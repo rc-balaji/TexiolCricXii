@@ -1,18 +1,26 @@
+# Flutter / Android build output
 .dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.metadata
 .packages
 build/
-coverage/
 android/.gradle/
-android/app/google-services.json
+android/local.properties
+
+# Firebase client configuration is injected by CI
 firebase/google-services.json
-android/key.properties
-android/app/*.jks
-android/app/*.keystore
-*.iml
-.idea/
-.vscode/
-firebase-debug.log
-*.log
+android/app/google-services.json
+google-services.json
+google-services-base64.txt
+
+# Backend dependencies and compiled output
+functions/node_modules/
+functions/lib/
+
+# Signing material and local environment files
+*.jks
+*.keystore
+key.properties
+.env
+.env.*
+
+# Packaged deliverables
+dist/

@@ -9,11 +9,37 @@ permissions:
   contents: read
 
 jobs:
+  functions-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: functions
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions packages
+        run: npm ci
+
+      - name: Type-check and test ID allocation
+        run: npm test
+
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       FIREBASE_CONFIG_B64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+      FACEBOOK_CLIENT_TOKEN: ${{ secrets.FACEBOOK_CLIENT_TOKEN }}
 
     steps:
       - name: Check out source
@@ -39,6 +65,9 @@ jobs:
       - name: Install packages
         run: flutter pub get
 
+      - name: Generate CricXii launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
@@ -46,7 +75,7 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED}
+        run: flutter build apk --release --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED} --dart-define=APP_CHECK_ENABLED=false --dart-define=FACEBOOK_ENABLED=${CRICXII_FACEBOOK_ENABLED}
 
       - name: Name APK
         run: cp build/app/outputs/flutter-apk/app-release.apk CricXii-Android-release.apk

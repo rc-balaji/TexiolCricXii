@@ -1,56 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/enums.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'account_settings_screen.dart';
 import 'match_summary_screen.dart';
+import 'player_management_screen.dart';
+import 'profile_edit_screen.dart';
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
-  Future<void> _switchProfile(BuildContext context) async {
-    final store = AppScope.read(context);
-    final id = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-          children: [
-            const ListTile(
-              title: Text(
-                'Switch local profile',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-              ),
-              subtitle: Text(
-                'Previously added profiles stay available on this device.',
-              ),
-            ),
-            ...store.players.map(
-              (player) => ListTile(
-                leading: PlayerAvatar(player: player, showClaimState: true),
-                title: Text(
-                  player.name,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text(player.id),
-                trailing: player.id == store.activePlayerId
-                    ? const Icon(
-                        Icons.check_circle_rounded,
-                        color: AppColors.greenDark,
-                      )
-                    : null,
-                onTap: () => Navigator.pop(context, player.id),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (id != null) await store.switchPlayer(id);
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  bool _teamHistory = false;
+
+  void _open(BuildContext context, Widget page) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  Future<void> _openLink(BuildContext context, String value, {bool instagram = false}) async {
+    final raw = value.trim();
+    final uri = instagram
+        ? Uri.parse(
+            raw.startsWith('http')
+                ? raw
+                : 'https://www.instagram.com/${raw.replaceFirst('@', '')}/',
+          )
+        : Uri.tryParse(raw);
+    if (uri == null || uri.scheme != 'https' || !await launchUrl(uri)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open that profile link.')),
+        );
+      }
+    }
+  }
+
+  String _joined(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[date.month - 1]} ${date.year}';
   }
 
   @override
@@ -58,31 +66,29 @@ class ProfilePage extends StatelessWidget {
     final store = AppScope.of(context);
     final player = store.activePlayer!;
     final gang = store.gangById(player.gangId);
-    final history =
-        store.matches
-            .where(
-              (match) =>
-                  match.status == MatchStatus.completed &&
-                  match.participantIds.contains(player.id),
-            )
-            .toList()
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final history = store.matches
+        .where(
+          (match) =>
+              match.status == MatchStatus.completed &&
+              match.participantIds.contains(player.id),
+        )
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
         children: [
-          const ScreenTitle(title: 'Player profile'),
-          const SizedBox(height: 22),
+          const ScreenTitle(
+            title: 'Profile',
+            subtitle: 'Your clean public cricket identity and permanent records.',
+          ),
+          const SizedBox(height: 20),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  PlayerAvatar(
-                    player: player,
-                    radius: 42,
-                    showClaimState: true,
-                  ),
+                  PlayerAvatar(player: player, radius: 48, showClaimState: true),
                   const SizedBox(height: 14),
                   Text(
                     player.name,
@@ -90,83 +96,152 @@ class ProfilePage extends StatelessWidget {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 4),
                   SelectableText(
                     player.id,
                     style: const TextStyle(
                       color: AppColors.greenDark,
                       fontWeight: FontWeight.w900,
-                      letterSpacing: 1,
+                      letterSpacing: 1.4,
                     ),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 7,
+                    runSpacing: 7,
                     alignment: WrapAlignment.center,
                     children: [
-                      Chip(
-                        label: Text(
-                          player.claimed
-                              ? 'Claimed profile'
-                              : 'Unclaimed profile',
-                        ),
-                      ),
+                      Chip(label: Text(player.battingStyle.label)),
                       Chip(label: Text(gang?.name ?? 'Solo player')),
+                      if (player.age != null) Chip(label: Text('Age ${player.age}')),
                     ],
                   ),
-                  if (player.instagramHandle != null) ...[
-                    const SizedBox(height: 8),
+                  const SizedBox(height: 6),
+                  Text(
+                    player.bowlingStyles.isEmpty
+                        ? 'Bowling style not added'
+                        : player.bowlingStyles.join(' • '),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
+                  if (player.bio != null) ...[
+                    const SizedBox(height: 14),
                     Text(
-                      '@${player.instagramHandle}',
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      player.bio!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(height: 1.4),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Text(
+                    'Joined CricXii • ${_joined(player.createdAt)}',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                  ),
+                  if (player.instagramHandle != null ||
+                      player.facebookUrl != null) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        if (player.instagramHandle != null)
+                          ActionChip(
+                            avatar: const Icon(Icons.camera_alt_outlined, size: 16),
+                            label: Text('@${player.instagramHandle}'),
+                            onPressed: () => _openLink(
+                              context,
+                              player.instagramHandle!,
+                              instagram: true,
+                            ),
+                          ),
+                        if (player.facebookUrl != null)
+                          ActionChip(
+                            avatar: const Icon(Icons.facebook_rounded, size: 16),
+                            label: const Text('Facebook'),
+                            onPressed: () => _openLink(
+                              context,
+                              player.facebookUrl!,
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                   const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () => _switchProfile(context),
-                    icon: const Icon(Icons.switch_account_rounded),
-                    label: const Text('Switch profile'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => _open(
+                            context,
+                            const ProfileEditScreen(),
+                          ),
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Edit profile'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _open(
+                            context,
+                            const AccountSettingsScreen(),
+                          ),
+                          icon: const Icon(Icons.settings_outlined),
+                          label: const Text('Account'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ),
-          if (store.firebaseEnabled) ...[
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: Icon(
-                  store.cloudConnected
-                      ? Icons.cloud_done_rounded
-                      : Icons.cloud_off_rounded,
-                  color: store.cloudConnected
-                      ? AppColors.greenDark
-                      : AppColors.muted,
+          const SizedBox(height: 12),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.manage_accounts_outlined),
+                  title: const Text(
+                    'Player management',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  subtitle: const Text('Edit, remove or archive testing players'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    const PlayerManagementScreen(),
+                  ),
                 ),
-                title: Text(
-                  store.cloudConnected
-                      ? 'Cloud backup connected'
-                      : 'Offline session',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
-                subtitle: Text(
-                  store.cloudEmail ?? 'Scores remain on this phone',
-                ),
-                trailing: TextButton(
-                  onPressed: store.cloudConnected
-                      ? store.signOutCloud
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(
+                    store.cloudConnected
+                        ? Icons.cloud_done_rounded
+                        : Icons.cloud_off_rounded,
+                    color: store.cloudConnected
+                        ? AppColors.greenDark
+                        : AppColors.muted,
+                  ),
+                  title: Text(
+                    store.cloudConnected ? 'Account connected' : 'Offline session',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  subtitle: Text(
+                    store.needsPlayerIdSync
+                        ? 'Player ID upgrade pending'
+                        : store.cloudEmail ?? 'Data on this phone',
+                  ),
+                  trailing: store.needsPlayerIdSync
+                      ? const Chip(label: Text('SYNC'))
+                      : null,
+                  onTap: store.cloudConnected
+                      ? null
                       : store.requestCloudSignIn,
-                  child: Text(store.cloudConnected ? 'Sign out' : 'Sign in'),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
           const SizedBox(height: 24),
-          const SectionLabel('Career stats'),
+          const SectionLabel('Singles career stats'),
           const SizedBox(height: 12),
           GridView.count(
             crossAxisCount: 2,
@@ -208,39 +283,34 @@ class ProfilePage extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.speed_rounded),
-                  title: const Text('Strike rate'),
-                  trailing: Text(
-                    player.stats.strikeRate.toStringAsFixed(1),
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.compare_arrows_rounded),
-                  title: const Text('Run outs'),
-                  trailing: Text(
-                    '${player.stats.directRunOuts} direct • ${player.stats.assistedRunOuts} assists',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 24),
-          const SectionLabel('Match history'),
+          const SectionLabel('Records & history'),
+          const SizedBox(height: 10),
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: false, label: Text('Singles')),
+              ButtonSegment(value: true, label: Text('Team • Soon')),
+            ],
+            selected: {_teamHistory},
+            onSelectionChanged: (value) =>
+                setState(() => _teamHistory = value.single),
+          ),
           const SizedBox(height: 12),
-          if (history.isEmpty)
+          if (_teamHistory)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.groups_2_outlined),
+                title: Text('Team match profile is ready'),
+                subtitle: Text('Team scoring and records arrive in a future update.'),
+                trailing: Chip(label: Text('SOON')),
+              ),
+            )
+          else if (history.isEmpty)
             const Card(
               child: ListTile(
                 leading: Icon(Icons.history_rounded),
-                title: Text('No completed matches yet'),
-                subtitle: Text('Finished Singles matches will stay here.'),
+                title: Text('No completed Singles matches yet'),
               ),
             )
           else
@@ -259,33 +329,14 @@ class ProfilePage extends StatelessWidget {
                     ),
                     subtitle: Text('${match.id} • ${match.scoringMode.label}'),
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => MatchSummaryScreen(matchId: match.id),
-                      ),
+                    onTap: () => _open(
+                      context,
+                      MatchSummaryScreen(matchId: match.id),
                     ),
                   ),
                 ),
               ),
             ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.sports_handball_outlined),
-            title: const Text('Stumpings'),
-            trailing: Text(
-              '${player.stats.stumpings}',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.shield_outlined),
-            title: const Text('Not-out finishes'),
-            trailing: Text(
-              '${player.stats.matches - player.stats.outs}',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
         ],
       ),
     );

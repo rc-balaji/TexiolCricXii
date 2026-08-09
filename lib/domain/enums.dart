@@ -1,5 +1,21 @@
 enum GangRole { leader, coLeader, member }
 
+enum BattingStyle { rightHanded, leftHanded }
+
+enum AvatarSource { preset, customUrl, google, facebook }
+
+enum ProfileVisibility {
+  onlyMe,
+  friends,
+  selectedFriends,
+  everyoneExceptSelected,
+  everyone,
+}
+
+enum FriendRequestStatus { pending, accepted, rejected, cancelled }
+
+enum NotificationType { friendRequest, friendAccepted, profile, system }
+
 enum MatchStatus { draft, drawing, live, completed }
 
 enum ScoringMode { ballByBall, quickTotal }
@@ -28,6 +44,32 @@ extension GangRoleLabel on GangRole {
     GangRole.leader => 'Leader',
     GangRole.coLeader => 'Co-leader',
     GangRole.member => 'Member',
+  };
+}
+
+extension BattingStyleLabel on BattingStyle {
+  String get label => switch (this) {
+    BattingStyle.rightHanded => 'Right-hand bat',
+    BattingStyle.leftHanded => 'Left-hand bat',
+  };
+}
+
+extension AvatarSourceLabel on AvatarSource {
+  String get label => switch (this) {
+    AvatarSource.preset => 'CricXii avatar',
+    AvatarSource.customUrl => 'Private URL',
+    AvatarSource.google => 'Google photo',
+    AvatarSource.facebook => 'Facebook photo',
+  };
+}
+
+extension ProfileVisibilityLabel on ProfileVisibility {
+  String get label => switch (this) {
+    ProfileVisibility.onlyMe => 'Only me',
+    ProfileVisibility.friends => 'All friends',
+    ProfileVisibility.selectedFriends => 'Selected friends',
+    ProfileVisibility.everyoneExceptSelected => 'Everyone except selected',
+    ProfileVisibility.everyone => 'Everyone',
   };
 }
 

@@ -1,28 +1,42 @@
 name: crixx
 description: Android-first local cricket scoring for individual singles matches.
 publish_to: "none"
-version: 0.1.1+2
+version: 0.2.0+3
 
 environment:
-  sdk: ">=3.6.0 <4.0.0"
+  sdk: ">=3.7.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  cloud_firestore: ^6.8.0
-  cross_file: ^0.3.5+2
+  cloud_firestore: ^6.7.1
+  cloud_functions: ^6.3.5
   crypto: ^3.0.6
-  firebase_auth: ^6.5.7
-  firebase_core: ^4.13.0
+  firebase_auth: ^6.5.6
+  firebase_app_check: ^0.4.5+2
+  firebase_core: ^4.12.1
+  flutter_facebook_auth: ^7.2.0
+  google_sign_in: ^7.2.0
   path_provider: ^2.1.5
   pdf: ^3.12.0
   share_plus: ^12.0.2
   shared_preferences: ^2.5.3
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/avatars/
+    - assets/branding/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/branding/cricxii_app_icon.png
+  min_sdk_android: 24

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../data/app_store.dart';
 import '../domain/enums.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'register_player_dialog.dart';
 
 class GangPage extends StatelessWidget {
   const GangPage({super.key});
@@ -66,7 +66,7 @@ class GangPage extends StatelessWidget {
             child: const ListTile(
               leading: Icon(Icons.person_add_alt_1_rounded),
               title: Text('Create player without phone'),
-              subtitle: Text('Generate a new ID and one-time claim password.'),
+              subtitle: Text('Generate a new ID and temporary login password.'),
             ),
           ),
         ],
@@ -83,8 +83,11 @@ class GangPage extends StatelessWidget {
           content: TextField(
             controller: controller,
             autofocus: true,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(hintText: 'TXP-XXXXXX'),
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Numeric Player ID',
+              hintText: '100000',
+            ),
           ),
           actions: [
             TextButton(
@@ -92,8 +95,7 @@ class GangPage extends StatelessWidget {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, controller.text.trim().toUpperCase()),
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
               child: const Text('Add'),
             ),
           ],
@@ -102,13 +104,12 @@ class GangPage extends StatelessWidget {
       controller.dispose();
       if (playerId == null || !context.mounted) return;
       final store = AppScope.read(context);
-      final player = store.playerById(playerId);
+      final player = await store.findPlayer(playerId);
+      if (!context.mounted) return;
       if (player == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Player is not on this phone yet. Use Create player for now.',
-            ),
+            content: Text('No player found with that numeric Player ID.'),
           ),
         );
         return;
@@ -125,36 +126,9 @@ class GangPage extends StatelessWidget {
       return;
     }
 
-    final created = await _showCreatePlayerDialog(context);
+    final created = await showProvisionalPlayerRegistration(context);
     if (created == null || !context.mounted) return;
     await AppScope.read(context).addPlayerToGang(gangId, created.player.id);
-    if (!context.mounted || created.temporaryPassword == null) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Temporary claim details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Give these details directly to the player. The password is shown only now. New-phone claiming activates with the secure claim service; this phone already remembers the local profile.',
-            ),
-            const SizedBox(height: 16),
-            SelectableText(
-              'ID: ${created.player.id}\nPassword: ${created.temporaryPassword}',
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('I saved it'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -345,56 +319,4 @@ class GangPage extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<CreatedPlayer?> _showCreatePlayerDialog(BuildContext context) async {
-  final name = TextEditingController();
-  final instagram = TextEditingController();
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Add player without phone'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: name,
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(labelText: 'Player name'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: instagram,
-            decoration: const InputDecoration(
-              labelText: 'Instagram ID (optional)',
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, name.text.trim().length >= 2),
-          child: const Text('Create ID'),
-        ),
-      ],
-    ),
-  );
-  if (result != true || !context.mounted) {
-    name.dispose();
-    instagram.dispose();
-    return null;
-  }
-  final created = await AppScope.read(context).createPlayer(
-    name: name.text,
-    instagramHandle: instagram.text,
-    claimed: false,
-  );
-  name.dispose();
-  instagram.dispose();
-  return created;
 }

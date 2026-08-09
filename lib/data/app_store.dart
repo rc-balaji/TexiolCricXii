@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,6 +15,8 @@ import '../domain/enums.dart';
 import '../domain/gang.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
+import '../domain/social.dart';
+import '../services/provider_auth_service.dart';
 
 class CreatedPlayer {
   const CreatedPlayer({required this.player, this.temporaryPassword});
@@ -28,6 +31,7 @@ class AppStore extends ChangeNotifier {
 
   static const _storageKey = 'texiol_local_cricket_state_v1';
   static const _offlineSessionKey = 'cricxii_offline_session_v1';
+  static const _cloudUidKey = 'cricxii_last_cloud_uid_v2';
   static const _avatarColors = <int>[
     0xFF19C37D,
     0xFFFFB020,
@@ -44,10 +48,16 @@ class AppStore extends ChangeNotifier {
   final bool firebaseEnabled;
   FirebaseAuth? _auth;
   FirebaseFirestore? _firestore;
+  FirebaseFunctions? _functions;
+  ProviderAuthService? _providerAuth;
   bool _offlineSession = false;
+  String? _pendingIdPassword;
+  final Map<String, Player> _playerIndex = <String, Player>{};
   final List<Player> players = <Player>[];
   final List<Gang> gangs = <Gang>[];
   final List<CricketMatch> matches = <CricketMatch>[];
+  final List<FriendRequest> friendRequests = <FriendRequest>[];
+  final List<CricNotification> notifications = <CricNotification>[];
 
   bool initialized = false;
   String? activePlayerId;
@@ -57,8 +67,45 @@ class AppStore extends ChangeNotifier {
   bool get requiresAuthentication =>
       firebaseEnabled && firebaseUser == null && !_offlineSession;
   bool get cloudConnected => firebaseEnabled && firebaseUser != null;
+  bool get facebookLoginConfigured =>
+      const bool.fromEnvironment('FACEBOOK_ENABLED');
+  bool get canContinueOffline =>
+      activePlayer == null || activePlayer?.accountUid == null;
+  bool get hasNumericIdLogin =>
+      cloudConnected &&
+      (activePlayer?.claimed ?? false) &&
+      !(activePlayer?.pendingSync ?? true);
+  bool get needsPlayerIdSync =>
+      cloudConnected && (activePlayer?.pendingSync ?? false);
 
   Player? get activePlayer => playerById(activePlayerId);
+
+  List<Player> get visiblePlayers => players
+      .where((player) => !player.archived)
+      .toList(growable: false);
+
+  List<FriendRequest> get incomingFriendRequests {
+    final id = activePlayerId;
+    if (id == null) return const [];
+    return friendRequests
+        .where(
+          (request) =>
+              request.toPlayerId == id &&
+              request.status == FriendRequestStatus.pending,
+        )
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  List<CricNotification> get activeNotifications {
+    final id = activePlayerId;
+    if (id == null) return const [];
+    return notifications.where((value) => value.playerId == id).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  int get unreadNotificationCount =>
+      activeNotifications.where((value) => !value.read).length;
 
   List<CricketMatch> get activeMatches {
     final id = activePlayerId;
@@ -79,6 +126,7 @@ class AppStore extends ChangeNotifier {
     if (raw != null && raw.isNotEmpty) {
       try {
         _replaceState(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+        await _persistLocal();
       } on Object {
         _clearState();
       }
@@ -86,9 +134,13 @@ class AppStore extends ChangeNotifier {
     if (firebaseEnabled) {
       _auth = FirebaseAuth.instance;
       _firestore = FirebaseFirestore.instance;
+      _functions = FirebaseFunctions.instanceFor(region: 'asia-south1');
+      _providerAuth = ProviderAuthService(auth: _auth);
+      if (firebaseUser != null) await _selectCloudAccount();
       if (firebaseUser != null && players.isEmpty) {
         await _restoreCloudState();
       }
+      if (firebaseUser != null) await _refreshSocialGraph();
     }
     initialized = true;
     notifyListeners();
@@ -102,9 +154,20 @@ class AppStore extends ChangeNotifier {
       email: email.trim(),
       password: password,
     );
+    await _selectCloudAccount();
+    _pendingIdPassword = password;
     _offlineSession = false;
     await _preferences.setBool(_offlineSessionKey, false);
-    await _syncCloudState(_stateData());
+    if (activePlayer != null) {
+      try {
+        await activatePendingPlayerId(password);
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        await _syncCloudState(_stateData());
+      }
+    } else {
+      await _syncCloudState(_stateData());
+    }
     notifyListeners();
   }
 
@@ -116,11 +179,311 @@ class AppStore extends ChangeNotifier {
       email: email.trim(),
       password: password,
     );
+    await _selectCloudAccount();
     _offlineSession = false;
     await _preferences.setBool(_offlineSessionKey, false);
     await _restoreCloudState(replaceLocal: true);
+    await _refreshSocialGraph();
     await _syncCloudState(_stateData());
     notifyListeners();
+  }
+
+  Future<void> signInWithPlayerId(String playerId, String password) async {
+    if (!firebaseEnabled || _auth == null || _functions == null) {
+      throw StateError('Player ID login needs the connected Firebase build.');
+    }
+    final normalized = playerId.trim();
+    if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) {
+      throw StateError('Enter a numeric Player ID with at least 6 digits.');
+    }
+    final result = await _functions!.httpsCallable('loginWithPlayerId').call(
+      <String, Object?>{'playerId': normalized, 'password': password},
+    );
+    final token = (result.data as Map?)?['customToken']?.toString();
+    if (token == null || token.isEmpty) {
+      throw StateError('The Player ID login service returned no token.');
+    }
+    await _auth!.signInWithCustomToken(token);
+    await _selectCloudAccount();
+    _offlineSession = false;
+    await _preferences.setBool(_offlineSessionKey, false);
+    await _restoreCloudState(replaceLocal: true);
+    await _refreshSocialGraph();
+    notifyListeners();
+  }
+
+  Future<void> signInWithGoogle() async {
+    final provider = _providerAuth;
+    if (!firebaseEnabled || provider == null) {
+      throw StateError('Google sign-in needs the connected Firebase build.');
+    }
+    final result = await provider.signInWithGoogle();
+    await _selectCloudAccount();
+    _offlineSession = false;
+    await _preferences.setBool(_offlineSessionKey, false);
+    await _restoreCloudState(replaceLocal: true);
+    await _refreshSocialGraph();
+    _saveProviderPhoto(result.user, 'google.com');
+    await _commit();
+  }
+
+  Future<void> signInWithFacebook() async {
+    final provider = _providerAuth;
+    if (!facebookLoginConfigured || !firebaseEnabled || provider == null) {
+      throw StateError(
+        'Facebook login is not configured in this build. Add the Facebook GitHub secrets and rebuild.',
+      );
+    }
+    final result = await provider.signInWithFacebook();
+    await _selectCloudAccount();
+    _offlineSession = false;
+    await _preferences.setBool(_offlineSessionKey, false);
+    await _restoreCloudState(replaceLocal: true);
+    await _refreshSocialGraph();
+    _saveProviderPhoto(result.user, 'facebook.com');
+    await _commit();
+  }
+
+  Future<void> connectGoogle({bool replaceExisting = false}) async {
+    final provider = _providerAuth;
+    if (!firebaseEnabled || provider == null) {
+      throw StateError('Google connection needs the Firebase build.');
+    }
+    final result = replaceExisting
+        ? await provider.replaceGoogle()
+        : await provider.linkGoogle();
+    _saveProviderPhoto(result.user, 'google.com');
+    await _commit();
+  }
+
+  Future<void> connectFacebook({bool replaceExisting = false}) async {
+    final provider = _providerAuth;
+    if (!facebookLoginConfigured || !firebaseEnabled || provider == null) {
+      throw StateError(
+        'Facebook login is not configured in this build. Add the Facebook GitHub secrets and rebuild.',
+      );
+    }
+    final result = replaceExisting
+        ? await provider.replaceFacebook()
+        : await provider.linkFacebook();
+    _saveProviderPhoto(result.user, 'facebook.com');
+    await _commit();
+  }
+
+  Future<void> connectEmailPassword(String email, String password) async {
+    final user = firebaseUser;
+    if (user == null) throw StateError('Sign in before connecting email.');
+    if (password.length < 8) {
+      throw StateError('Use at least 8 characters for the email password.');
+    }
+    final credential = EmailAuthProvider.credential(
+      email: email.trim(),
+      password: password,
+    );
+    await user.linkWithCredential(credential);
+    final player = activePlayer;
+    if (player != null) {
+      player.email = email.trim();
+      await _commit();
+    }
+  }
+
+  Future<void> changePlayerIdPassword(String password) async {
+    final player = activePlayer;
+    if (player == null || _functions == null || !cloudConnected) {
+      throw StateError('Connected Player ID account required.');
+    }
+    if (password.length < 8) {
+      throw StateError('Use at least 8 characters or digits.');
+    }
+    await _functions!.httpsCallable('changePlayerIdPassword').call(
+      <String, Object?>{'password': password},
+    );
+  }
+
+  Future<String> activatePendingPlayerId(String password) async {
+    final player = activePlayer;
+    if (player == null || _functions == null || !cloudConnected) {
+      throw StateError('A connected player profile is required.');
+    }
+    if (password.length < 8) {
+      throw StateError('Use at least 8 characters or digits.');
+    }
+    final result = await _functions!
+        .httpsCallable('ensurePlayerProfile')
+        .call(<String, Object?>{
+          'name': player.name,
+          'contactEmail': player.email,
+          'idPassword': password,
+        });
+    final officialId = (result.data as Map?)?['playerId']?.toString();
+    if (officialId == null || !RegExp(r'^\d{6,}$').hasMatch(officialId)) {
+      throw StateError('The Player ID service returned an invalid ID.');
+    }
+    await firebaseUser?.getIdToken(true);
+    final oldId = player.id;
+    if (oldId != officialId) {
+      final remapped = _replaceExactPlayerReferences(
+        _stateData(),
+        <String, String>{oldId: officialId},
+      );
+      _replaceState(remapped);
+    }
+    final upgraded = activePlayer;
+    if (upgraded != null) {
+      upgraded
+        ..accountUid = firebaseUser?.uid
+        ..claimed = true
+        ..pendingSync = false;
+    }
+    _pendingIdPassword = null;
+    await _commit();
+    return officialId;
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    final auth = _auth;
+    if (auth == null) throw StateError('Firebase is not connected.');
+    await auth.sendPasswordResetEmail(email: email.trim());
+  }
+
+  Future<void> claimProvisionalPlayer(
+    String playerId,
+    String temporaryPassword,
+  ) async {
+    if (!firebaseEnabled || _auth == null || _functions == null) {
+      throw StateError('Player claiming needs the connected Firebase build.');
+    }
+    if (_auth!.currentUser == null) {
+      await _auth!.signInAnonymously();
+      await _selectCloudAccount();
+    }
+    final result = await _functions!.httpsCallable('claimPlayer').call(
+      <String, Object?>{
+        'playerId': playerId.trim(),
+        'temporaryPassword': temporaryPassword,
+      },
+    );
+    final data = Map<String, dynamic>.from(result.data as Map);
+    final claimedId = data['playerId']?.toString();
+    if (claimedId == null) throw StateError('Claiming did not return a profile.');
+    await firebaseUser?.getIdToken(true);
+    final player = await findPlayer(claimedId);
+    if (player != null) {
+      player
+        ..accountUid = firebaseUser?.uid
+        ..claimed = true
+        ..pendingSync = false;
+      activePlayerId = player.id;
+    }
+    await _refreshSocialGraph();
+    await _commit();
+  }
+
+  List<String> get linkedProviderIds =>
+      firebaseUser?.providerData.map((value) => value.providerId).toList() ??
+      const [];
+
+  Future<void> disconnectProvider(String providerId) async {
+    final user = firebaseUser;
+    if (user == null) throw StateError('Sign in before changing connections.');
+    if (!hasNumericIdLogin && user.providerData.length <= 1) {
+      throw StateError(
+        'Activate the global Player ID or connect another login before disconnecting this one.',
+      );
+    }
+    await user.unlink(providerId);
+    final player = activePlayer;
+    if (player != null) {
+      player.providerPhotoUrls.remove(providerId);
+      final disconnectedSource =
+          (providerId == 'google.com' &&
+              player.avatarSource == AvatarSource.google) ||
+          (providerId == 'facebook.com' &&
+              player.avatarSource == AvatarSource.facebook);
+      if (disconnectedSource) {
+        player
+          ..avatarSource = AvatarSource.preset
+          ..avatarUrl = null;
+      }
+      await _commit();
+    }
+  }
+
+  Future<void> deleteMyAccount() async {
+    final user = firebaseUser;
+    if (user == null) {
+      _clearState();
+      await _persistLocal();
+      notifyListeners();
+      return;
+    }
+    var backendDeletedAuth = false;
+    if (_functions != null) {
+      try {
+        await _functions!.httpsCallable('deleteMyAccountData').call();
+        backendDeletedAuth = true;
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error) ||
+            !(activePlayer?.pendingSync ?? true)) {
+          rethrow;
+        }
+        // Fall back to client-owned documents and Firebase Auth deletion.
+      }
+    }
+    if (!backendDeletedAuth) {
+      final player = activePlayer;
+      final firestore = _firestore;
+      if (firestore != null) {
+        await firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('private')
+            .doc('state')
+            .delete();
+        if (player?.accountUid == user.uid) {
+          await firestore.collection('players').doc(player!.id).delete();
+        }
+      }
+      await user.delete();
+    }
+    await _auth?.signOut();
+    _clearState();
+    _offlineSession = false;
+    await _preferences.setBool(_offlineSessionKey, false);
+    await _preferences.remove(_cloudUidKey);
+    await _persistLocal();
+    notifyListeners();
+  }
+
+  void _saveProviderPhoto(User? user, String providerId) {
+    final player = activePlayer;
+    if (player == null || user == null) return;
+    for (final data in user.providerData) {
+      if (data.providerId != providerId) continue;
+      final photo = data.photoURL;
+      if (photo != null && photo.isNotEmpty) {
+        player.providerPhotoUrls[providerId] = photo;
+      }
+    }
+  }
+
+  Future<void> _selectCloudAccount() async {
+    final uid = firebaseUser?.uid;
+    if (uid == null) return;
+    final previousUid = await _preferences.getString(_cloudUidKey);
+    if (previousUid == null) {
+      final player = activePlayer;
+      if (player != null) {
+        player
+          ..accountUid ??= uid
+          ..pendingSync = true;
+      }
+    } else if (previousUid != uid) {
+      _clearState();
+      await _persistLocal();
+    }
+    await _preferences.setString(_cloudUidKey, uid);
   }
 
   Future<void> signOutCloud() async {
@@ -131,6 +494,9 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> continueOffline() async {
+    if (!canContinueOffline) {
+      throw StateError('Sign in to open this cloud-owned player profile.');
+    }
     _offlineSession = true;
     await _preferences.setBool(_offlineSessionKey, true);
     notifyListeners();
@@ -143,12 +509,11 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshSocialGraph() => _refreshSocialGraph();
+
   Player? playerById(String? id) {
     if (id == null) return null;
-    for (final player in players) {
-      if (player.id == id) return player;
-    }
-    return null;
+    return _playerIndex[id];
   }
 
   Gang? gangById(String? id) {
@@ -170,40 +535,264 @@ class AppStore extends ChangeNotifier {
     required String name,
     String? email,
     String? instagramHandle,
+    String? idPassword,
     bool claimed = true,
     bool makeActive = false,
   }) async {
-    final id = _uniquePlayerId();
-    final temporaryPassword = claimed ? null : _ids.temporaryPassword();
+    if (!claimed) {
+      return createProvisionalPlayer(
+        name: name,
+        email: email,
+        temporaryPassword: idPassword,
+        sendFriendRequest: false,
+      );
+    }
+
+    String? cloudPlayerId;
+    if (cloudConnected && _functions != null) {
+      try {
+        final result = await _functions!
+            .httpsCallable('ensurePlayerProfile')
+            .call(<String, Object?>{
+              'name': name.trim(),
+              'contactEmail': _clean(email),
+              'idPassword': idPassword ?? _pendingIdPassword,
+            });
+        cloudPlayerId = (result.data as Map?)?['playerId']?.toString();
+        if (cloudPlayerId != null) await firebaseUser?.getIdToken(true);
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        // The app remains testable before the optional Functions deployment.
+      }
+    }
+
+    final id = cloudPlayerId ?? _uniquePlayerId();
     final claimSecretSalt = claimed ? null : _ids.eventId();
-    final claimSecretHash = temporaryPassword == null
-        ? null
-        : sha256
-              .convert(utf8.encode('$claimSecretSalt:$temporaryPassword'))
-              .toString();
     final player = Player(
       id: id,
       name: name.trim(),
-      email: email?.trim().isEmpty ?? true ? null : email!.trim(),
-      instagramHandle: instagramHandle?.trim().isEmpty ?? true
-          ? null
-          : instagramHandle!.trim().replaceFirst('@', ''),
-      claimSecretHash: claimSecretHash,
+      accountUid: firebaseUser?.uid,
+      email: _clean(email),
+      instagramHandle: _cleanInstagram(instagramHandle),
+      claimSecretHash: null,
       claimSecretSalt: claimSecretSalt,
       avatarColor: _avatarColors[players.length % _avatarColors.length],
       claimed: claimed,
+      pendingSync: cloudPlayerId == null,
       createdAt: DateTime.now(),
     );
-    players.add(player);
+    _addOrReplacePlayer(player);
     if (makeActive || activePlayerId == null) activePlayerId = player.id;
+    _saveProviderPhoto(firebaseUser, 'google.com');
+    _saveProviderPhoto(firebaseUser, 'facebook.com');
+    _pendingIdPassword = null;
     await _commit();
-    return CreatedPlayer(player: player, temporaryPassword: temporaryPassword);
+    return CreatedPlayer(player: player);
+  }
+
+  Future<CreatedPlayer> createProvisionalPlayer({
+    required String name,
+    String? email,
+    String? temporaryPassword,
+    bool sendFriendRequest = false,
+  }) async {
+    final creator = activePlayer;
+    final requestedPassword = _clean(temporaryPassword);
+    var password = requestedPassword ?? _ids.temporaryPassword();
+    String? cloudPlayerId;
+
+    if (cloudConnected && _functions != null) {
+      try {
+        final result = await _functions!
+            .httpsCallable('createProvisionalPlayer')
+            .call(<String, Object?>{
+              'name': name.trim(),
+              'contactEmail': _clean(email),
+              'temporaryPassword': requestedPassword,
+            });
+        final data = Map<String, dynamic>.from(result.data as Map);
+        cloudPlayerId = data['playerId']?.toString();
+        password = data['temporaryPassword']?.toString() ?? password;
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        // A local provisional profile is clearly marked for later sync.
+      }
+    }
+
+    final id = cloudPlayerId ?? _uniquePlayerId();
+    final player = Player(
+      id: id,
+      name: name.trim(),
+      createdByPlayerId: creator?.id,
+      email: _clean(email),
+      avatarColor: _avatarColors[players.length % _avatarColors.length],
+      claimed: false,
+      pendingSync: cloudPlayerId == null,
+      createdAt: DateTime.now(),
+    );
+    _addOrReplacePlayer(player);
+    await _commit();
+    if (sendFriendRequest && creator != null) {
+      await sendFriendRequestTo(player.id);
+    }
+    return CreatedPlayer(player: player, temporaryPassword: password);
   }
 
   Future<void> switchPlayer(String playerId) async {
     if (playerById(playerId) == null) throw StateError('Player not found.');
     activePlayerId = playerId;
     await _commit();
+  }
+
+  Future<void> savePlayerProfile(Player player) async {
+    if (playerById(player.id) == null) {
+      throw StateError('Player not found.');
+    }
+    if (player.id != activePlayerId && !player.isProvisional) {
+      throw StateError('Only that account owner can edit a claimed player.');
+    }
+    if (player.name.trim().length < 2) {
+      throw StateError('Player name must contain at least two characters.');
+    }
+    player.name = player.name.trim();
+    player.instagramHandle = _cleanInstagram(player.instagramHandle);
+    player.email = _clean(player.email);
+    player.phoneNumber = _clean(player.phoneNumber);
+    player.whatsappNumber = _clean(player.whatsappNumber);
+    player.location = _clean(player.location);
+    player.facebookUrl = _clean(player.facebookUrl);
+    player.bio = _clean(player.bio);
+    player.customBowlingStyle = _clean(player.customBowlingStyle);
+    if (player.avatarSource == AvatarSource.customUrl) {
+      final avatar = Uri.tryParse(player.avatarUrl ?? '');
+      if (avatar == null || avatar.scheme != 'https' || avatar.host.isEmpty) {
+        throw StateError('A custom avatar must use a complete HTTPS URL.');
+      }
+    }
+    if (player.id != activePlayerId &&
+        player.isProvisional &&
+        player.createdByPlayerId == activePlayerId &&
+        !player.pendingSync &&
+        cloudConnected &&
+        _functions != null) {
+      try {
+        await _functions!.httpsCallable('updateProvisionalPlayer').call(
+          <String, Object?>{
+            'playerId': player.id,
+            'profile': <String, Object?>{
+              'name': player.name,
+              'bio': player.bio,
+              'age': player.age,
+              'instagramHandle': player.instagramHandle,
+              'facebookUrl': player.facebookUrl,
+              'battingStyle': player.battingStyle.name,
+              'bowlingStyles': player.bowlingStyles,
+              'customBowlingStyle': player.customBowlingStyle,
+              'avatarSource': player.avatarSource.name,
+              'avatarPreset': player.avatarPreset,
+            },
+            'contacts': <String, Object?>{
+              for (final field in sensitiveProfileFields)
+                field: <String, Object?>{
+                  'value': _contactValue(player, field),
+                  'visibility':
+                      (player.contactVisibility[field] ??
+                              ProfileVisibility.onlyMe)
+                          .name,
+                  'audienceIds':
+                      player.contactAudienceIds[field] ?? const <String>[],
+                },
+            },
+          },
+        );
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+      }
+    }
+    await _commit();
+  }
+
+  Future<bool> deleteCachedPlayer(String playerId) async {
+    final player = playerById(playerId);
+    if (player == null) return false;
+    if (playerId == activePlayerId) {
+      throw StateError('Use Delete account for a claimed player.');
+    }
+    if (player.accountUid != null) {
+      player.archived = true;
+      activePlayer?.friendIds.remove(playerId);
+      await _commit();
+      return false;
+    }
+    if (player.isProvisional &&
+        player.createdByPlayerId == activePlayerId &&
+        !player.pendingSync &&
+        cloudConnected &&
+        _functions != null) {
+      await _functions!.httpsCallable('deleteProvisionalPlayer').call(
+        <String, Object?>{'playerId': playerId},
+      );
+    }
+    final isReferenced = matches.any(
+      (match) => match.participantIds.contains(playerId),
+    );
+    if (isReferenced) {
+      player.archived = true;
+    } else {
+      players.remove(player);
+      _playerIndex.remove(playerId);
+      for (final gang in gangs) {
+        gang.members.remove(playerId);
+      }
+      for (final value in players) {
+        value.friendIds.remove(playerId);
+      }
+      friendRequests.removeWhere(
+        (request) =>
+            request.fromPlayerId == playerId ||
+            request.toPlayerId == playerId,
+      );
+      notifications.removeWhere((value) => value.playerId == playerId);
+    }
+    await _commit();
+    return !isReferenced;
+  }
+
+  Future<void> resetActivePlayerData() async {
+    final player = activePlayer;
+    if (player == null) return;
+    if (cloudConnected && !player.pendingSync && _functions != null) {
+      await _functions!.httpsCallable('resetMyPlayerData').call();
+    }
+    matches.removeWhere((match) => match.participantIds.contains(player.id));
+    for (final cached in players) {
+      cached.friendIds.remove(player.id);
+    }
+    player.friendIds.clear();
+    _clearStats(player.stats);
+    _clearStats(player.teamStats);
+    friendRequests.removeWhere(
+      (request) =>
+          request.fromPlayerId == player.id || request.toPlayerId == player.id,
+    );
+    notifications.removeWhere((value) => value.playerId == player.id);
+    await _commit();
+    if (cloudConnected) await _syncCloudState(_stateData());
+  }
+
+  void _clearStats(PlayerStats stats) {
+    stats
+      ..matches = 0
+      ..runs = 0
+      ..balls = 0
+      ..outs = 0
+      ..wickets = 0
+      ..catches = 0
+      ..directRunOuts = 0
+      ..assistedRunOuts = 0
+      ..stumpings = 0
+      ..points = 0
+      ..wins = 0;
   }
 
   Future<Gang> createGang(String name) async {
@@ -270,14 +859,213 @@ class AppStore extends ChangeNotifier {
     await _commit();
   }
 
-  Future<void> addFriend(String playerId, String friendId) async {
-    final player = playerById(playerId);
-    final friend = playerById(friendId);
-    if (player == null || friend == null || playerId == friendId) {
-      throw StateError('Choose another valid player.');
+  bool areFriends(String firstPlayerId, String secondPlayerId) =>
+      playerById(firstPlayerId)?.friendIds.contains(secondPlayerId) ?? false;
+
+  Future<Player?> findPlayer(String playerId) async {
+    final normalized = playerId.trim();
+    if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) return null;
+    final cached = playerById(normalized);
+    if (cached != null) return cached;
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null) return null;
+    try {
+      final snapshot = await firestore.collection('players').doc(normalized).get();
+      final data = snapshot.data();
+      if (data == null) return null;
+      final player = Player.fromJson(<String, dynamic>{
+        ...data,
+        'id': normalized,
+        'createdAt':
+            data['joinedAt']?.toString() ?? DateTime.now().toIso8601String(),
+      });
+      for (final field in sensitiveProfileFields) {
+        try {
+          final contact = await firestore
+              .collection('players')
+              .doc(normalized)
+              .collection('contactFields')
+              .doc(field)
+              .get();
+          final contactData = contact.data();
+          if (contactData == null) continue;
+          _setContactValue(player, field, contactData['value'] as String?);
+          final visibility = contactData['visibility'] as String?;
+          if (visibility != null &&
+              ProfileVisibility.values.any(
+                (value) => value.name == visibility,
+              )) {
+            player.contactVisibility[field] =
+                ProfileVisibility.values.byName(visibility);
+          }
+          player.contactAudienceIds[field] = List<String>.from(
+            contactData['audienceIds'] as List? ?? const [],
+          );
+        } on FirebaseException {
+          // A field hidden by its owner is intentionally unavailable.
+        }
+      }
+      _addOrReplacePlayer(player);
+      await _persistLocal();
+      notifyListeners();
+      return player;
+    } on FirebaseException {
+      return null;
     }
-    if (!player.friendIds.contains(friendId)) player.friendIds.add(friendId);
-    if (!friend.friendIds.contains(playerId)) friend.friendIds.add(playerId);
+  }
+
+  Future<void> sendFriendRequestTo(String friendId) async {
+    final player = activePlayer;
+    final friend = await findPlayer(friendId);
+    if (player == null || friend == null || player.id == friendId) {
+      throw StateError('Choose another valid numeric Player ID.');
+    }
+    if (player.friendIds.contains(friendId)) {
+      throw StateError('This player is already your friend.');
+    }
+    final existing = friendRequests.where(
+      (request) =>
+          request.status == FriendRequestStatus.pending &&
+          ((request.fromPlayerId == player.id &&
+                  request.toPlayerId == friendId) ||
+              (request.fromPlayerId == friendId &&
+                  request.toPlayerId == player.id)),
+    );
+    if (existing.isNotEmpty) {
+      throw StateError('A friend request is already pending.');
+    }
+
+    String? cloudRequestId;
+    if (cloudConnected && _functions != null) {
+      try {
+        final result = await _functions!
+            .httpsCallable('sendFriendRequest')
+            .call(<String, Object?>{'targetPlayerId': friendId});
+        cloudRequestId = (result.data as Map?)?['requestId']?.toString();
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        // Keep a local request so the player can continue testing the UX.
+      }
+    }
+    final request = FriendRequest(
+      id: cloudRequestId ?? _ids.eventId(),
+      fromPlayerId: player.id,
+      toPlayerId: friendId,
+      createdAt: DateTime.now(),
+    );
+    friendRequests.add(request);
+    notifications.add(
+      CricNotification(
+        id: _ids.eventId(),
+        playerId: friendId,
+        type: NotificationType.friendRequest,
+        title: 'New friend request',
+        body: '${player.name} (${player.id}) wants to connect.',
+        referenceId: request.id,
+        createdAt: DateTime.now(),
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> respondToFriendRequest(
+    String requestId, {
+    required bool accept,
+  }) async {
+    final request = friendRequests.cast<FriendRequest?>().firstWhere(
+      (value) => value?.id == requestId,
+      orElse: () => null,
+    );
+    if (request == null || request.status != FriendRequestStatus.pending) {
+      throw StateError('This friend request is no longer pending.');
+    }
+    if (request.toPlayerId != activePlayerId) {
+      throw StateError('Only the receiving player can respond.');
+    }
+
+    if (cloudConnected && _functions != null) {
+      try {
+        await _functions!.httpsCallable('respondFriendRequest').call(
+          <String, Object?>{'requestId': requestId, 'accept': accept},
+        );
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        // Local state remains available while the backend is not deployed.
+      }
+    }
+
+    request
+      ..status = accept
+          ? FriendRequestStatus.accepted
+          : FriendRequestStatus.rejected
+      ..respondedAt = DateTime.now();
+    if (accept) {
+      final sender = playerById(request.fromPlayerId);
+      final receiver = playerById(request.toPlayerId);
+      if (sender != null && !sender.friendIds.contains(receiver?.id)) {
+        if (receiver != null) sender.friendIds.add(receiver.id);
+      }
+      if (receiver != null && !receiver.friendIds.contains(sender?.id)) {
+        if (sender != null) receiver.friendIds.add(sender.id);
+      }
+      notifications.add(
+        CricNotification(
+          id: _ids.eventId(),
+          playerId: request.fromPlayerId,
+          type: NotificationType.friendAccepted,
+          title: 'Friend request accepted',
+          body: '${receiver?.name ?? request.toPlayerId} is now your friend.',
+          referenceId: request.id,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    await _commit();
+  }
+
+  Future<void> removeFriend(String friendPlayerId) async {
+    final player = activePlayer;
+    if (player == null || !player.friendIds.contains(friendPlayerId)) {
+      throw StateError('Friendship not found.');
+    }
+    if (cloudConnected && _functions != null) {
+      await _functions!.httpsCallable('removeFriend').call(
+        <String, Object?>{'friendPlayerId': friendPlayerId},
+      );
+    }
+    player.friendIds.remove(friendPlayerId);
+    final friend = playerById(friendPlayerId);
+    friend?.friendIds.remove(player.id);
+    if (friend != null) {
+      for (final field in sensitiveProfileFields) {
+        if (!friend.canViewField(
+          field,
+          viewerPlayerId: player.id,
+          areFriends: false,
+        )) {
+          _setContactValue(friend, field, null);
+        }
+      }
+    }
+    await _commit();
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    for (final value in notifications) {
+      if (value.id == notificationId && value.playerId == activePlayerId) {
+        value.read = true;
+      }
+    }
+    if (cloudConnected && _functions != null) {
+      try {
+        await _functions!.httpsCallable('markNotificationRead').call(
+          <String, Object?>{'notificationId': notificationId},
+        );
+      } on FirebaseFunctionsException catch (error) {
+        if (!_isBackendUnavailable(error)) rethrow;
+        // The local read state is retained until the backend is reachable.
+      }
+    }
     await _commit();
   }
 
@@ -504,20 +1292,26 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _commit() async {
     final data = _stateData();
-    await _preferences.setString(_storageKey, jsonEncode(data));
+    await _persistLocal(data);
     unawaited(_syncCloudState(data));
     notifyListeners();
   }
+
+  Future<void> _persistLocal([Map<String, Object?>? state]) => _preferences
+      .setString(_storageKey, jsonEncode(state ?? _stateData()));
 
   Map<String, Object?> _stateData() => {
     'activePlayerId': activePlayerId,
     'players': players.map((value) => value.toJson()).toList(),
     'gangs': gangs.map((value) => value.toJson()).toList(),
     'matches': matches.map((value) => value.toJson()).toList(),
-    'schemaVersion': 1,
+    'friendRequests': friendRequests.map((value) => value.toJson()).toList(),
+    'notifications': notifications.map((value) => value.toJson()).toList(),
+    'schemaVersion': 2,
   };
 
   void _replaceState(Map<String, dynamic> json) {
+    json = _migrateLegacyPlayerIds(json);
     _clearState();
     activePlayerId = json['activePlayerId'] as String?;
     players.addAll(
@@ -525,6 +1319,7 @@ class AppStore extends ChangeNotifier {
         (value) => Player.fromJson(Map<String, dynamic>.from(value as Map)),
       ),
     );
+    _rebuildPlayerIndex();
     gangs.addAll(
       (json['gangs'] as List? ?? const []).map(
         (value) => Gang.fromJson(Map<String, dynamic>.from(value as Map)),
@@ -536,12 +1331,89 @@ class AppStore extends ChangeNotifier {
             CricketMatch.fromJson(Map<String, dynamic>.from(value as Map)),
       ),
     );
+    friendRequests.addAll(
+      (json['friendRequests'] as List? ?? const []).map(
+        (value) =>
+            FriendRequest.fromJson(Map<String, dynamic>.from(value as Map)),
+      ),
+    );
+    notifications.addAll(
+      (json['notifications'] as List? ?? const []).map(
+        (value) =>
+            CricNotification.fromJson(Map<String, dynamic>.from(value as Map)),
+      ),
+    );
+  }
+
+  Map<String, dynamic> _migrateLegacyPlayerIds(Map<String, dynamic> state) {
+    final rawPlayers = state['players'] as List? ?? const [];
+    final used = <String>{};
+    final replacements = <String, String>{};
+    for (final value in rawPlayers) {
+      final player = Map<String, dynamic>.from(value as Map);
+      final id = player['id']?.toString();
+      if (id != null && RegExp(r'^\d{6,}$').hasMatch(id)) used.add(id);
+    }
+    for (final value in rawPlayers) {
+      final player = Map<String, dynamic>.from(value as Map);
+      final id = player['id']?.toString();
+      if (id == null || RegExp(r'^\d{6,}$').hasMatch(id)) continue;
+      final bytes = sha256.convert(utf8.encode('cricxii-legacy:$id')).bytes;
+      var numeric =
+          100000 +
+          (((bytes[0] << 24) |
+                  (bytes[1] << 16) |
+                  (bytes[2] << 8) |
+                  bytes[3]) &
+              0x7fffffff) %
+              900000;
+      while (used.contains('$numeric')) {
+        numeric = numeric == 999999 ? 100000 : numeric + 1;
+      }
+      replacements[id] = '$numeric';
+      used.add('$numeric');
+    }
+    if (replacements.isEmpty) return state;
+
+    final migrated = _replaceExactPlayerReferences(state, replacements);
+    final migratedPlayers = migrated['players'] as List? ?? const [];
+    for (final value in migratedPlayers) {
+      final player = value as Map;
+      if (replacements.containsValue(player['id'])) {
+        player['pendingSync'] = true;
+      }
+    }
+    migrated['schemaVersion'] = 2;
+    return migrated;
+  }
+
+  Map<String, dynamic> _replaceExactPlayerReferences(
+    Map<String, Object?> state,
+    Map<String, String> replacements,
+  ) {
+    Object? replace(Object? value) {
+      if (value is String) return replacements[value] ?? value;
+      if (value is List) return value.map(replace).toList();
+      if (value is Map) {
+        return <String, Object?>{
+          for (final entry in value.entries)
+            (replacements[entry.key.toString()] ?? entry.key.toString()):
+                replace(entry.value),
+        };
+      }
+      return value;
+    }
+
+    return Map<String, dynamic>.from(replace(state) as Map);
   }
 
   void _clearState() {
     players.clear();
+    _playerIndex.clear();
     gangs.clear();
     matches.clear();
+    friendRequests.clear();
+    notifications.clear();
     activePlayerId = null;
   }
 
@@ -557,9 +1429,40 @@ class AppStore extends ChangeNotifier {
           .doc('state')
           .set({
             'state': jsonEncode(state),
-            'schemaVersion': 1,
+            'schemaVersion': 2,
             'updatedAt': FieldValue.serverTimestamp(),
           });
+      final player = activePlayer;
+      if (player != null && !player.pendingSync) {
+        player.accountUid ??= user.uid;
+        final playerRef = firestore.collection('players').doc(player.id);
+        await playerRef.set({
+          ...player.toPublicJson(),
+          'ownerUid': user.uid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        final batch = firestore.batch();
+        for (final field in sensitiveProfileFields) {
+          final value = _contactValue(player, field);
+          final ref = playerRef.collection('contactFields').doc(field);
+          if (value == null || value.isEmpty) {
+            batch.delete(ref);
+          } else {
+            batch.set(ref, {
+              'ownerUid': user.uid,
+              'ownerPlayerId': player.id,
+              'value': value,
+              'visibility':
+                  (player.contactVisibility[field] ??
+                          ProfileVisibility.onlyMe)
+                      .name,
+              'audienceIds': player.contactAudienceIds[field] ?? const [],
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+        await batch.commit();
+      }
     } on FirebaseException {
       // Local scoring remains authoritative while the ground is offline.
     }
@@ -580,11 +1483,147 @@ class AppStore extends ChangeNotifier {
       if (raw == null || raw.isEmpty) return;
       if (replaceLocal || players.isEmpty) {
         _replaceState(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+        activePlayer?.accountUid ??= user.uid;
         await _preferences.setString(_storageKey, jsonEncode(_stateData()));
       }
     } on FirebaseException {
       // A cached local match can still continue if Firebase is unreachable.
     }
+  }
+
+  Future<void> _refreshSocialGraph() async {
+    final user = firebaseUser;
+    final firestore = _firestore;
+    final self = activePlayer;
+    if (user == null || firestore == null || self == null) return;
+    try {
+      final results = await Future.wait([
+        firestore
+            .collection('friendRequests')
+            .where('toUid', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'pending')
+            .orderBy('createdAt', descending: true)
+            .limit(100)
+            .get(),
+        firestore
+            .collection('notifications')
+            .where('recipientUid', isEqualTo: user.uid)
+            .orderBy('createdAt', descending: true)
+            .limit(100)
+            .get(),
+        firestore
+            .collection('friendships')
+            .where('uids', arrayContains: user.uid)
+            .limit(500)
+            .get(),
+      ]);
+
+      final requestSnapshot = results[0];
+      final cloudRequestIds = requestSnapshot.docs
+          .map((document) => document.id)
+          .toSet();
+      friendRequests.removeWhere(
+        (request) =>
+            request.toPlayerId == self.id &&
+            request.status == FriendRequestStatus.pending &&
+            request.id.contains('_') &&
+            !cloudRequestIds.contains(request.id),
+      );
+      for (final document in requestSnapshot.docs) {
+        final data = document.data();
+        final fromId = data['fromPlayerId']?.toString();
+        final toId = data['toPlayerId']?.toString();
+        if (fromId == null || toId == null) continue;
+        await findPlayer(fromId);
+        final existing = friendRequests.where(
+          (value) => value.id == document.id,
+        );
+        if (existing.isEmpty) {
+          friendRequests.add(
+            FriendRequest(
+              id: document.id,
+              fromPlayerId: fromId,
+              toPlayerId: toId,
+              createdAt: _dateFromCloud(data['createdAt']),
+            ),
+          );
+        }
+      }
+
+      final notificationSnapshot = results[1];
+      for (final document in notificationSnapshot.docs) {
+        final data = document.data();
+        final existing = notifications.where(
+          (value) => value.id == document.id,
+        );
+        if (existing.isNotEmpty) {
+          existing.first.read = data['read'] as bool? ?? false;
+          continue;
+        }
+        final typeName = data['type']?.toString() ?? 'system';
+        final fromId = data['fromPlayerId']?.toString();
+        final sender = fromId == null ? null : await findPlayer(fromId);
+        final type = NotificationType.values.any(
+          (value) => value.name == typeName,
+        )
+            ? NotificationType.values.byName(typeName)
+            : NotificationType.system;
+        notifications.add(
+          CricNotification(
+            id: document.id,
+            playerId: self.id,
+            type: type,
+            title: switch (type) {
+              NotificationType.friendRequest => 'New friend request',
+              NotificationType.friendAccepted => 'Friend request accepted',
+              _ => 'CricXii update',
+            },
+            body: switch (type) {
+              NotificationType.friendRequest =>
+                '${sender?.name ?? fromId ?? 'A player'} wants to connect.',
+              NotificationType.friendAccepted =>
+                '${sender?.name ?? fromId ?? 'A player'} is now your friend.',
+              _ => 'Your CricXii account has an update.',
+            },
+            referenceId: data['requestId']?.toString(),
+            createdAt: _dateFromCloud(data['createdAt']),
+            read: data['read'] as bool? ?? false,
+          ),
+        );
+      }
+
+      final friendshipSnapshot = results[2];
+      final cloudFriendIds = <String>{};
+      for (final document in friendshipSnapshot.docs) {
+        final ids = List<String>.from(
+          document.data()['playerIds'] as List? ?? const [],
+        );
+        for (final id in ids.where((value) => value != self.id)) {
+          cloudFriendIds.add(id);
+          await findPlayer(id);
+        }
+      }
+      self.friendIds
+        ..clear()
+        ..addAll(cloudFriendIds);
+      for (final cached in players.where((player) => player.id != self.id)) {
+        if (cloudFriendIds.contains(cached.id)) {
+          if (!cached.friendIds.contains(self.id)) cached.friendIds.add(self.id);
+        } else {
+          cached.friendIds.remove(self.id);
+        }
+      }
+      await _persistLocal();
+      notifyListeners();
+    } on FirebaseException {
+      // Offline cache remains usable.
+    }
+  }
+
+  DateTime _dateFromCloud(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
   }
 
   String _uniquePlayerId() {
@@ -593,6 +1632,67 @@ class AppStore extends ChangeNotifier {
       id = _ids.playerId();
     }
     return id;
+  }
+
+  void _addOrReplacePlayer(Player player) {
+    final existing = _playerIndex[player.id];
+    if (existing != null) players.remove(existing);
+    players.add(player);
+    _playerIndex[player.id] = player;
+  }
+
+  void _rebuildPlayerIndex() {
+    _playerIndex
+      ..clear()
+      ..addEntries(players.map((player) => MapEntry(player.id, player)));
+  }
+
+  String? _clean(String? value) {
+    final cleaned = value?.trim();
+    return cleaned == null || cleaned.isEmpty ? null : cleaned;
+  }
+
+  bool _isBackendUnavailable(FirebaseFunctionsException error) => const {
+    'not-found',
+    'unimplemented',
+    'unavailable',
+    'deadline-exceeded',
+  }.contains(error.code);
+
+  String? _cleanInstagram(String? value) {
+    final cleaned = _clean(value);
+    if (cleaned == null) return null;
+    final uri = Uri.tryParse(cleaned);
+    if (uri != null && uri.host.toLowerCase().contains('instagram.com')) {
+      final segments = uri.pathSegments.where((part) => part.isNotEmpty);
+      if (segments.isNotEmpty) return segments.first.replaceFirst('@', '');
+    }
+    return cleaned.replaceFirst('@', '');
+  }
+
+  String? _contactValue(Player player, String field) => switch (field) {
+    'email' => player.email,
+    'phone' => player.phoneNumber,
+    'whatsapp' => player.whatsappNumber,
+    'location' => player.location,
+    _ => null,
+  };
+
+  void _setContactValue(Player player, String field, String? value) {
+    switch (field) {
+      case 'email':
+        player.email = value;
+        break;
+      case 'phone':
+        player.phoneNumber = value;
+        break;
+      case 'whatsapp':
+        player.whatsappNumber = value;
+        break;
+      case 'location':
+        player.location = value;
+        break;
+    }
   }
 
   String _uniqueGangId() {

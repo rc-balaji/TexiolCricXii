@@ -8,6 +8,7 @@ import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
 import 'create_match_screen.dart';
 import 'match_summary_screen.dart';
+import 'notifications_screen.dart';
 import 'quick_score_screen.dart';
 import 'secret_draw_screen.dart';
 import 'tracker_screen.dart';
@@ -65,6 +66,20 @@ class HomePage extends StatelessWidget {
                   ],
                 ),
               ),
+              Badge(
+                isLabelVisible: store.unreadNotificationCount > 0,
+                label: Text('${store.unreadNotificationCount}'),
+                child: IconButton.filledTonal(
+                  tooltip: 'Notifications',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.notifications_none_rounded),
+                ),
+              ),
+              const SizedBox(width: 6),
               IconButton.filledTonal(
                 tooltip: 'Player ID',
                 onPressed: () => showDialog<void>(

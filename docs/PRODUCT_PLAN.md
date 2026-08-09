@@ -2,64 +2,51 @@
 
 ## Product promise
 
-CricXii makes a real local-cricket Singles match feel official without requiring an umpire or scorer. Players can use one shared phone, optionally track every ball, finish with a reliable ranking, and share a permanent scorecard.
+CricXii makes real local cricket official without requiring a dedicated scorer. Each person owns a durable player identity, can build a trusted local network, play from one shared phone, and keep permanent match records.
 
-## V1 rules locked from the product discussion
+## Locked product decisions
 
-| Area | CricXii V1 decision |
+| Area | Decision |
 |---|---|
-| Format | Singles Match only; Team Match is a later update |
-| Turn end | Wicket or configured legal-ball limit |
-| 1.5 overs | Exactly 9 balls |
-| Tracker ON | Store each delivery, including legal-ball state and extras |
-| Tracker OFF | Enter only each player's final runs plus Out/Not Out and dismissal credits |
-| Gang membership | A player has at most one home gang but can play with anyone |
-| Roles | Creator is Leader; Leader can promote Co-leaders |
-| Profile image | Generated colour/initial avatar; Instagram handle stored as a link, with no Firebase Storage upload in V1 |
-| No-phone player | Anyone can create an unclaimed local profile and receive a Player ID plus temporary claim detail |
-| Draw | Unique face-down card per player; earlier choices stay hidden; last card auto-assigns |
-| Ranking | Match creator selects Runs-only or Overall points before start |
-| Recovery | Undo final event, reset current turn, adjust pre-match order, or send current player later |
-| Output | Final ranking, player breakdown, career history, share/save PDF |
+| Account ownership | One Firebase UID owns exactly one Player ID |
+| Opponents on a phone | Independent cached players, not account-switch profiles |
+| Player ID | Digits only, starting at 6 digits and growing to 7/8/9/10 as required |
+| High-scale allocation | Trusted block allocator; no collection scan or random retry loop |
+| No-phone player | Separate provisional account with a temporary numeric password that becomes the initial ID login |
+| Friends | Explicit request and accept/reject; never auto-friend on registration |
+| Contacts | Private by default with a visibility rule per field |
+| DOB | Stored privately; age is calculated and published instead of raw DOB |
+| Avatar | Five built-ins, linked provider photo, or private HTTPS URL |
+| Instagram | Store normalized handle/link; do not scrape an unstable profile image URL |
+| Team Match | Visible as Coming Soon; Singles and Team records remain separate |
+| Singles turn end | Wicket or configured legal-ball limit |
+| 1.5 overs | Exactly 9 legal balls |
+| Tracker off | One final runs/out entry per batter, not fake ball history |
 
-## Dismissal credits
+## v0.2 Player & Social foundation — included
 
-| Dismissal | Bowler wicket | Fielding credit |
-|---|---:|---|
-| Bowled, LBW, hit wicket | Yes | None |
-| Caught | Yes | Catcher |
-| Caught & bowled | Yes | Bowler also receives catch |
-| Stumped | Yes | Wicketkeeper receives stumping |
-| Direct run-out | No | One fielder receives direct run-out |
-| Assisted run-out | No | Up to two fielders receive assisted run-out |
-| Retired out | No | None |
+- Numeric Player ID service and old-ID local migration
+- Email, ID/password, Google, and credential-gated Facebook sign-in/linking
+- Provisional creation, creator-authorized editing, secure claim, and claim-time contact transfer
+- Profile, privacy, player management, reset, provider disconnect, and deletion screens
+- Friend requests, notification routing/refresh, accepted friendships, player lookup
+- Original CricXii launcher icon and five original avatars
+- Normalized public/contact/social Firestore documents with backend-only secrets
 
-## Delivery milestones
+## Next: connected match hardening
 
-### Singles foundation — included here
+- Join a match from another phone using Match ID
+- Creator/tracker permissions and event revision transactions
+- Read-only live score subscriptions for other players
+- Transactional multi-device secret draw
+- Push notifications after in-app notifications are proven
 
-- Local-first profiles, gang roles, friend list, match setup, secret draw
-- Both scoring modes and deterministic scoring/points engine
-- Match history, final rankings, PDF scorecard, undo/edit controls
-- Firebase Android configuration, email/password authentication, private recovery
-- Automated APK build
+## Later: Team Match
 
-### Connected Singles
+- Teams, innings, striker/non-striker, overs, bowling spells, extras, wickets
+- Team result and full innings scorecard
+- Separate Team career stats and history
 
-- Normalized Firestore player/gang/match documents
-- Join by Match ID from another phone
-- Transactional private draw across multiple devices
-- Live event stream with creator/tracker authorization and conflict protection
-- Secure Player-ID + temporary-password claim service
-- Email/Google credential linking after claim
-- Invitations, friend requests, and gang discovery
+## Security boundary
 
-### Team Match
-
-- Teams, innings, striker/non-striker, over changes, bowling spells
-- Extras and wicket rules appropriate to team cricket
-- Team result, net totals, and full innings scorecard
-
-## Secure claim decision
-
-A Player ID must not be mapped to an email in a publicly readable collection. Claiming an unclaimed profile therefore needs a small trusted backend that verifies a one-time secret, atomically attaches the Firebase UID, and invalidates the secret. The client and Firestore rules reserve this boundary instead of implementing an insecure shortcut.
+Player-ID passwords, the ID allocator, provisional claiming, friendships, and account deletion run only in trusted callable Functions. No Admin key or password hash is exposed to the app, and public Player ID documents never map directly to an email address.

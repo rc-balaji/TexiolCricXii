@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/app_scope.dart';
 import 'friends_page.dart';
 import 'gang_page.dart';
 import 'home_page.dart';
@@ -27,7 +28,10 @@ class _HomeShellState extends State<HomeShell> {
     body: IndexedStack(index: _index, children: _pages),
     bottomNavigationBar: NavigationBar(
       selectedIndex: _index,
-      onDestinationSelected: (value) => setState(() => _index = value),
+      onDestinationSelected: (value) {
+        setState(() => _index = value);
+        if (value == 2) AppScope.read(context).refreshSocialGraph();
+      },
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),

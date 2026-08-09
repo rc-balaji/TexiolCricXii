@@ -13,15 +13,18 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
+  final _emailOrId = TextEditingController();
   final _password = TextEditingController();
-  bool _creating = false;
+  int _mode = 0;
   bool _busy = false;
   bool _hidePassword = true;
 
+  bool get _idLogin => _mode == 1;
+  bool get _creating => _mode == 2;
+
   @override
   void dispose() {
-    _email.dispose();
+    _emailOrId.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -31,13 +34,89 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _busy = true);
     try {
       final store = AppScope.read(context);
-      if (_creating) {
-        await store.signUpWithEmail(_email.text, _password.text);
+      if (_idLogin) {
+        await store.signInWithPlayerId(_emailOrId.text, _password.text);
+      } else if (_creating) {
+        await store.signUpWithEmail(_emailOrId.text, _password.text);
       } else {
-        await store.signInWithEmail(_email.text, _password.text);
+        await store.signInWithEmail(_emailOrId.text, _password.text);
       }
     } on FirebaseAuthException catch (error) {
       if (mounted) _showError(_messageFor(error.code));
+    } on Object catch (error) {
+      if (mounted) _showError('$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _google() async {
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).signInWithGoogle();
+    } on Object catch (error) {
+      if (mounted) _showError('$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _facebook() async {
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).signInWithFacebook();
+    } on Object catch (error) {
+      if (mounted) _showError('$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _claim() async {
+    final id = TextEditingController();
+    final password = TextEditingController();
+    final values = await showDialog<List<String>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Claim provisional player'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: id,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Numeric Player ID'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: password,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Temporary password'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              context,
+              <String>[id.text.trim(), password.text],
+            ),
+            child: const Text('Claim'),
+          ),
+        ],
+      ),
+    );
+    id.dispose();
+    password.dispose();
+    if (values == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).claimProvisionalPlayer(values[0], values[1]);
     } on Object catch (error) {
       if (mounted) _showError('$error');
     } finally {
@@ -53,9 +132,11 @@ class _AuthScreenState extends State<AuthScreen> {
 
   String _messageFor(String code) => switch (code) {
     'invalid-email' => 'Enter a valid email address.',
-    'invalid-credential' => 'Email or password is incorrect.',
+    'invalid-credential' => 'Email, Player ID or password is incorrect.',
     'email-already-in-use' => 'An account already uses this email.',
-    'weak-password' => 'Use a stronger password with at least 6 characters.',
+    'credential-already-in-use' =>
+      'This Google/Facebook account is connected to another Player ID.',
+    'weak-password' => 'Use a stronger password with at least 8 characters.',
     'network-request-failed' => 'No internet. Continue offline or try again.',
     _ => 'Firebase sign-in failed ($code).',
   };
@@ -71,13 +152,14 @@ class _AuthScreenState extends State<AuthScreen> {
               Container(
                 width: 56,
                 height: 56,
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: AppColors.ink,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(
-                  Icons.sports_cricket_rounded,
-                  color: AppColors.green,
+                child: Image.asset(
+                  'assets/branding/cricxii_app_icon.png',
+                  fit: BoxFit.cover,
                 ),
               ),
               const SizedBox(width: 13),
@@ -106,7 +188,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 38),
+          const SizedBox(height: 34),
           Text(
             _creating ? 'Create your account.' : 'Welcome back.',
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
@@ -118,21 +200,26 @@ class _AuthScreenState extends State<AuthScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            _creating
-                ? 'Your scores stay on this phone first and back up privately when connected.'
-                : 'Sign in to restore your CricXii profiles and match history.',
+            _idLogin
+                ? 'Use your numeric CricXii Player ID and password.'
+                : 'Every login opens one independent player account.',
             style: const TextStyle(color: AppColors.muted, height: 1.45),
           ),
-          const SizedBox(height: 26),
-          SegmentedButton<bool>(
+          const SizedBox(height: 24),
+          SegmentedButton<int>(
+            showSelectedIcon: false,
             segments: const [
-              ButtonSegment(value: false, label: Text('Sign in')),
-              ButtonSegment(value: true, label: Text('Create account')),
+              ButtonSegment(value: 0, label: Text('Email')),
+              ButtonSegment(value: 1, label: Text('Player ID')),
+              ButtonSegment(value: 2, label: Text('Register')),
             ],
-            selected: {_creating},
+            selected: {_mode},
             onSelectionChanged: _busy
                 ? null
-                : (value) => setState(() => _creating = value.single),
+                : (value) => setState(() {
+                    _mode = value.single;
+                    _formKey.currentState?.reset();
+                  }),
           ),
           const SizedBox(height: 18),
           Form(
@@ -140,25 +227,30 @@ class _AuthScreenState extends State<AuthScreen> {
             child: Column(
               children: [
                 TextFormField(
-                  controller: _email,
-                  keyboardType: TextInputType.emailAddress,
-                  autofillHints: const [AutofillHints.email],
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.alternate_email_rounded),
+                  controller: _emailOrId,
+                  keyboardType: _idLogin
+                      ? TextInputType.number
+                      : TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: _idLogin ? 'Player ID' : 'Email',
+                    prefixIcon: Icon(
+                      _idLogin ? Icons.badge_outlined : Icons.alternate_email,
+                    ),
                   ),
-                  validator: (value) =>
-                      value == null || !value.trim().contains('@')
-                      ? 'Enter your email'
-                      : null,
+                  validator: (value) {
+                    final text = value?.trim() ?? '';
+                    if (_idLogin) {
+                      return RegExp(r'^\d{6,}$').hasMatch(text)
+                          ? null
+                          : 'Enter at least 6 digits';
+                    }
+                    return text.contains('@') ? null : 'Enter your email';
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _password,
                   obscureText: _hidePassword,
-                  autofillHints: _creating
-                      ? const [AutofillHints.newPassword]
-                      : const [AutofillHints.password],
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline_rounded),
@@ -172,8 +264,8 @@ class _AuthScreenState extends State<AuthScreen> {
                       ),
                     ),
                   ),
-                  validator: (value) => value == null || value.length < 6
-                      ? 'Use at least 6 characters'
+                  validator: (value) => value == null || value.length < 8
+                      ? 'Use at least 8 characters or digits'
                       : null,
                   onFieldSubmitted: (_) {
                     if (!_busy) _submit();
@@ -192,39 +284,44 @@ class _AuthScreenState extends State<AuthScreen> {
                               ? Icons.person_add_alt_1_rounded
                               : Icons.login_rounded,
                         ),
-                  label: Text(_creating ? 'Create & continue' : 'Sign in'),
+                  label: Text(_creating ? 'Register & continue' : 'Sign in'),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: _busy
-                ? null
-                : () => AppScope.read(context).continueOffline(),
-            icon: const Icon(Icons.signal_wifi_off_rounded),
-            label: const Text('Continue offline on this phone'),
+            onPressed: _busy ? null : _google,
+            icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
+            label: const Text('Continue with Google'),
           ),
-          const SizedBox(height: 18),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF7E3),
-              borderRadius: BorderRadius.circular(16),
+          if (AppScope.of(context).facebookLoginConfigured)
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _facebook,
+              icon: const Icon(Icons.facebook_rounded),
+              label: const Text('Continue with Facebook'),
             ),
-            child: const Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.key_rounded, color: Color(0xFF8A5A00)),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Player-ID + temporary-password claiming is reserved for the secure claim service. Existing local profiles can still be switched without repeated login.',
-                    style: TextStyle(color: Color(0xFF6D4B0F), height: 1.35),
-                  ),
-                ),
-              ],
+          TextButton.icon(
+            onPressed: _busy ? null : _claim,
+            icon: const Icon(Icons.key_rounded),
+            label: const Text('Claim a temporary Player ID'),
+          ),
+          const SizedBox(height: 8),
+          if (AppScope.of(context).canContinueOffline)
+            OutlinedButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => AppScope.read(context).continueOffline(),
+              icon: const Icon(Icons.signal_wifi_off_rounded),
+              label: const Text('Continue offline on this phone'),
             ),
+          const SizedBox(height: 16),
+          Text(
+            AppScope.of(context).facebookLoginConfigured
+                ? 'Email, Player ID, Google and Facebook all open the same independent player account after linking.'
+                : 'Facebook login becomes available after its App ID and Client Token are added to the build.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
         ],
       ),

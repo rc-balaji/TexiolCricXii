@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'register_player_dialog.dart';
 import 'secret_draw_screen.dart';
 
 class CreateMatchScreen extends StatefulWidget {
@@ -104,71 +105,30 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   }
 
   Future<void> _addPlayer() async {
-    final name = TextEditingController();
-    final result = await showDialog<bool>(
+    final created = await showProvisionalPlayerRegistration(context);
+    if (created == null || !mounted) return;
+    final addToMatch = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Create player for this match'),
-        content: TextField(
-          controller: name,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Player name',
-            helperText: 'An unclaimed Player ID and password will be created.',
-          ),
+        title: Text('Add ${created.player.name} to this match?'),
+        content: const Text(
+          'The account was created separately. Choose whether this player should participate now.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text('Not now'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, name.text.trim().length >= 2),
-            child: const Text('Create'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Add to match'),
           ),
         ],
       ),
     );
-    if (result != true || !mounted) {
-      name.dispose();
-      return;
+    if (addToMatch == true && mounted) {
+      setState(() => _selected.add(created.player.id));
     }
-    final created = await AppScope.read(
-      context,
-    ).createPlayer(name: name.text, claimed: false);
-    name.dispose();
-    if (!mounted) return;
-    setState(() => _selected.add(created.player.id));
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Save these claim details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SelectableText(
-              'Player: ${created.player.name}\nID: ${created.player.id}\nPassword: ${created.temporaryPassword}',
-              style: const TextStyle(height: 1.7, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'The password is shown once. New-phone claiming activates with the secure claim service.',
-              style: TextStyle(color: AppColors.muted),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Saved'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _editPoints() async {
@@ -261,11 +221,11 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       _selected.add(store.activePlayer!.id);
       _initialized = true;
     }
-    final selectedPlayers = store.players
+    final selectedPlayers = store.visiblePlayers
         .where((player) => _selected.contains(player.id))
         .toList();
     final query = _playerSearch.text.trim().toLowerCase();
-    final visiblePlayers = store.players.where((player) {
+    final visiblePlayers = store.visiblePlayers.where((player) {
       if (query.isEmpty) return true;
       final gang = store.gangById(player.gangId);
       return player.name.toLowerCase().contains(query) ||
@@ -365,42 +325,52 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          if (visiblePlayers.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: Text(
-                'No local player matches this search.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.muted),
-              ),
+          Container(
+            height: 330,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE1E9E4)),
             ),
-          ...visiblePlayers.map(
-            (player) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Card(
-                child: CheckboxListTile(
-                  value: _selected.contains(player.id),
-                  onChanged: player.id == store.activePlayerId
-                      ? null
-                      : (value) => setState(() {
-                          if (value ?? false) {
-                            _selected.add(player.id);
-                          } else {
-                            _selected.remove(player.id);
-                          }
-                        }),
-                  secondary: PlayerAvatar(player: player, showClaimState: true),
-                  title: Text(
-                    player.name,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+            child: visiblePlayers.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No player matches this search.',
+                      style: TextStyle(color: AppColors.muted),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    itemCount: visiblePlayers.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final player = visiblePlayers[index];
+                      return CheckboxListTile(
+                        value: _selected.contains(player.id),
+                        onChanged: player.id == store.activePlayerId
+                            ? null
+                            : (value) => setState(() {
+                                if (value ?? false) {
+                                  _selected.add(player.id);
+                                } else {
+                                  _selected.remove(player.id);
+                                }
+                              }),
+                        secondary: PlayerAvatar(
+                          player: player,
+                          showClaimState: true,
+                        ),
+                        title: Text(
+                          player.name,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          '${player.id}${player.id == store.activePlayerId ? ' • Creator' : ''}',
+                        ),
+                        controlAffinity: ListTileControlAffinity.trailing,
+                      );
+                    },
                   ),
-                  subtitle: Text(
-                    '${player.id}${player.id == store.activePlayerId ? ' • Creator' : ''}',
-                  ),
-                  controlAffinity: ListTileControlAffinity.trailing,
-                ),
-              ),
-            ),
           ),
           if (_mode == ScoringMode.ballByBall &&
               selectedPlayers.isNotEmpty) ...[

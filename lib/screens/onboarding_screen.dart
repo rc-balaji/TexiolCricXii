@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../domain/enums.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 
@@ -15,6 +16,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _instagram = TextEditingController();
+  final _idPassword = TextEditingController();
+  BattingStyle _battingStyle = BattingStyle.rightHanded;
   bool _busy = false;
 
   @override
@@ -22,20 +25,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _name.dispose();
     _email.dispose();
     _instagram.dispose();
+    _idPassword.dispose();
     super.dispose();
   }
 
   Future<void> _continue() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
-    await AppScope.read(context).createPlayer(
-      name: _name.text,
-      email: _email.text,
-      instagramHandle: _instagram.text,
-      claimed: true,
-      makeActive: true,
-    );
-    if (mounted) setState(() => _busy = false);
+    try {
+      final created = await AppScope.read(context).createPlayer(
+        name: _name.text,
+        email: _email.text,
+        instagramHandle: _instagram.text,
+        idPassword: _idPassword.text,
+        claimed: true,
+        makeActive: true,
+      );
+      created.player.battingStyle = _battingStyle;
+      await AppScope.read(context).savePlayerProfile(created.player);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -49,11 +65,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: Container(
               width: 54,
               height: 54,
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: AppColors.ink,
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: const Icon(Icons.sports_cricket, color: AppColors.green),
+              child: Image.asset(
+                'assets/branding/cricxii_app_icon.png',
+                fit: BoxFit.cover,
+              ),
             ),
           ),
           const SizedBox(height: 32),
@@ -91,7 +111,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'A unique Player ID will be generated automatically.',
+                      'A numeric Player ID will be generated automatically.',
                       style: TextStyle(color: AppColors.muted),
                     ),
                     const SizedBox(height: 20),
@@ -123,6 +143,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         labelText: 'Instagram ID (optional)',
                         prefixIcon: Icon(Icons.camera_alt_outlined),
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _idPassword,
+                      obscureText: true,
+                      keyboardType: TextInputType.visiblePassword,
+                      decoration: const InputDecoration(
+                        labelText: 'Player ID password',
+                        helperText: 'At least 8 characters or digits',
+                        prefixIcon: Icon(Icons.password_rounded),
+                      ),
+                      validator: (value) => value == null || value.length < 8
+                          ? 'Use at least 8 characters or digits'
+                          : null,
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<BattingStyle>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: BattingStyle.rightHanded,
+                          label: Text('Right bat'),
+                        ),
+                        ButtonSegment(
+                          value: BattingStyle.leftHanded,
+                          label: Text('Left bat'),
+                        ),
+                      ],
+                      selected: {_battingStyle},
+                      onSelectionChanged: (value) =>
+                          setState(() => _battingStyle = value.single),
                     ),
                     const SizedBox(height: 18),
                     FilledButton.icon(

@@ -10,21 +10,106 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
-    // Used by the current local-first build for private, per-account recovery.
-    match /users/{userId}/private/{document=**} {
-      allow read, write: if isSelf(userId);
+    function requestParticipant() {
+      return signedIn() &&
+        (resource.data.fromUid == request.auth.uid ||
+          resource.data.toUid == request.auth.uid);
     }
 
-    // Reserved normalized collections for the multi-phone collaboration phase.
+    function viewerPlayerId() {
+      return signedIn() && request.auth.token.playerId is string
+        ? request.auth.token.playerId
+        : '';
+    }
+
+    function ownsPlayer(playerId) {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.playerId == playerId;
+    }
+
+    function isPlayerFriend(ownerPlayerId) {
+      return viewerPlayerId() != '' &&
+        exists(/databases/$(database)/documents/players/$(ownerPlayerId)/friends/$(viewerPlayerId()));
+    }
+
+    function canReadContact(ownerPlayerId) {
+      return signedIn() &&
+        (resource.data.ownerUid == request.auth.uid ||
+          resource.data.visibility == 'everyone' ||
+          (resource.data.visibility == 'friends' && isPlayerFriend(ownerPlayerId)) ||
+          (resource.data.visibility == 'selectedFriends' &&
+            isPlayerFriend(ownerPlayerId) &&
+            viewerPlayerId() in resource.data.audienceIds) ||
+          (resource.data.visibility == 'everyoneExceptSelected' &&
+            !(viewerPlayerId() in resource.data.audienceIds)));
+    }
+
+    // Callable Functions own the account-to-Player-ID mapping.
+    match /users/{userId} {
+      allow read: if isSelf(userId);
+      allow write: if false;
+
+      // Private local-first recovery. It may include contacts and privacy ACLs.
+      match /private/{document=**} {
+        allow read, write: if isSelf(userId);
+      }
+    }
+
+    // Public cricket profile only. Sensitive contact data is never stored here.
     match /players/{playerId} {
       allow read: if signedIn();
       allow create: if signedIn() &&
-        request.resource.data.ownerUid == request.auth.uid;
+        ownsPlayer(playerId) &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.playerId == playerId;
       allow update: if signedIn() &&
+        ownsPlayer(playerId) &&
         resource.data.ownerUid == request.auth.uid &&
-        request.resource.data.ownerUid == resource.data.ownerUid;
+        request.resource.data.ownerUid == resource.data.ownerUid &&
+        request.resource.data.playerId == resource.data.playerId;
       allow delete: if signedIn() &&
+        ownsPlayer(playerId) &&
         resource.data.ownerUid == request.auth.uid;
+
+      match /contactFields/{field} {
+        allow get: if canReadContact(playerId);
+        allow list: if false;
+        allow create: if signedIn() &&
+          ownsPlayer(playerId) &&
+          request.resource.data.ownerUid == request.auth.uid &&
+          request.resource.data.ownerPlayerId == playerId;
+        allow update: if signedIn() &&
+          ownsPlayer(playerId) &&
+          resource.data.ownerUid == request.auth.uid &&
+          resource.data.ownerPlayerId == playerId &&
+          request.resource.data.ownerUid == resource.data.ownerUid &&
+          request.resource.data.ownerPlayerId == resource.data.ownerPlayerId;
+        allow delete: if signedIn() &&
+          ownsPlayer(playerId) &&
+          resource.data.ownerUid == request.auth.uid &&
+          resource.data.ownerPlayerId == playerId;
+      }
+
+      match /friends/{friendPlayerId} {
+        allow read: if signedIn() &&
+          (playerId == viewerPlayerId() || friendPlayerId == viewerPlayerId());
+        allow write: if false;
+      }
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if requestParticipant();
+      allow write: if false;
+    }
+
+    match /friendships/{friendshipId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.uids;
+      allow write: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.recipientUid == request.auth.uid;
+      allow write: if false;
     }
 
     match /gangs/{gangId} {
@@ -63,9 +148,17 @@ service cloud.firestore {
       }
     }
 
-    // Claiming an unclaimed Player ID is intentionally not allowed from a
-    // client rule. A callable backend must verify the one-time claim secret.
-    match /claimTickets/{playerId} {
+    // Security-critical documents are backend-only.
+    match /playerIds/{document=**} {
+      allow read, write: if false;
+    }
+    match /loginSecrets/{document=**} {
+      allow read, write: if false;
+    }
+    match /loginRateLimits/{document=**} {
+      allow read, write: if false;
+    }
+    match /system/{document=**} {
       allow read, write: if false;
     }
   }

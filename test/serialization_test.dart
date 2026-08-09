@@ -9,11 +9,11 @@ void main() {
     final original = CricketMatch(
       id: 'TXM-ABC123',
       title: 'Sunday Ground',
-      creatorPlayerId: 'TXP-ONE',
+      creatorPlayerId: '100001',
       scoringMode: ScoringMode.ballByBall,
       ballLimit: 9,
-      participantIds: ['TXP-ONE', 'TXP-TWO'],
-      battingOrder: ['TXP-TWO', 'TXP-ONE'],
+      participantIds: ['100001', '100002'],
+      battingOrder: ['100002', '100001'],
       createdAt: DateTime.utc(2026, 8, 9),
       status: MatchStatus.live,
       pointRules: const PointRules(wicket: 25, catchPoint: 12),
@@ -25,10 +25,10 @@ void main() {
         ScoreEvent(
           id: 'event-a',
           type: ScoreEventType.delivery,
-          batterId: 'TXP-TWO',
+          batterId: '100002',
           createdAt: DateTime.utc(2026, 8, 9, 10),
           batRuns: 6,
-          bowlerId: 'TXP-ONE',
+          bowlerId: '100001',
         ),
       ],
     );
@@ -40,7 +40,7 @@ void main() {
 
     expect(restored.id, original.id);
     expect(restored.ballLimit, 9);
-    expect(restored.battingOrder, ['TXP-TWO', 'TXP-ONE']);
+    expect(restored.battingOrder, ['100002', '100001']);
     expect(restored.pointRules.wicket, 25);
     expect(restored.drawPool.length, 2);
     expect(restored.events.single.batRuns, 6);
