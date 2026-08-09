@@ -67,8 +67,9 @@ class ScoringEngine {
       throw StateError('This match uses direct-runs scoring.');
     }
     final batterId = currentBatterId(match);
-    if (batterId == null)
+    if (batterId == null) {
       throw StateError('Every player has completed a turn.');
+    }
     if (batRuns < 0 || extraRuns < 0) {
       throw ArgumentError('Runs cannot be negative.');
     }
@@ -112,8 +113,9 @@ class ScoringEngine {
       throw StateError('This match uses ball tracking.');
     }
     final batterId = currentBatterId(match);
-    if (batterId == null)
+    if (batterId == null) {
       throw StateError('Every player has completed a turn.');
+    }
     if (runs < 0) throw ArgumentError('Runs cannot be negative.');
     if (isOut && dismissalType == DismissalType.none) {
       throw ArgumentError('An out entry requires a dismissal type.');

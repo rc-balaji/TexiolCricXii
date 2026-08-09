@@ -8,6 +8,8 @@
 - Validated Firebase and Firestore JSON files.
 - Validated the Android bootstrap script with `bash -n` and executable permissions.
 - Confirmed the supplied Firebase Android client contains the `com.texiol.crixx` registration and no service-account `private_key` field.
+- Corrected all 11 findings from the first GitHub analyzer run, including the generated counter-demo test that referenced `MyApp`.
+- Updated the Android bootstrap to remove only Flutter's generated counter-demo widget test while preserving CricXii's own tests.
 
 ## Automated tests included
 

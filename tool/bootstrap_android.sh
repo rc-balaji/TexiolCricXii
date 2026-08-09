@@ -17,6 +17,13 @@ if [[ ! -d android ]]; then
     .
 fi
 
+# `flutter create` adds its counter-demo widget test to an existing source
+# tree. CricXii has its own tests and app root, so remove only that generated
+# template before analysis.
+if [[ -f test/widget_test.dart ]] && grep -q 'pumpWidget(const MyApp())' test/widget_test.dart; then
+  rm -f test/widget_test.dart
+fi
+
 manifest="android/app/src/main/AndroidManifest.xml"
 if [[ -f "$manifest" ]]; then
   sed -i 's/android:label="[^"]*"/android:label="CricXii"/' "$manifest"

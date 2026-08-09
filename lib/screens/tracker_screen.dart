@@ -151,8 +151,9 @@ class _TrackerScreenState extends State<TrackerScreen> {
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
     final match = store.matchById(widget.matchId);
-    if (match == null)
+    if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
+    }
     final batterId = ScoringEngine.currentBatterId(match);
     final batter = store.playerById(batterId);
     if (batter == null) {

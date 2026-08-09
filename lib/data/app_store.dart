@@ -209,8 +209,9 @@ class AppStore extends ChangeNotifier {
   Future<Gang> createGang(String name) async {
     final player = activePlayer;
     if (player == null) throw StateError('Create a player profile first.');
-    if (player.gangId != null)
+    if (player.gangId != null) {
       throw StateError('A player can join only one gang.');
+    }
     final gang = Gang(
       id: _uniqueGangId(),
       name: name.trim(),
@@ -227,8 +228,9 @@ class AppStore extends ChangeNotifier {
   Future<void> addPlayerToGang(String gangId, String playerId) async {
     final gang = gangById(gangId);
     final player = playerById(playerId);
-    if (gang == null || player == null)
+    if (gang == null || player == null) {
       throw StateError('Gang or player not found.');
+    }
     if (player.gangId != null && player.gangId != gangId) {
       throw StateError('This player already belongs to another gang.');
     }
@@ -248,8 +250,9 @@ class AppStore extends ChangeNotifier {
   ) async {
     final gang = gangById(gangId);
     final player = playerById(playerId);
-    if (gang == null || player == null)
+    if (gang == null || player == null) {
       throw StateError('Gang or player not found.');
+    }
     if (!gang.members.containsKey(playerId)) {
       throw StateError('This player is not a member of the gang.');
     }
@@ -663,8 +666,9 @@ class AppStore extends ChangeNotifier {
         ..points += value.points;
     }
     final rankings = ScoringEngine.rankings(match);
-    if (rankings.isNotEmpty)
+    if (rankings.isNotEmpty) {
       playerById(rankings.first.playerId)?.stats.wins += 1;
+    }
     match.statsApplied = true;
   }
 
@@ -688,8 +692,9 @@ class AppStore extends ChangeNotifier {
         ..stumpings -= value.stumpings
         ..points -= value.points;
     }
-    if (rankings.isNotEmpty)
+    if (rankings.isNotEmpty) {
       playerById(rankings.first.playerId)?.stats.wins -= 1;
+    }
     match.statsApplied = false;
   }
 }
