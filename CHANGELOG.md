@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1+4 — GitHub analysis hotfix
+
+- Fixed the onboarding async-context analyzer warning by retaining the app store before awaiting.
+- Removed the unused public-profile import so GitHub Actions analysis completes cleanly.
+
 ## 0.2.0+3 — Player & Social foundation
 
 - Replaced prefixed player IDs with high-scale numeric server allocation starting at six digits.

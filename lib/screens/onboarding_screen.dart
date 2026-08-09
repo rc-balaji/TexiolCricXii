@@ -30,10 +30,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _continue() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+    final store = AppScope.read(context);
     setState(() => _busy = true);
     try {
-      final created = await AppScope.read(context).createPlayer(
+      final created = await store.createPlayer(
         name: _name.text,
         email: _email.text,
         instagramHandle: _instagram.text,
@@ -42,7 +45,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         makeActive: true,
       );
       created.player.battingStyle = _battingStyle;
-      await AppScope.read(context).savePlayerProfile(created.player);
+      await store.savePlayerProfile(created.player);
     } on Object catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
