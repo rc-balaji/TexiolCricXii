@@ -1,0 +1,72 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Used by the current local-first build for private, per-account recovery.
+    match /users/{userId}/private/{document=**} {
+      allow read, write: if isSelf(userId);
+    }
+
+    // Reserved normalized collections for the multi-phone collaboration phase.
+    match /players/{playerId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn() &&
+        resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if signedIn() &&
+        resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /gangs/{gangId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.leaderUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (resource.data.leaderUid == request.auth.uid ||
+          request.auth.uid in resource.data.coLeaderUids) &&
+        request.resource.data.leaderUid is string;
+      allow delete: if signedIn() &&
+        resource.data.leaderUid == request.auth.uid;
+    }
+
+    match /matches/{matchId} {
+      allow get: if signedIn();
+      allow list: if signedIn() &&
+        (resource.data.creatorUid == request.auth.uid ||
+          request.auth.uid in resource.data.participantUids);
+      allow create: if signedIn() &&
+        request.resource.data.creatorUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (resource.data.creatorUid == request.auth.uid ||
+          resource.data.trackerUid == request.auth.uid) &&
+        request.resource.data.creatorUid == resource.data.creatorUid;
+      allow delete: if signedIn() &&
+        resource.data.creatorUid == request.auth.uid;
+
+      match /events/{eventId} {
+        allow read: if signedIn() &&
+          (get(/databases/$(database)/documents/matches/$(matchId)).data.creatorUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.participantUids);
+        allow create, update, delete: if signedIn() &&
+          (get(/databases/$(database)/documents/matches/$(matchId)).data.creatorUid == request.auth.uid ||
+            get(/databases/$(database)/documents/matches/$(matchId)).data.trackerUid == request.auth.uid);
+      }
+    }
+
+    // Claiming an unclaimed Player ID is intentionally not allowed from a
+    // client rule. A callable backend must verify the one-time claim secret.
+    match /claimTickets/{playerId} {
+      allow read, write: if false;
+    }
+  }
+}
