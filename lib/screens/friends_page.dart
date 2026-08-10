@@ -405,10 +405,11 @@ class _SearchResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isSelf = player.id == activePlayerId;
-    final outgoing = pendingRequest != null &&
-        pendingRequest.fromPlayerId == activePlayerId;
-    final incoming = pendingRequest != null &&
-        pendingRequest.toPlayerId == activePlayerId;
+    final request = pendingRequest;
+    final outgoing = request != null &&
+        request.fromPlayerId == activePlayerId;
+    final incoming = request != null &&
+        request.toPlayerId == activePlayerId;
 
     String buttonText = 'Send request';
     IconData buttonIcon = Icons.person_add_alt_1_rounded;

@@ -430,7 +430,7 @@ class AppStore extends ChangeNotifier {
       transaction.set(userRef, {
         'playerId': normalized,
         'createdAt': userSnapshot.exists
-            ? userSnapshot.data()?['createdAt'] ?? FieldValue.serverTimestamp()
+            ? (userSnapshot.data()?['createdAt'] ?? FieldValue.serverTimestamp())
             : FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));

@@ -1,6 +1,6 @@
 # CricXii
 
-CricXii is Texiol's Android-first scorer for real local cricket. Version `0.2.2+5` keeps the Singles scoring engine and adds a Spark-first social flow, full temporary-player registration, manual notification sync, exact Player ID search, and a more polished PDF scorecard.
+CricXii is Texiol's Android-first scorer for real local cricket. Version `0.2.2+6` keeps the Singles scoring engine and adds a Spark-first social flow, full temporary-player registration, manual notification sync, exact Player ID search, and a more polished PDF scorecard.
 
 ## Included in v0.2.2
 

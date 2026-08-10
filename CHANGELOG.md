@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2+6 — Analyzer fixes
+
+- Fixed ternary/null-coalescing precedence in Spark player claim transaction.
+- Fixed nullable FriendRequest field access by promoting a local request variable.
+- Removed unnecessary dart:typed_data import from PDF export.
+- No functional flow changes from 0.2.2+5.
+
 ## 0.2.2+5 — Spark social + registration + scorecard polish
 
 - Added Spark-first numeric Player ID reservation for normal Firebase accounts, without requiring Cloud Functions for first profile creation.
