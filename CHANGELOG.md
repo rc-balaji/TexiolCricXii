@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2+5 — Spark social + registration + scorecard polish
+
+- Added Spark-first numeric Player ID reservation for normal Firebase accounts, without requiring Cloud Functions for first profile creation.
+- Moved friend request send/accept/remove and notification read flows to secured Firestore client transactions so social testing works on Spark.
+- Added exact Player ID search with visible Request sent / Request received / Friends states and a cached outgoing-pending list.
+- Changed social refresh to one sync on fresh sign-in/app launch plus explicit manual refresh while the app stays open; removed automatic Friends-tab refreshes.
+- Rebuilt temporary-player creation as a full registration screen with name, claim email, Instagram, batting style and avatar. Connected temp IDs are reserved in Firestore immediately and are globally searchable.
+- Added a Spark-native email-identity claim flow so the registered player can sign in on their own phone and claim the same Player ID without storing passwords in Firestore.
+- Upgraded PDF scorecards with winner hero, player avatars/photos, podium cards, richer ranking rows and match-detail cards.
+- Added the outgoing friend-request composite index and updated Firestore rules for Spark account mapping and social transactions.
+- Kept the existing Functions backend as optional legacy compatibility; the default GitHub APK build disables Functions.
+
 ## 0.2.1+4 — GitHub analysis hotfix
 
 - Fixed the onboarding async-context analyzer warning by retaining the app store before awaiting.

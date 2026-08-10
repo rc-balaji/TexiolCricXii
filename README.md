@@ -1,23 +1,34 @@
 # CricXii
 
-CricXii is Texiol's Android-first scorer for real local cricket. Version `0.2.0+3` keeps the working Singles match engine and adds the Player & Social foundation: independent accounts, numeric Player IDs, provisional players, profiles, privacy, friends, notifications, and original CricXii branding.
+CricXii is Texiol's Android-first scorer for real local cricket. Version `0.2.2+5` keeps the Singles scoring engine and adds a Spark-first social flow, full temporary-player registration, manual notification sync, exact Player ID search, and a more polished PDF scorecard.
 
-## Included in v0.2
+## Included in v0.2.2
 
-- Globally allocated numeric Player IDs beginning at `100000`; digit length grows naturally after each numeric range is exhausted.
-- Server-side ID blocks plus an atomic `playerIds/{id}.create()` guard, so allocation does not scan the player collection.
-- One Firebase UID owns one player. Other players on a phone are cached opponents, never switchable subprofiles.
-- Existing v0.1 `TXP-...` local IDs migrate to deterministic six-digit local IDs without breaking gangs, matches, events, batting order, friends, or history.
-- Provisional no-phone registration with a temporary numeric password and secure later claim; it remains the initial Player-ID login until changed.
-- Email/password, Player ID/password, Google, and credential-gated Facebook authentication; connection, replacement, disconnection, reset, sign-out, and account deletion controls.
-- Friend request, accept/reject, in-app notification, player lookup, and fixed-height searchable player/friend lists.
-- Editable profile with right/left batting, multiple/custom bowling styles, DOB-derived age, bio, place, social links, five original avatars, provider photos, and named private HTTPS avatars with generated IDs.
-- Per-field privacy for email, phone, WhatsApp, and place: only me, all friends, selected friends, everyone except selected, or everyone.
-- Separate Singles and future Team statistics/history sections.
-- Existing Singles scoring: 6/9/12/18/36/custom balls, secret draw, optional ball tracker, direct totals, dismissals, undo/reset, points/runs rankings, history, and PDF scorecard sharing.
-- GitHub Actions checks Functions, analyzes/tests Flutter, generates the launcher icon, and builds a release APK.
+- One Firebase account owns one independent numeric Player ID. Normal account Player IDs can now be reserved directly with secured Firestore transactions on Spark.
+- Exact numeric Player ID search, request sending, outgoing Pending state, incoming notification, accept/reject, accepted friend list, and remove-friend flow.
+- Social sync is intentionally conservative: one refresh on fresh sign-in/app launch, then manual Refresh from Notifications while the app remains open. No continuous listener or polling is required.
+- Temporary players now use a full registration page with name, claim email, Instagram, batting style, and avatar instead of a small dialog. When Firebase is connected, the numeric ID is reserved in Firestore immediately and becomes searchable.
+- Spark claim flow: the player signs in/registers on their own phone with the same email and claims the already-registered numeric Player ID. Firebase Auth owns the password; no password is stored in Firestore.
+- Legacy Player-ID/password backend Functions remain in the source only as optional compatibility for a future backend mode.
+- Editable profile with batting/bowling styles, DOB-derived age, bio, social links, five original avatars, provider photos, private HTTPS avatars, and privacy controls.
+- Existing Singles scoring: 6/9/12/18/36/custom balls, secret draw, optional tracker, direct totals, dismissals, undo/reset, points/runs rankings, history, and sharing.
+- Advanced PDF scorecard with winner hero, player avatar/photo fallback, top-three podium, richer final ranking, match metrics, and official match details.
+- GitHub Actions analyzes/tests Flutter and builds the Android release APK.
 
-Team-match scoring and multi-phone live match scoring remain future phases. Facebook profile links work immediately; Facebook OAuth automatically activates in builds that receive a Facebook App ID and Client Token.
+Team-match scoring and multi-phone live match scoring remain future phases.
+
+## Spark-first Firebase setup
+
+For current testing, deploy only Firestore rules and indexes:
+
+```bash
+npx --yes firebase-tools@latest login
+npx --yes firebase-tools@latest deploy --project YOUR_PROJECT_ID --only "firestore:rules,firestore:indexes"
+```
+
+Then build with Firebase enabled. Email/password, Google/Facebook authentication, normal Player ID creation, exact Player ID search, friend requests, notifications, and accepted-friend synchronization use Firebase Authentication + Firestore.
+
+The `functions/` folder is retained only for optional legacy Player-ID/password login, server-side allocator compatibility, and administrative cleanup. The v0.2.2 temporary-player claim path works directly on Spark using Firebase Auth email identity + Firestore rules. Deploying Functions requires the Firebase project configuration appropriate for Cloud Functions.
 
 ## Run locally
 
@@ -31,34 +42,26 @@ flutter test
 flutter run --dart-define=FIREBASE_ENABLED=true --dart-define=FACEBOOK_ENABLED=false
 ```
 
-Backend checks:
-
-```bash
-cd functions
-npm ci
-npm test
-```
-
-`tool/bootstrap_android.sh` generates the Android shell for `com.texiol.crixx`, installs the supplied Firebase Android config, and sets Android 7.0/API 24 as the minimum. Use `FIREBASE_ENABLED=false` for a fully local scoring build.
-
 ## Build the APK on GitHub
 
 1. Add the source to a GitHub repository.
 2. Create repository Actions secret `GOOGLE_SERVICES_JSON_BASE64` from the complete base64 text of `google-services.json`.
-3. Optional: add `FACEBOOK_APP_ID` and `FACEBOOK_CLIENT_TOKEN` secrets after configuring the Facebook app and Firebase Facebook provider.
+3. Optional: add `FACEBOOK_APP_ID` and `FACEBOOK_CLIENT_TOKEN` after configuring Facebook.
 4. Open **Actions → Build CricXii Android APK → Run workflow**.
 5. Download `CricXii-Android-APK` from the successful run.
-
-The workflow can build an offline APK without the secret. Secure global Player IDs, Player-ID login/claim, cross-phone friends, and notifications additionally require the included Firebase Functions, Firestore rules, and indexes to be deployed; see [Firebase setup](docs/FIREBASE_SETUP.md).
 
 ## Project map
 
 - `lib/domain/` — player, privacy, social, match, and scoring models
 - `lib/data/app_store.dart` — account-scoped local state and Firebase synchronization
-- `lib/screens/` — auth, profile/settings, player management, social, and match flows
-- `functions/` — trusted numeric-ID, password, claim, friend, notification, and deletion services
-- `assets/` — original CricXii app icon and avatar pack
+- `lib/screens/` — auth, registration, profile/settings, social, and match flows
+- `lib/export/scorecard_export.dart` — PDF scorecard generation and sharing
+- `functions/` — optional trusted Player-ID, password, claim, and cleanup services
+- `assets/` — CricXii app icon and avatar pack
 - `test/` — scoring, serialization, profile privacy, and ID-format tests
-- `docs/` — decisions, architecture, setup, and verification handoff
+- `docs/` — architecture, setup, and verification handoff
 
-See [Product plan](docs/PRODUCT_PLAN.md), [Architecture](docs/ARCHITECTURE.md), [Firebase setup](docs/FIREBASE_SETUP.md), and [Verification](docs/VERIFICATION.md).
+
+## Spark build mode
+
+The default GitHub Android workflow builds with `FUNCTIONS_ENABLED=false`. Friend search, friend requests, notifications refresh, account Player-ID reservation and scoring use Firebase Authentication + Firestore directly. The `functions/` folder is retained for an optional future backend upgrade.

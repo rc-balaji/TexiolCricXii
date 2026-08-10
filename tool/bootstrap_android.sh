@@ -28,6 +28,9 @@ fi
 manifest="android/app/src/main/AndroidManifest.xml"
 if [[ -f "$manifest" ]]; then
   sed -i 's/android:label="[^"]*"/android:label="CricXii"/' "$manifest"
+  if ! grep -q 'android.permission.INTERNET' "$manifest"; then
+    sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$manifest"
+  fi
 fi
 
 app_kts="android/app/build.gradle.kts"

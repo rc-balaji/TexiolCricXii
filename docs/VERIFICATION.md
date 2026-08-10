@@ -1,34 +1,27 @@
-# Verification handoff
+# CricXii v0.2.2+5 verification
 
-## Checks completed in this workspace
+This package was prepared as the Spark-first test build.
 
-- Parsed every Dart source/test file with a prebuilt Dart tree-sitter grammar; no syntax errors were reported.
-- Built the TypeScript Functions with `tsc` and ran all numeric-ID allocator tests successfully.
-- Validated `firebase.json` and `firestore.indexes.json` as JSON.
-- Validated `tool/bootstrap_android.sh` with `bash -n`.
-- Verified the app icon is opaque and square, and all five built-in avatars are 512×512 PNG files.
-- Cross-checked every declared direct dependency version against its current pub.dev package page and corrected the Firebase version set before packaging.
-- Removed all user-facing legacy `TXP-...` IDs; the only remaining mention is the documented v0.1 migration.
-- Kept the uploaded Firebase configuration out of the source archive; Actions consumes the encrypted repository secret.
+## Checks completed in this package workspace
 
-## Flutter tests included
+- JSON configuration files parse successfully.
+- GitHub Actions YAML parses successfully.
+- `tool/bootstrap_android.sh` passes `bash -n`.
+- Dart source delimiter/string/comment balance scan passes for all `lib/` and `test/` files.
+- Firestore Rules delimiter/string/comment balance scan passes.
+- Avatar assets exist and are readable PNG images.
+- App icon exists and is a readable PNG image.
+- No `google-services.json`, service-account key, `.pem`, `.p12`, `.jks`, or obvious private-key/client-secret payload is bundled.
+- ZIP integrity is checked after packaging.
 
-- Nine legal balls for the 1.5-over rule; wides do not consume a legal ball.
-- Wicket-based early turn completion and Direct Runs progression.
-- Completed-match undo and every requested dismissal credit.
-- Runs-only ranking and full match JSON round-trip.
-- Six-digit offline ID format.
-- Profile/playing-style/privacy serialization.
-- Public profile exclusion of sensitive contacts and private avatar URLs.
+## Checks delegated to GitHub Actions
 
-## Functions tests included
+The current workspace does not contain a Flutter/Dart SDK, so the authoritative build checks run in `.github/workflows/android.yml` after push:
 
-- IDs grow correctly from 6 to 7, 8, 9, and 10 digits.
-- The billionth allocation is still a digits-only unique sequence value.
-- Reserved allocator blocks do not overlap.
+1. `flutter pub get`
+2. launcher icon generation
+3. `flutter analyze --no-fatal-infos`
+4. `flutter test`
+5. release APK build
 
-## Final CI authority
-
-This workspace does not include Flutter, Dart, Gradle, or an Android SDK, so semantic package analysis, widget/unit execution, launcher generation, and APK compilation are delegated to `.github/workflows/android.yml`. The workflow runs `flutter analyze --no-fatal-infos`, `flutter test`, and `flutter build apk --release`, while a separate job runs `npm ci` and `npm test` for Functions.
-
-Google sign-in requires the console/SHA setup in `FIREBASE_SETUP.md`. Facebook OAuth is implemented but remains build-credential-gated. Firestore rules should also be exercised with the Firebase Emulator Suite before a public production launch.
+The Android workflow is Spark-first and builds with `FUNCTIONS_ENABLED=false`. The legacy `functions/` folder is retained only for a future optional backend upgrade and does not block the APK workflow.

@@ -69,9 +69,12 @@ class AppStore extends ChangeNotifier {
   bool get cloudConnected => firebaseEnabled && firebaseUser != null;
   bool get facebookLoginConfigured =>
       const bool.fromEnvironment('FACEBOOK_ENABLED');
+  bool get functionsBackendEnabled =>
+      const bool.fromEnvironment('FUNCTIONS_ENABLED', defaultValue: false);
   bool get canContinueOffline =>
       activePlayer == null || activePlayer?.accountUid == null;
   bool get hasNumericIdLogin =>
+      functionsBackendEnabled &&
       cloudConnected &&
       (activePlayer?.claimed ?? false) &&
       !(activePlayer?.pendingSync ?? true);
@@ -95,6 +98,32 @@ class AppStore extends ChangeNotifier {
         )
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  List<FriendRequest> get outgoingFriendRequests {
+    final id = activePlayerId;
+    if (id == null) return const [];
+    return friendRequests
+        .where(
+          (request) =>
+              request.fromPlayerId == id &&
+              request.status == FriendRequestStatus.pending,
+        )
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  FriendRequest? pendingRequestWith(String otherPlayerId) {
+    final id = activePlayerId;
+    if (id == null) return null;
+    for (final request in friendRequests) {
+      if (request.status != FriendRequestStatus.pending) continue;
+      final samePair =
+          (request.fromPlayerId == id && request.toPlayerId == otherPlayerId) ||
+          (request.fromPlayerId == otherPlayerId && request.toPlayerId == id);
+      if (samePair) return request;
+    }
+    return null;
   }
 
   List<CricNotification> get activeNotifications {
@@ -189,8 +218,11 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> signInWithPlayerId(String playerId, String password) async {
-    if (!firebaseEnabled || _auth == null || _functions == null) {
-      throw StateError('Player ID login needs the connected Firebase build.');
+    if (!functionsBackendEnabled ||
+        !firebaseEnabled ||
+        _auth == null ||
+        _functions == null) {
+      throw StateError('Player ID login needs the optional Functions backend.');
     }
     final normalized = playerId.trim();
     if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) {
@@ -290,8 +322,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> changePlayerIdPassword(String password) async {
     final player = activePlayer;
-    if (player == null || _functions == null || !cloudConnected) {
-      throw StateError('Connected Player ID account required.');
+    if (!functionsBackendEnabled ||
+        player == null ||
+        _functions == null ||
+        !cloudConnected) {
+      throw StateError('Player ID password needs the optional Functions backend.');
     }
     if (password.length < 8) {
       throw StateError('Use at least 8 characters or digits.');
@@ -303,8 +338,11 @@ class AppStore extends ChangeNotifier {
 
   Future<String> activatePendingPlayerId(String password) async {
     final player = activePlayer;
-    if (player == null || _functions == null || !cloudConnected) {
-      throw StateError('A connected player profile is required.');
+    if (!functionsBackendEnabled ||
+        player == null ||
+        _functions == null ||
+        !cloudConnected) {
+      throw StateError('Player ID activation needs the optional Functions backend.');
     }
     if (password.length < 8) {
       throw StateError('Use at least 8 characters or digits.');
@@ -347,12 +385,83 @@ class AppStore extends ChangeNotifier {
     await auth.sendPasswordResetEmail(email: email.trim());
   }
 
+  Future<void> claimSparkRegisteredPlayer(String playerId) async {
+    final user = firebaseUser;
+    final firestore = _firestore;
+    final email = user?.email?.trim().toLowerCase();
+    final normalized = playerId.trim();
+    if (!cloudConnected || user == null || firestore == null) {
+      throw StateError('Sign in before claiming a registered Player ID.');
+    }
+    if (email == null || email.isEmpty) {
+      throw StateError('Use an email account to claim a registered Player ID.');
+    }
+    if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) {
+      throw StateError('Enter a valid numeric Player ID.');
+    }
+
+    final userRef = firestore.collection('users').doc(user.uid);
+    final playerRef = firestore.collection('players').doc(normalized);
+    final claimRef = firestore.collection('playerClaims').doc(normalized);
+    await firestore.runTransaction((transaction) async {
+      final userSnapshot = await transaction.get(userRef);
+      final playerSnapshot = await transaction.get(playerRef);
+      final claimSnapshot = await transaction.get(claimRef);
+      final mapped = userSnapshot.data()?['playerId']?.toString();
+      if (mapped != null && mapped.isNotEmpty && mapped != normalized) {
+        throw StateError('This login already owns Player ID $mapped.');
+      }
+      final playerData = playerSnapshot.data();
+      if (playerData == null || playerData['claimed'] != false) {
+        throw StateError('This Player ID is not available to claim.');
+      }
+      final claimData = claimSnapshot.data();
+      final claimEmail = claimData?['email']?.toString().trim().toLowerCase();
+      if (claimEmail == null || claimEmail != email) {
+        throw StateError(
+          'Sign in with the same email used when this player was registered.',
+        );
+      }
+      transaction.update(playerRef, {
+        'ownerUid': user.uid,
+        'claimed': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      transaction.set(userRef, {
+        'playerId': normalized,
+        'createdAt': userSnapshot.exists
+            ? userSnapshot.data()?['createdAt'] ?? FieldValue.serverTimestamp()
+            : FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      transaction.delete(claimRef);
+    });
+
+    // Force a fresh public read after ownership changed.
+    final cached = _playerIndex.remove(normalized);
+    if (cached != null) players.remove(cached);
+    final player = await findPublicPlayer(normalized);
+    if (player == null) {
+      throw StateError('Player claimed, but the profile could not be loaded.');
+    }
+    player
+      ..accountUid = user.uid
+      ..claimed = true
+      ..pendingSync = false;
+    activePlayerId = player.id;
+    await _refreshSocialGraph();
+    await _commit();
+  }
+
   Future<void> claimProvisionalPlayer(
     String playerId,
     String temporaryPassword,
   ) async {
-    if (!firebaseEnabled || _auth == null || _functions == null) {
-      throw StateError('Player claiming needs the connected Firebase build.');
+    if (!functionsBackendEnabled ||
+        !firebaseEnabled ||
+        _auth == null ||
+        _functions == null) {
+      throw StateError('Legacy Player-ID claiming needs the optional Functions backend.');
     }
     if (_auth!.currentUser == null) {
       await _auth!.signInAnonymously();
@@ -419,7 +528,7 @@ class AppStore extends ChangeNotifier {
       return;
     }
     var backendDeletedAuth = false;
-    if (_functions != null) {
+    if (functionsBackendEnabled && _functions != null) {
       try {
         await _functions!.httpsCallable('deleteMyAccountData').call();
         backendDeletedAuth = true;
@@ -444,6 +553,7 @@ class AppStore extends ChangeNotifier {
         if (player?.accountUid == user.uid) {
           await firestore.collection('players').doc(player!.id).delete();
         }
+        await firestore.collection('users').doc(user.uid).delete();
       }
       await user.delete();
     }
@@ -549,7 +659,7 @@ class AppStore extends ChangeNotifier {
     }
 
     String? cloudPlayerId;
-    if (cloudConnected && _functions != null) {
+    if (cloudConnected && _functions != null && functionsBackendEnabled) {
       try {
         final result = await _functions!
             .httpsCallable('ensurePlayerProfile')
@@ -564,6 +674,10 @@ class AppStore extends ChangeNotifier {
         if (!_isBackendUnavailable(error)) rethrow;
         // The app remains testable before the optional Functions deployment.
       }
+    }
+
+    if (cloudPlayerId == null && cloudConnected) {
+      cloudPlayerId = await _ensureSparkAccountPlayerId(name.trim());
     }
 
     final id = cloudPlayerId ?? _uniquePlayerId();
@@ -601,7 +715,7 @@ class AppStore extends ChangeNotifier {
     var password = requestedPassword ?? _ids.temporaryPassword();
     String? cloudPlayerId;
 
-    if (cloudConnected && _functions != null) {
+    if (cloudConnected && _functions != null && functionsBackendEnabled) {
       try {
         final result = await _functions!
             .httpsCallable('createProvisionalPlayer')
@@ -617,6 +731,13 @@ class AppStore extends ChangeNotifier {
         if (!_isBackendUnavailable(error)) rethrow;
         // A local provisional profile is clearly marked for later sync.
       }
+    }
+
+    if (cloudPlayerId == null && cloudConnected) {
+      cloudPlayerId = await _reserveSparkProvisionalPlayerId(
+        name.trim(),
+        email: _clean(email),
+      );
     }
 
     final id = cloudPlayerId ?? _uniquePlayerId();
@@ -674,7 +795,16 @@ class AppStore extends ChangeNotifier {
         player.createdByPlayerId == activePlayerId &&
         !player.pendingSync &&
         cloudConnected &&
-        _functions != null) {
+        !functionsBackendEnabled) {
+      await _syncSparkProvisionalProfile(player);
+    }
+    if (player.id != activePlayerId &&
+        player.isProvisional &&
+        player.createdByPlayerId == activePlayerId &&
+        !player.pendingSync &&
+        cloudConnected &&
+        _functions != null &&
+        functionsBackendEnabled) {
       try {
         await _functions!.httpsCallable('updateProvisionalPlayer').call(
           <String, Object?>{
@@ -728,7 +858,25 @@ class AppStore extends ChangeNotifier {
         player.createdByPlayerId == activePlayerId &&
         !player.pendingSync &&
         cloudConnected &&
-        _functions != null) {
+        !functionsBackendEnabled) {
+      try {
+        final firestore = _firestore;
+        if (firestore != null) {
+          final batch = firestore.batch();
+          batch.delete(firestore.collection('players').doc(playerId));
+          batch.delete(firestore.collection('playerClaims').doc(playerId));
+          await batch.commit();
+        }
+      } on FirebaseException {
+        // Local cleanup can still continue if the network is unavailable.
+      }
+    }
+    if (player.isProvisional &&
+        player.createdByPlayerId == activePlayerId &&
+        !player.pendingSync &&
+        cloudConnected &&
+        _functions != null &&
+        functionsBackendEnabled) {
       await _functions!.httpsCallable('deleteProvisionalPlayer').call(
         <String, Object?>{'playerId': playerId},
       );
@@ -761,7 +909,10 @@ class AppStore extends ChangeNotifier {
   Future<void> resetActivePlayerData() async {
     final player = activePlayer;
     if (player == null) return;
-    if (cloudConnected && !player.pendingSync && _functions != null) {
+    if (cloudConnected &&
+        !player.pendingSync &&
+        _functions != null &&
+        functionsBackendEnabled) {
       await _functions!.httpsCallable('resetMyPlayerData').call();
     }
     matches.removeWhere((match) => match.participantIds.contains(player.id));
@@ -862,7 +1013,7 @@ class AppStore extends ChangeNotifier {
   bool areFriends(String firstPlayerId, String secondPlayerId) =>
       playerById(firstPlayerId)?.friendIds.contains(secondPlayerId) ?? false;
 
-  Future<Player?> findPlayer(String playerId) async {
+  Future<Player?> findPublicPlayer(String playerId) async {
     final normalized = playerId.trim();
     if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) return null;
     final cached = playerById(normalized);
@@ -879,6 +1030,23 @@ class AppStore extends ChangeNotifier {
         'createdAt':
             data['joinedAt']?.toString() ?? DateTime.now().toIso8601String(),
       });
+      _addOrReplacePlayer(player);
+      await _persistLocal();
+      notifyListeners();
+      return player;
+    } on FirebaseException {
+      return null;
+    }
+  }
+
+  Future<Player?> findPlayer(String playerId) async {
+    final normalized = playerId.trim();
+    if (!RegExp(r'^\d{6,}$').hasMatch(normalized)) return null;
+    final player = await findPublicPlayer(normalized);
+    if (player == null) return null;
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null) return player;
+    try {
       for (final field in sensitiveProfileFields) {
         try {
           final contact = await firestore
@@ -905,67 +1073,90 @@ class AppStore extends ChangeNotifier {
           // A field hidden by its owner is intentionally unavailable.
         }
       }
-      _addOrReplacePlayer(player);
       await _persistLocal();
       notifyListeners();
       return player;
     } on FirebaseException {
-      return null;
+      return player;
     }
   }
 
-  Future<void> sendFriendRequestTo(String friendId) async {
+  Future<void> sendFriendRequestTo(
+    String friendId, {
+    Player? knownPlayer,
+  }) async {
     final player = activePlayer;
-    final friend = await findPlayer(friendId);
+    final friend = knownPlayer ?? await findPublicPlayer(friendId);
     if (player == null || friend == null || player.id == friendId) {
       throw StateError('Choose another valid numeric Player ID.');
     }
     if (player.friendIds.contains(friendId)) {
       throw StateError('This player is already your friend.');
     }
-    final existing = friendRequests.where(
-      (request) =>
-          request.status == FriendRequestStatus.pending &&
-          ((request.fromPlayerId == player.id &&
-                  request.toPlayerId == friendId) ||
-              (request.fromPlayerId == friendId &&
-                  request.toPlayerId == player.id)),
-    );
-    if (existing.isNotEmpty) {
-      throw StateError('A friend request is already pending.');
+    final existing = pendingRequestWith(friendId);
+    if (existing != null) {
+      if (existing.fromPlayerId == player.id) {
+        throw StateError('Friend request already sent.');
+      }
+      throw StateError('This player has already sent you a request.');
     }
 
-    String? cloudRequestId;
-    if (cloudConnected && _functions != null) {
-      try {
-        final result = await _functions!
-            .httpsCallable('sendFriendRequest')
-            .call(<String, Object?>{'targetPlayerId': friendId});
-        cloudRequestId = (result.data as Map?)?['requestId']?.toString();
-      } on FirebaseFunctionsException catch (error) {
-        if (!_isBackendUnavailable(error)) rethrow;
-        // Keep a local request so the player can continue testing the UX.
+    final user = firebaseUser;
+    final firestore = _firestore;
+    final targetUid = friend.accountUid;
+    String requestId = _friendPairKey(player.id, friendId);
+
+    if (cloudConnected && user != null && firestore != null) {
+      if (targetUid == null || targetUid.isEmpty) {
+        throw StateError(
+          'This Player ID is not connected to an app account yet.',
+        );
       }
+      final requestRef = firestore.collection('friendRequests').doc(requestId);
+      final friendshipRef = firestore.collection('friendships').doc(requestId);
+      final notificationRef = firestore.collection('notifications').doc();
+      await firestore.runTransaction((transaction) async {
+        final requestSnapshot = await transaction.get(requestRef);
+        final friendshipSnapshot = await transaction.get(friendshipRef);
+        if (friendshipSnapshot.exists) {
+          throw StateError('This player is already your friend.');
+        }
+        if (requestSnapshot.exists &&
+            requestSnapshot.data()?['status'] == 'pending') {
+          throw StateError('A friend request is already pending.');
+        }
+        transaction.set(requestRef, {
+          'fromUid': user.uid,
+          'fromPlayerId': player.id,
+          'toUid': targetUid,
+          'toPlayerId': friendId,
+          'status': 'pending',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        transaction.set(notificationRef, {
+          'recipientUid': targetUid,
+          'recipientPlayerId': friendId,
+          'fromUid': user.uid,
+          'fromPlayerId': player.id,
+          'type': 'friendRequest',
+          'requestId': requestId,
+          'read': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      });
     }
-    final request = FriendRequest(
-      id: cloudRequestId ?? _ids.eventId(),
-      fromPlayerId: player.id,
-      toPlayerId: friendId,
-      createdAt: DateTime.now(),
-    );
-    friendRequests.add(request);
-    notifications.add(
-      CricNotification(
-        id: _ids.eventId(),
-        playerId: friendId,
-        type: NotificationType.friendRequest,
-        title: 'New friend request',
-        body: '${player.name} (${player.id}) wants to connect.',
-        referenceId: request.id,
+
+    friendRequests.removeWhere((value) => value.id == requestId);
+    friendRequests.add(
+      FriendRequest(
+        id: requestId,
+        fromPlayerId: player.id,
+        toPlayerId: friendId,
         createdAt: DateTime.now(),
       ),
     );
-    await _commit();
+    await _persistLocal();
+    notifyListeners();
   }
 
   Future<void> respondToFriendRequest(
@@ -983,15 +1174,79 @@ class AppStore extends ChangeNotifier {
       throw StateError('Only the receiving player can respond.');
     }
 
-    if (cloudConnected && _functions != null) {
-      try {
-        await _functions!.httpsCallable('respondFriendRequest').call(
-          <String, Object?>{'requestId': requestId, 'accept': accept},
-        );
-      } on FirebaseFunctionsException catch (error) {
-        if (!_isBackendUnavailable(error)) rethrow;
-        // Local state remains available while the backend is not deployed.
-      }
+    final user = firebaseUser;
+    final firestore = _firestore;
+    if (cloudConnected && user != null && firestore != null) {
+      final requestRef = firestore.collection('friendRequests').doc(requestId);
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(requestRef);
+        final data = snapshot.data();
+        if (!snapshot.exists || data?['status'] != 'pending') {
+          throw StateError('Pending request not found.');
+        }
+        if (data?['toUid'] != user.uid) {
+          throw StateError('Only the receiving player can respond.');
+        }
+        if (accept) {
+          transaction.update(requestRef, {
+            'status': 'accepted',
+            'respondedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.delete(requestRef);
+        }
+        if (accept) {
+          final fromUid = data?['fromUid']?.toString();
+          final fromPlayerId = data?['fromPlayerId']?.toString();
+          final toPlayerId = data?['toPlayerId']?.toString();
+          if (fromUid == null || fromPlayerId == null || toPlayerId == null) {
+            throw StateError('Friend request data is incomplete.');
+          }
+          final pairKey = _friendPairKey(fromPlayerId, toPlayerId);
+          final friendshipRef = firestore.collection('friendships').doc(pairKey);
+          transaction.set(friendshipRef, {
+            'playerIds': [fromPlayerId, toPlayerId],
+            'uids': [fromUid, user.uid],
+            'requestId': requestId,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          transaction.set(
+            firestore
+                .collection('players')
+                .doc(fromPlayerId)
+                .collection('friends')
+                .doc(toPlayerId),
+            {
+              'playerId': toPlayerId,
+              'friendshipId': pairKey,
+              'createdAt': FieldValue.serverTimestamp(),
+            },
+          );
+          transaction.set(
+            firestore
+                .collection('players')
+                .doc(toPlayerId)
+                .collection('friends')
+                .doc(fromPlayerId),
+            {
+              'playerId': fromPlayerId,
+              'friendshipId': pairKey,
+              'createdAt': FieldValue.serverTimestamp(),
+            },
+          );
+          final notificationRef = firestore.collection('notifications').doc();
+          transaction.set(notificationRef, {
+            'recipientUid': fromUid,
+            'recipientPlayerId': fromPlayerId,
+            'fromUid': user.uid,
+            'fromPlayerId': toPlayerId,
+            'type': 'friendAccepted',
+            'requestId': requestId,
+            'read': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
     }
 
     request
@@ -1000,27 +1255,19 @@ class AppStore extends ChangeNotifier {
           : FriendRequestStatus.rejected
       ..respondedAt = DateTime.now();
     if (accept) {
-      final sender = playerById(request.fromPlayerId);
-      final receiver = playerById(request.toPlayerId);
-      if (sender != null && !sender.friendIds.contains(receiver?.id)) {
-        if (receiver != null) sender.friendIds.add(receiver.id);
+      final sender = await findPlayer(request.fromPlayerId);
+      final receiver = activePlayer;
+      if (sender != null && receiver != null) {
+        if (!sender.friendIds.contains(receiver.id)) {
+          sender.friendIds.add(receiver.id);
+        }
+        if (!receiver.friendIds.contains(sender.id)) {
+          receiver.friendIds.add(sender.id);
+        }
       }
-      if (receiver != null && !receiver.friendIds.contains(sender?.id)) {
-        if (sender != null) receiver.friendIds.add(sender.id);
-      }
-      notifications.add(
-        CricNotification(
-          id: _ids.eventId(),
-          playerId: request.fromPlayerId,
-          type: NotificationType.friendAccepted,
-          title: 'Friend request accepted',
-          body: '${receiver?.name ?? request.toPlayerId} is now your friend.',
-          referenceId: request.id,
-          createdAt: DateTime.now(),
-        ),
-      );
     }
-    await _commit();
+    await _persistLocal();
+    notifyListeners();
   }
 
   Future<void> removeFriend(String friendPlayerId) async {
@@ -1028,10 +1275,27 @@ class AppStore extends ChangeNotifier {
     if (player == null || !player.friendIds.contains(friendPlayerId)) {
       throw StateError('Friendship not found.');
     }
-    if (cloudConnected && _functions != null) {
-      await _functions!.httpsCallable('removeFriend').call(
-        <String, Object?>{'friendPlayerId': friendPlayerId},
+    final firestore = _firestore;
+    if (cloudConnected && firestore != null) {
+      final key = _friendPairKey(player.id, friendPlayerId);
+      final batch = firestore.batch();
+      batch.delete(firestore.collection('friendships').doc(key));
+      batch.delete(firestore.collection('friendRequests').doc(key));
+      batch.delete(
+        firestore
+            .collection('players')
+            .doc(player.id)
+            .collection('friends')
+            .doc(friendPlayerId),
       );
+      batch.delete(
+        firestore
+            .collection('players')
+            .doc(friendPlayerId)
+            .collection('friends')
+            .doc(player.id),
+      );
+      await batch.commit();
     }
     player.friendIds.remove(friendPlayerId);
     final friend = playerById(friendPlayerId);
@@ -1047,7 +1311,8 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    await _commit();
+    await _persistLocal();
+    notifyListeners();
   }
 
   Future<void> markNotificationRead(String notificationId) async {
@@ -1056,17 +1321,19 @@ class AppStore extends ChangeNotifier {
         value.read = true;
       }
     }
-    if (cloudConnected && _functions != null) {
+    final firestore = _firestore;
+    if (cloudConnected && firestore != null) {
       try {
-        await _functions!.httpsCallable('markNotificationRead').call(
-          <String, Object?>{'notificationId': notificationId},
-        );
-      } on FirebaseFunctionsException catch (error) {
-        if (!_isBackendUnavailable(error)) rethrow;
-        // The local read state is retained until the backend is reachable.
+        await firestore.collection('notifications').doc(notificationId).update({
+          'read': true,
+          'readAt': FieldValue.serverTimestamp(),
+        });
+      } on FirebaseException {
+        // Keep the local read state; the next manual refresh can retry.
       }
     }
-    await _commit();
+    await _persistLocal();
+    notifyListeners();
   }
 
   Future<CricketMatch> createMatch({
@@ -1503,41 +1770,46 @@ class AppStore extends ChangeNotifier {
             .where('toUid', isEqualTo: user.uid)
             .where('status', isEqualTo: 'pending')
             .orderBy('createdAt', descending: true)
-            .limit(100)
+            .limit(50)
+            .get(),
+        firestore
+            .collection('friendRequests')
+            .where('fromUid', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'pending')
+            .orderBy('createdAt', descending: true)
+            .limit(50)
             .get(),
         firestore
             .collection('notifications')
             .where('recipientUid', isEqualTo: user.uid)
             .orderBy('createdAt', descending: true)
-            .limit(100)
+            .limit(50)
             .get(),
         firestore
             .collection('friendships')
             .where('uids', arrayContains: user.uid)
-            .limit(500)
+            .limit(200)
             .get(),
       ]);
 
-      final requestSnapshot = results[0];
-      final cloudRequestIds = requestSnapshot.docs
-          .map((document) => document.id)
-          .toSet();
+      final incomingSnapshot = results[0];
+      final outgoingSnapshot = results[1];
+      final requestDocuments = [...incomingSnapshot.docs, ...outgoingSnapshot.docs];
+      final cloudPendingIds = requestDocuments.map((document) => document.id).toSet();
       friendRequests.removeWhere(
         (request) =>
-            request.toPlayerId == self.id &&
             request.status == FriendRequestStatus.pending &&
-            request.id.contains('_') &&
-            !cloudRequestIds.contains(request.id),
+            (request.toPlayerId == self.id || request.fromPlayerId == self.id) &&
+            !cloudPendingIds.contains(request.id),
       );
-      for (final document in requestSnapshot.docs) {
+      for (final document in requestDocuments) {
         final data = document.data();
         final fromId = data['fromPlayerId']?.toString();
         final toId = data['toPlayerId']?.toString();
         if (fromId == null || toId == null) continue;
-        await findPlayer(fromId);
-        final existing = friendRequests.where(
-          (value) => value.id == document.id,
-        );
+        final otherId = fromId == self.id ? toId : fromId;
+        await findPublicPlayer(otherId);
+        final existing = friendRequests.where((value) => value.id == document.id);
         if (existing.isEmpty) {
           friendRequests.add(
             FriendRequest(
@@ -1550,22 +1822,18 @@ class AppStore extends ChangeNotifier {
         }
       }
 
-      final notificationSnapshot = results[1];
+      final notificationSnapshot = results[2];
       for (final document in notificationSnapshot.docs) {
         final data = document.data();
-        final existing = notifications.where(
-          (value) => value.id == document.id,
-        );
+        final existing = notifications.where((value) => value.id == document.id);
         if (existing.isNotEmpty) {
           existing.first.read = data['read'] as bool? ?? false;
           continue;
         }
         final typeName = data['type']?.toString() ?? 'system';
         final fromId = data['fromPlayerId']?.toString();
-        final sender = fromId == null ? null : await findPlayer(fromId);
-        final type = NotificationType.values.any(
-          (value) => value.name == typeName,
-        )
+        final sender = fromId == null ? null : await findPublicPlayer(fromId);
+        final type = NotificationType.values.any((value) => value.name == typeName)
             ? NotificationType.values.byName(typeName)
             : NotificationType.system;
         notifications.add(
@@ -1592,15 +1860,13 @@ class AppStore extends ChangeNotifier {
         );
       }
 
-      final friendshipSnapshot = results[2];
+      final friendshipSnapshot = results[3];
       final cloudFriendIds = <String>{};
       for (final document in friendshipSnapshot.docs) {
-        final ids = List<String>.from(
-          document.data()['playerIds'] as List? ?? const [],
-        );
+        final ids = List<String>.from(document.data()['playerIds'] as List? ?? const []);
         for (final id in ids.where((value) => value != self.id)) {
           cloudFriendIds.add(id);
-          await findPlayer(id);
+          await findPublicPlayer(id);
         }
       }
       self.friendIds
@@ -1616,7 +1882,7 @@ class AppStore extends ChangeNotifier {
       await _persistLocal();
       notifyListeners();
     } on FirebaseException {
-      // Offline cache remains usable.
+      // Cached local social data remains usable. Refresh can be retried manually.
     }
   }
 
@@ -1624,6 +1890,146 @@ class AppStore extends ChangeNotifier {
     if (value is Timestamp) return value.toDate();
     if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
     return DateTime.now();
+  }
+
+  String _friendPairKey(String firstPlayerId, String secondPlayerId) {
+    final ids = <String>[firstPlayerId, secondPlayerId]..sort();
+    return '${ids[0]}_${ids[1]}';
+  }
+
+  Future<String> _reserveSparkProvisionalPlayerId(
+    String name, {
+    String? email,
+  }) async {
+    final creator = activePlayer;
+    final user = firebaseUser;
+    final firestore = _firestore;
+    if (creator == null || user == null || firestore == null) {
+      return _uniquePlayerId();
+    }
+    for (var attempt = 0; attempt < 12; attempt++) {
+      final candidate =
+          (10000000 + Random.secure().nextInt(90000000)).toString();
+      final ref = firestore.collection('players').doc(candidate);
+      final claimRef = firestore.collection('playerClaims').doc(candidate);
+      try {
+        await firestore.runTransaction((transaction) async {
+          final collision = await transaction.get(ref);
+          if (collision.exists) throw StateError('Player ID collision');
+          transaction.set(ref, {
+            'playerId': candidate,
+            'ownerUid': null,
+            'createdByUid': user.uid,
+            'createdByPlayerId': creator.id,
+            'name': name,
+            'claimed': false,
+            'archived': false,
+            'joinedAt': DateTime.now().toIso8601String(),
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          final normalizedEmail = email?.trim().toLowerCase();
+          if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
+            transaction.set(claimRef, {
+              'playerId': candidate,
+              'email': normalizedEmail,
+              'createdByUid': user.uid,
+              'createdByPlayerId': creator.id,
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+          }
+        });
+        return candidate;
+      } on StateError {
+        continue;
+      }
+    }
+    throw StateError('Could not reserve a temporary Player ID. Try again.');
+  }
+
+  Future<void> _syncSparkProvisionalProfile(Player player) async {
+    final user = firebaseUser;
+    final creator = activePlayer;
+    final firestore = _firestore;
+    if (user == null || creator == null || firestore == null) return;
+    try {
+      final batch = firestore.batch();
+      batch.set(
+        firestore.collection('players').doc(player.id),
+        {
+          ...player.toPublicJson(),
+          'ownerUid': null,
+          'createdByUid': user.uid,
+          'createdByPlayerId': creator.id,
+          'claimed': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      final email = player.email?.trim().toLowerCase();
+      if (email != null && email.isNotEmpty) {
+        batch.set(
+          firestore.collection('playerClaims').doc(player.id),
+          {
+            'playerId': player.id,
+            'email': email,
+            'createdByUid': user.uid,
+            'createdByPlayerId': creator.id,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
+      await batch.commit();
+    } on FirebaseException {
+      // The registered player remains cached locally and can retry on next edit.
+    }
+  }
+
+  Future<String> _ensureSparkAccountPlayerId(String name) async {
+    final user = firebaseUser;
+    final firestore = _firestore;
+    if (user == null || firestore == null) return _uniquePlayerId();
+    final userRef = firestore.collection('users').doc(user.uid);
+    final existing = await userRef.get();
+    final existingId = existing.data()?['playerId']?.toString();
+    if (existingId != null && RegExp(r'^\d{6,}$').hasMatch(existingId)) {
+      return existingId;
+    }
+
+    for (var attempt = 0; attempt < 12; attempt++) {
+      final candidate = (10000000 + Random.secure().nextInt(90000000)).toString();
+      final playerRef = firestore.collection('players').doc(candidate);
+      try {
+        final reserved = await firestore.runTransaction<String>((transaction) async {
+          final latestUser = await transaction.get(userRef);
+          final mapped = latestUser.data()?['playerId']?.toString();
+          if (mapped != null && RegExp(r'^\d{6,}$').hasMatch(mapped)) {
+            return mapped;
+          }
+          final collision = await transaction.get(playerRef);
+          if (collision.exists) throw StateError('Player ID collision');
+          transaction.set(userRef, {
+            'playerId': candidate,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          transaction.set(playerRef, {
+            'playerId': candidate,
+            'ownerUid': user.uid,
+            'name': name,
+            'claimed': true,
+            'archived': false,
+            'joinedAt': DateTime.now().toIso8601String(),
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          return candidate;
+        });
+        return reserved;
+      } on StateError {
+        continue;
+      }
+    }
+    throw StateError('Could not reserve a unique Player ID. Try again.');
   }
 
   String _uniquePlayerId() {

@@ -310,16 +310,20 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
               subtitle: Text(
-                store.hasNumericIdLogin
-                    ? '${store.activePlayer?.id} • Active'
-                    : '${store.activePlayer?.id} • Activation pending',
+                store.functionsBackendEnabled
+                    ? (store.hasNumericIdLogin
+                          ? '${store.activePlayer?.id} • Backend login active'
+                          : '${store.activePlayer?.id} • Backend login inactive')
+                    : '${store.activePlayer?.id} • Spark profile ID',
               ),
-              trailing: TextButton(
-                onPressed: _busy || !store.hasNumericIdLogin
-                    ? null
-                    : _changeIdPassword,
-                child: const Text('Password'),
-              ),
+              trailing: store.functionsBackendEnabled
+                  ? TextButton(
+                      onPressed: _busy || !store.hasNumericIdLogin
+                          ? null
+                          : _changeIdPassword,
+                      child: const Text('Password'),
+                    )
+                  : null,
             ),
           ),
           _ProviderTile(

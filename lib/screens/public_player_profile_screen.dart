@@ -132,7 +132,7 @@ class PublicPlayerProfileScreen extends StatelessWidget {
                         try {
                           await AppScope.read(
                             context,
-                          ).sendFriendRequestTo(player.id);
+                          ).sendFriendRequestTo(player.id, knownPlayer: player);
                         } on Object catch (error) {
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(

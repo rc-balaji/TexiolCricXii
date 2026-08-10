@@ -16,7 +16,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _instagram = TextEditingController();
-  final _idPassword = TextEditingController();
+  final _claimPlayerId = TextEditingController();
   BattingStyle _battingStyle = BattingStyle.rightHanded;
   bool _busy = false;
 
@@ -25,7 +25,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _name.dispose();
     _email.dispose();
     _instagram.dispose();
-    _idPassword.dispose();
+    _claimPlayerId.dispose();
     super.dispose();
   }
 
@@ -40,7 +40,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         name: _name.text,
         email: _email.text,
         instagramHandle: _instagram.text,
-        idPassword: _idPassword.text,
         claimed: true,
         makeActive: true,
       );
@@ -51,6 +50,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _claimRegisteredPlayer() async {
+    final id = _claimPlayerId.text.trim();
+    if (!RegExp(r'^\d{6,}$').hasMatch(id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid numeric Player ID.')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).claimSparkRegisteredPlayer(id);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -147,20 +168,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         prefixIcon: Icon(Icons.camera_alt_outlined),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _idPassword,
-                      obscureText: true,
-                      keyboardType: TextInputType.visiblePassword,
-                      decoration: const InputDecoration(
-                        labelText: 'Player ID password',
-                        helperText: 'At least 8 characters or digits',
-                        prefixIcon: Icon(Icons.password_rounded),
-                      ),
-                      validator: (value) => value == null || value.length < 8
-                          ? 'Use at least 8 characters or digits'
-                          : null,
-                    ),
                     const SizedBox(height: 14),
                     SegmentedButton<BattingStyle>(
                       showSelectedIcon: false,
@@ -191,6 +198,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                   ],
                 ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Already registered in someone else’s match?',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Signed in as ${AppScope.of(context).cloudEmail ?? 'your email'}. Enter the Player ID registered with this same email.',
+                    style: const TextStyle(color: AppColors.muted, height: 1.4),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _claimPlayerId,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Registered Player ID',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _claimRegisteredPlayer,
+                    icon: const Icon(Icons.verified_user_outlined),
+                    label: const Text('Claim this Player ID'),
+                  ),
+                ],
               ),
             ),
           ),
