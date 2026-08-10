@@ -51,8 +51,12 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED} \
-            --dart-define=FUNCTIONS_ENABLED=false --dart-define=APP_CHECK_ENABLED=false --dart-define=FACEBOOK_ENABLED=${CRICXII_FACEBOOK_ENABLED}
+        run: |
+          flutter build apk --release \
+            --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED} \
+            --dart-define=FUNCTIONS_ENABLED=false \
+            --dart-define=APP_CHECK_ENABLED=false \
+            --dart-define=FACEBOOK_ENABLED=${CRICXII_FACEBOOK_ENABLED}
 
       - name: Name APK
         run: cp build/app/outputs/flutter-apk/app-release.apk CricXii-Android-release.apk

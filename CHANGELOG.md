@@ -1,3 +1,6 @@
+## 0.2.2+7
+- Fixed GitHub Actions release APK command formatting so multiline `--dart-define` arguments are passed to Flutter correctly.
+
 # Changelog
 
 ## 0.2.2+6 — Analyzer fixes
