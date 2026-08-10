@@ -208,7 +208,7 @@ class AppStore extends ChangeNotifier {
   }
 
   String _passwordVerifier(String password, String salt) {
-    var bytes = utf8.encode('$salt:$password');
+    List<int> bytes = utf8.encode('$salt:$password');
     for (var round = 0; round < 12000; round++) {
       bytes = sha256.convert(bytes).bytes;
     }

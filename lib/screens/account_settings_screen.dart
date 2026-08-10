@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/ui_bits.dart';
 
@@ -31,6 +30,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Future<void> _changePassword() async {
+    final store = AppScope.read(context);
     final current = TextEditingController();
     final next = TextEditingController();
     final result = await showDialog<List<String>>(
@@ -69,7 +69,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     next.dispose();
     if (result == null || result.length != 2) return;
     await _run(
-      () => AppScope.read(context).changeAccountPassword(
+      () => store.changeAccountPassword(
         currentPassword: result[0],
         newPassword: result[1],
       ),
@@ -77,6 +77,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Future<void> _reset() async {
+    final store = AppScope.read(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -97,7 +98,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       ),
     );
     if (confirmed == true) {
-      await _run(AppScope.read(context).resetActivePlayerData);
+      await _run(store.resetActivePlayerData);
     }
   }
 
@@ -122,6 +123,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Future<void> _delete() async {
+    final store = AppScope.read(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -144,7 +146,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     if (confirmed != true || _busy) return;
     setState(() => _busy = true);
     try {
-      await AppScope.read(context).deleteMyAccount();
+      await store.deleteMyAccount();
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
