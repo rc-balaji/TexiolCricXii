@@ -1,7 +1,7 @@
 name: crixx
 description: Android-first local cricket scoring for individual singles matches.
 publish_to: "none"
-version: 0.2.2+7
+version: 0.2.2+8
 
 environment:
   sdk: ">=3.7.0 <4.0.0"

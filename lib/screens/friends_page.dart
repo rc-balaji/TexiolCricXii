@@ -127,7 +127,7 @@ class _FriendsPageState extends State<FriendsPage> {
           const ScreenTitle(
             title: 'Friends',
             subtitle:
-                'Search an exact Player ID, send a request, then manage incoming requests from Notifications.',
+                'Add a friend using their exact Player ID. Search first, then send the request from the result card.',
           ),
           const SizedBox(height: 18),
           _FindPlayerCard(
@@ -323,62 +323,74 @@ class _FindPlayerCard extends StatelessWidget {
   final VoidCallback onSearch;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.badge_outlined, color: AppColors.greenDark),
-              SizedBox(width: 8),
-              Text(
-                'Find a player',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-              ),
-            ],
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: const Color(0xFFEAF8F1),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: const Color(0xFFCDE9DB), width: 1.2),
+    ),
+    padding: const EdgeInsets.all(18),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.greenDark,
+            borderRadius: BorderRadius.circular(999),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Exact Player ID search keeps Firestore reads low.',
-            style: TextStyle(color: AppColors.muted),
+          child: const Text(
+            'ADD FRIEND',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+            ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) {
-                    if (!searching) onSearch();
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Player ID',
-                    hintText: 'Example: 18450231',
-                    prefixIcon: Icon(Icons.numbers_rounded),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 54,
-                child: FilledButton(
-                  onPressed: searching ? null : onSearch,
-                  child: searching
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.search_rounded),
-                ),
-              ),
-            ],
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Search Player ID',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 5),
+        const Text(
+          'Ask your friend for their CricXii Player ID and enter the full number below.',
+          style: TextStyle(color: AppColors.muted, height: 1.35),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.search,
+          autofocus: false,
+          onSubmitted: (_) {
+            if (!searching) onSearch();
+          },
+          decoration: const InputDecoration(
+            labelText: 'Enter Player ID',
+            hintText: 'Example: 18450231',
+            prefixIcon: Icon(Icons.person_search_rounded),
+            helperText: 'Exact numeric Player ID',
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: FilledButton.icon(
+            onPressed: searching ? null : onSearch,
+            icon: searching
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.search_rounded),
+            label: Text(searching ? 'Searching...' : 'Search Player'),
+          ),
+        ),
+      ],
     ),
   );
 }

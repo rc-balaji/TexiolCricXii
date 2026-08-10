@@ -1,3 +1,10 @@
+# Changelog
+
+## 0.2.2+8
+- Made Player ID friend search permanently prominent at the top of the Friends tab.
+- Added a full-width Search Player button and clearer Add Friend instructions.
+- Friend request flow remains: exact Player ID search -> result card -> Send Friend Request.
+
 ## 0.2.2+7
 - Fixed GitHub Actions release APK command formatting so multiline `--dart-define` arguments are passed to Flutter correctly.
 
