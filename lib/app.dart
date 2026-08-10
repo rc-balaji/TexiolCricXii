@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_shell.dart';
 import 'screens/auth_screen.dart';
-import 'screens/onboarding_screen.dart';
+import 'screens/home_shell.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_scope.dart';
 
@@ -27,9 +26,9 @@ class _AppGate extends StatelessWidget {
     if (!store.initialized) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (store.requiresAuthentication) return const AuthScreen();
-    return store.activePlayer == null
-        ? const OnboardingScreen()
-        : const HomeShell();
+    if (store.requiresAuthentication || store.activePlayer == null) {
+      return const AuthScreen();
+    }
+    return const HomeShell();
   }
 }

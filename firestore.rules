@@ -6,349 +6,141 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isSelf(userId) {
-      return signedIn() && request.auth.uid == userId;
+    function sessionPath() {
+      return /databases/$(database)/documents/sessions/$(request.auth.uid);
+    }
+
+    function hasSession() {
+      return signedIn() && exists(sessionPath());
     }
 
     function currentPlayerId() {
-      return signedIn() &&
-          exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.playerId
-        : '';
+      return hasSession() ? get(sessionPath()).data.playerId : '';
     }
 
-    function ownsPlayer(playerId) {
-      return signedIn() && currentPlayerId() == playerId;
+    function isCurrentPlayer(playerId) {
+      return currentPlayerId() == playerId;
     }
 
-    function ownsPlayerAfter(playerId) {
-      return signedIn() &&
-        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.playerId == playerId;
+    function areFriends(ownerPlayerId, viewerPlayerId) {
+      return viewerPlayerId != '' &&
+        exists(/databases/$(database)/documents/players/$(ownerPlayerId)/friends/$(viewerPlayerId));
     }
 
-
-    function validProvisionalPlayerCreate(playerId) {
-      return signedIn() &&
-        currentPlayerId() != '' &&
-        request.resource.data.playerId == playerId &&
-        request.resource.data.ownerUid == null &&
-        request.resource.data.createdByUid == request.auth.uid &&
-        request.resource.data.createdByPlayerId == currentPlayerId() &&
-        request.resource.data.claimed == false;
-    }
-
-    function validProvisionalPlayerUpdate(playerId) {
-      return signedIn() &&
-        resource.data.ownerUid == null &&
-        resource.data.createdByUid == request.auth.uid &&
-        resource.data.createdByPlayerId == currentPlayerId() &&
-        resource.data.claimed == false &&
-        request.resource.data.playerId == playerId &&
-        request.resource.data.ownerUid == null &&
-        request.resource.data.createdByUid == resource.data.createdByUid &&
-        request.resource.data.createdByPlayerId == resource.data.createdByPlayerId &&
-        request.resource.data.claimed == false;
-    }
-
-    function validProvisionalClaim(playerId) {
-      let claim = get(/databases/$(database)/documents/playerClaims/$(playerId));
-      return signedIn() &&
-        request.auth.token.email is string &&
-        resource.data.playerId == playerId &&
-        resource.data.ownerUid == null &&
-        resource.data.claimed == false &&
-        claim.data.email == request.auth.token.email.lower() &&
-        request.resource.data.ownerUid == request.auth.uid &&
-        request.resource.data.claimed == true &&
-        request.resource.data.playerId == resource.data.playerId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'ownerUid', 'claimed', 'updatedAt'
-        ]);
-    }
-
-    function requestParticipant() {
-      return signedIn() &&
-        (resource.data.fromUid == request.auth.uid ||
-          resource.data.toUid == request.auth.uid);
-    }
-
-    function isPlayerFriend(ownerPlayerId) {
-      return currentPlayerId() != '' &&
-        exists(/databases/$(database)/documents/players/$(ownerPlayerId)/friends/$(currentPlayerId()));
-    }
-
-    function canReadContact(ownerPlayerId) {
-      return signedIn() &&
-        (resource.data.ownerUid == request.auth.uid ||
-          resource.data.visibility == 'everyone' ||
-          (resource.data.visibility == 'friends' && isPlayerFriend(ownerPlayerId)) ||
-          (resource.data.visibility == 'selectedFriends' &&
-            isPlayerFriend(ownerPlayerId) &&
-            currentPlayerId() in resource.data.audienceIds) ||
-          (resource.data.visibility == 'everyoneExceptSelected' &&
-            !(currentPlayerId() in resource.data.audienceIds)));
-    }
-
-    function validFriendRequestCreate() {
-      return signedIn() &&
-        request.resource.data.fromUid == request.auth.uid &&
-        request.resource.data.fromPlayerId == currentPlayerId() &&
-        get(/databases/$(database)/documents/players/$(request.resource.data.fromPlayerId)).data.ownerUid == request.auth.uid &&
-        request.resource.data.toUid is string &&
-        request.resource.data.toPlayerId is string &&
-        request.resource.data.status == 'pending' &&
-        request.resource.data.fromPlayerId != request.resource.data.toPlayerId &&
-        get(/databases/$(database)/documents/players/$(request.resource.data.toPlayerId)).data.ownerUid == request.resource.data.toUid;
-    }
-
-    function validFriendRequestResponse() {
-      return signedIn() &&
-        resource.data.toUid == request.auth.uid &&
-        resource.data.status == 'pending' &&
-        request.resource.data.fromUid == resource.data.fromUid &&
-        request.resource.data.toUid == resource.data.toUid &&
-        request.resource.data.fromPlayerId == resource.data.fromPlayerId &&
-        request.resource.data.toPlayerId == resource.data.toPlayerId &&
-        request.resource.data.status in ['accepted', 'rejected'] &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'respondedAt'
-        ]);
-    }
-
-    function validFriendshipCreate() {
-      let friendRequest = getAfter(
-        /databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)
-      );
-      return signedIn() &&
-        request.resource.data.requestId is string &&
-        request.resource.data.uids is list &&
-        request.resource.data.playerIds is list &&
-        request.resource.data.uids.size() == 2 &&
-        request.resource.data.playerIds.size() == 2 &&
-        request.auth.uid in request.resource.data.uids &&
-        friendRequest.data.status == 'accepted' &&
-        friendRequest.data.toUid == request.auth.uid &&
-        friendRequest.data.fromUid in request.resource.data.uids &&
-        friendRequest.data.toUid in request.resource.data.uids &&
-        friendRequest.data.fromPlayerId in request.resource.data.playerIds &&
-        friendRequest.data.toPlayerId in request.resource.data.playerIds;
-    }
-
-    function validFriendDocumentCreate(playerId, friendPlayerId) {
-      let friendship = getAfter(
-        /databases/$(database)/documents/friendships/$(request.resource.data.friendshipId)
-      );
-      return signedIn() &&
-        request.resource.data.friendshipId is string &&
-        request.resource.data.playerId == friendPlayerId &&
-        request.auth.uid in friendship.data.uids &&
-        playerId in friendship.data.playerIds &&
-        friendPlayerId in friendship.data.playerIds;
-    }
-
-    function validNotificationCreate() {
-      let friendRequest = getAfter(
-        /databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)
-      );
-      return signedIn() &&
-        request.resource.data.requestId is string &&
-        request.resource.data.recipientUid is string &&
-        request.resource.data.recipientPlayerId is string &&
-        request.resource.data.fromUid == request.auth.uid &&
-        request.resource.data.fromPlayerId == currentPlayerId() &&
-        request.resource.data.read == false &&
-        (
-          (request.resource.data.type == 'friendRequest' &&
-            friendRequest.data.status == 'pending' &&
-            friendRequest.data.fromUid == request.auth.uid &&
-            friendRequest.data.fromPlayerId == currentPlayerId() &&
-            friendRequest.data.toUid == request.resource.data.recipientUid &&
-            friendRequest.data.toPlayerId == request.resource.data.recipientPlayerId) ||
-          (request.resource.data.type == 'friendAccepted' &&
-            friendRequest.data.status == 'accepted' &&
-            friendRequest.data.toUid == request.auth.uid &&
-            friendRequest.data.toPlayerId == currentPlayerId() &&
-            friendRequest.data.fromUid == request.resource.data.recipientUid &&
-            friendRequest.data.fromPlayerId == request.resource.data.recipientPlayerId)
-        );
-    }
-
-    // Spark-first one-account -> one-numeric-Player-ID mapping.
-    match /users/{userId} {
-      allow read: if isSelf(userId);
-      allow create: if isSelf(userId) &&
+    // Anonymous Firebase identity is only a transport/session layer.
+    match /sessions/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() &&
+        request.auth.uid == uid &&
         request.resource.data.playerId is string &&
-        request.resource.data.playerId.matches('^[0-9]{6,}$') &&
-        getAfter(/databases/$(database)/documents/players/$(request.resource.data.playerId)).data.ownerUid == request.auth.uid;
-      allow update: if isSelf(userId) &&
-        request.resource.data.playerId == resource.data.playerId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']);
-      allow delete: if isSelf(userId);
-
-      match /private/{document=**} {
-        allow read, write: if isSelf(userId);
-      }
+        request.resource.data.playerId.matches('^[0-9]{8}$') &&
+        exists(/databases/$(database)/documents/players/$(request.resource.data.playerId));
+      allow delete: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
     }
 
-    // Public cricket profile. Sensitive contacts remain in contactFields.
+    // Spark prototype custom credentials. Exact-document GET only; never list/query.
+    // Passwords are not stored in plain text. See SECURITY-NOTE.md for limitations.
+    match /loginCredentials/{emailKey} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() &&
+        request.resource.data.email is string &&
+        request.resource.data.playerId is string &&
+        request.resource.data.playerId.matches('^[0-9]{8}$') &&
+        request.resource.data.passwordSalt is string &&
+        request.resource.data.passwordVerifier is string;
+      allow update, delete: if signedIn() &&
+        currentPlayerId() == resource.data.playerId;
+    }
+
+    match /accountStates/{playerId} {
+      allow read, write: if signedIn() && isCurrentPlayer(playerId);
+    }
+
+    // Public player search is exact numeric-ID lookup.
     match /players/{playerId} {
-      allow read: if signedIn();
-      allow create: if
-        (signedIn() &&
-          ownsPlayerAfter(playerId) &&
-          request.resource.data.ownerUid == request.auth.uid &&
-          request.resource.data.playerId == playerId) ||
-        validProvisionalPlayerCreate(playerId);
-      allow update: if
-        (signedIn() &&
-          ownsPlayer(playerId) &&
-          resource.data.ownerUid == request.auth.uid &&
-          request.resource.data.ownerUid == resource.data.ownerUid &&
-          request.resource.data.playerId == resource.data.playerId) ||
-        validProvisionalPlayerUpdate(playerId) ||
-        validProvisionalClaim(playerId);
-      allow delete: if
-        (signedIn() &&
-          ownsPlayer(playerId) &&
-          resource.data.ownerUid == request.auth.uid) ||
-        (signedIn() &&
-          resource.data.ownerUid == null &&
-          resource.data.createdByUid == request.auth.uid &&
-          resource.data.createdByPlayerId == currentPlayerId());
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() &&
+        request.resource.data.playerId == playerId &&
+        playerId.matches('^[0-9]{8}$');
+      allow update, delete: if signedIn() && isCurrentPlayer(playerId);
 
       match /contactFields/{field} {
-        allow get: if canReadContact(playerId);
+        allow get: if signedIn() && (
+          isCurrentPlayer(playerId) ||
+          resource.data.visibility == 'everyone' ||
+          (resource.data.visibility == 'friends' &&
+            areFriends(playerId, currentPlayerId())) ||
+          (resource.data.visibility == 'selectedFriends' &&
+            areFriends(playerId, currentPlayerId()) &&
+            currentPlayerId() in resource.data.audienceIds) ||
+          (resource.data.visibility == 'everyoneExceptSelected' &&
+            !(currentPlayerId() in resource.data.audienceIds))
+        );
         allow list: if false;
-        allow create: if signedIn() &&
-          ownsPlayer(playerId) &&
-          request.resource.data.ownerUid == request.auth.uid &&
-          request.resource.data.ownerPlayerId == playerId;
-        allow update: if signedIn() &&
-          ownsPlayer(playerId) &&
-          resource.data.ownerUid == request.auth.uid &&
-          resource.data.ownerPlayerId == playerId &&
-          request.resource.data.ownerUid == resource.data.ownerUid &&
-          request.resource.data.ownerPlayerId == resource.data.ownerPlayerId;
-        allow delete: if signedIn() &&
-          ownsPlayer(playerId) &&
-          resource.data.ownerUid == request.auth.uid &&
-          resource.data.ownerPlayerId == playerId;
+        allow create, update, delete: if signedIn() && isCurrentPlayer(playerId);
       }
 
       match /friends/{friendPlayerId} {
-        allow read: if signedIn() &&
-          (playerId == currentPlayerId() || friendPlayerId == currentPlayerId());
-        allow create: if validFriendDocumentCreate(playerId, friendPlayerId);
+        allow read: if signedIn() && isCurrentPlayer(playerId);
+        allow create: if signedIn() &&
+          (isCurrentPlayer(playerId) || isCurrentPlayer(friendPlayerId)) &&
+          request.resource.data.playerId == friendPlayerId;
         allow delete: if signedIn() &&
-          (playerId == currentPlayerId() || friendPlayerId == currentPlayerId());
+          (isCurrentPlayer(playerId) || isCurrentPlayer(friendPlayerId));
         allow update: if false;
       }
     }
 
-    // Private claim handoff for a Spark-registered temporary player.
-    match /playerClaims/{playerId} {
-      allow create: if signedIn() &&
-        currentPlayerId() != '' &&
-        request.resource.data.playerId == playerId &&
-        request.resource.data.email is string &&
-        request.resource.data.email == request.resource.data.email.lower() &&
-        request.resource.data.createdByUid == request.auth.uid &&
-        request.resource.data.createdByPlayerId == currentPlayerId() &&
-        getAfter(/databases/$(database)/documents/players/$(playerId)).data.ownerUid == null &&
-        getAfter(/databases/$(database)/documents/players/$(playerId)).data.createdByUid == request.auth.uid;
-      allow read: if signedIn() &&
-        (resource.data.createdByUid == request.auth.uid ||
-          (request.auth.token.email is string &&
-            resource.data.email == request.auth.token.email.lower()));
-      allow delete: if signedIn() &&
-        (resource.data.createdByUid == request.auth.uid ||
-          (request.auth.token.email is string &&
-            resource.data.email == request.auth.token.email.lower()));
-      allow update: if signedIn() &&
-        resource.data.createdByUid == request.auth.uid &&
-        request.resource.data.playerId == resource.data.playerId &&
-        request.resource.data.createdByUid == resource.data.createdByUid &&
-        request.resource.data.createdByPlayerId == resource.data.createdByPlayerId &&
-        request.resource.data.email is string &&
-        request.resource.data.email == request.resource.data.email.lower() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'email', 'updatedAt'
-        ]);
-    }
-
     match /friendRequests/{requestId} {
-      allow read: if requestParticipant();
-      allow create: if validFriendRequestCreate();
-      allow update: if validFriendRequestResponse();
-      allow delete: if signedIn() &&
-        requestParticipant() &&
-        (resource.data.status == 'accepted' ||
-          (resource.data.status == 'pending' && resource.data.toUid == request.auth.uid));
-    }
-
-    match /friendships/{friendshipId} {
-      allow read: if signedIn() && request.auth.uid in resource.data.uids;
-      allow create: if validFriendshipCreate();
-      allow delete: if signedIn() && request.auth.uid in resource.data.uids;
+      allow read: if signedIn() &&
+        (resource.data.fromPlayerId == currentPlayerId() ||
+          resource.data.toPlayerId == currentPlayerId());
+      allow create: if signedIn() &&
+        request.resource.data.fromPlayerId == currentPlayerId() &&
+        request.resource.data.toPlayerId is string &&
+        request.resource.data.fromPlayerId != request.resource.data.toPlayerId &&
+        request.resource.data.status == 'pending';
       allow update: if false;
+      allow delete: if signedIn() &&
+        resource.data.status == 'pending' &&
+        (resource.data.fromPlayerId == currentPlayerId() ||
+          resource.data.toPlayerId == currentPlayerId());
     }
 
     match /notifications/{notificationId} {
-      allow read: if signedIn() && resource.data.recipientUid == request.auth.uid;
-      allow create: if validNotificationCreate();
+      allow read: if signedIn() &&
+        resource.data.recipientPlayerId == currentPlayerId();
+      allow create: if signedIn() &&
+        request.resource.data.fromPlayerId == currentPlayerId() &&
+        request.resource.data.recipientPlayerId is string &&
+        request.resource.data.read == false;
       allow update: if signedIn() &&
-        resource.data.recipientUid == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
-      allow delete: if signedIn() && resource.data.recipientUid == request.auth.uid;
+        resource.data.recipientPlayerId == currentPlayerId() &&
+        request.resource.data.recipientPlayerId == resource.data.recipientPlayerId &&
+        request.resource.data.fromPlayerId == resource.data.fromPlayerId &&
+        request.resource.data.type == resource.data.type &&
+        request.resource.data.requestId == resource.data.requestId;
+      allow delete: if signedIn() &&
+        resource.data.recipientPlayerId == currentPlayerId();
     }
 
+    // These remain available for the existing cricket features. The private
+    // account state is still protected by accountStates/{playerId}.
     match /gangs/{gangId} {
-      allow read: if signedIn();
-      allow create: if signedIn() &&
-        request.resource.data.leaderUid == request.auth.uid;
-      allow update: if signedIn() &&
-        (resource.data.leaderUid == request.auth.uid ||
-          request.auth.uid in resource.data.coLeaderUids) &&
-        request.resource.data.leaderUid is string;
-      allow delete: if signedIn() &&
-        resource.data.leaderUid == request.auth.uid;
+      allow read, write: if hasSession();
     }
 
     match /matches/{matchId} {
-      allow get: if signedIn();
-      allow list: if signedIn() &&
-        (resource.data.creatorUid == request.auth.uid ||
-          request.auth.uid in resource.data.participantUids);
-      allow create: if signedIn() &&
-        request.resource.data.creatorUid == request.auth.uid;
-      allow update: if signedIn() &&
-        (resource.data.creatorUid == request.auth.uid ||
-          resource.data.trackerUid == request.auth.uid) &&
-        request.resource.data.creatorUid == resource.data.creatorUid;
-      allow delete: if signedIn() &&
-        resource.data.creatorUid == request.auth.uid;
-
+      allow read, write: if hasSession();
       match /events/{eventId} {
-        allow read: if signedIn() &&
-          (get(/databases/$(database)/documents/matches/$(matchId)).data.creatorUid == request.auth.uid ||
-            request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.participantUids);
-        allow create, update, delete: if signedIn() &&
-          (get(/databases/$(database)/documents/matches/$(matchId)).data.creatorUid == request.auth.uid ||
-            get(/databases/$(database)/documents/matches/$(matchId)).data.trackerUid == request.auth.uid);
+        allow read, write: if hasSession();
       }
     }
 
-    // Optional Blaze/Functions compatibility. Client access remains blocked.
-    match /playerIds/{document=**} {
-      allow read, write: if false;
-    }
-    match /loginSecrets/{document=**} {
-      allow read, write: if false;
-    }
-    match /loginRateLimits/{document=**} {
-      allow read, write: if false;
-    }
-    match /system/{document=**} {
+    match /{document=**} {
       allow read, write: if false;
     }
   }

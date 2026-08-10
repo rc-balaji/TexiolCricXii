@@ -1,6 +1,6 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../domain/enums.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 
@@ -13,17 +13,19 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailOrId = TextEditingController();
+  final _name = TextEditingController();
+  final _email = TextEditingController();
   final _password = TextEditingController();
-  int _mode = 0;
+  BattingStyle _battingStyle = BattingStyle.rightHanded;
+  int _avatarPreset = 1;
+  bool _registering = false;
   bool _busy = false;
   bool _hidePassword = true;
 
-  bool get _creating => _mode == 1;
-
   @override
   void dispose() {
-    _emailOrId.dispose();
+    _name.dispose();
+    _email.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -33,58 +35,32 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _busy = true);
     try {
       final store = AppScope.read(context);
-      if (_creating) {
-        await store.signUpWithEmail(_emailOrId.text, _password.text);
+      if (_registering) {
+        await store.registerAccount(
+          name: _name.text,
+          email: _email.text,
+          password: _password.text,
+          battingStyle: _battingStyle,
+          avatarPreset: _avatarPreset,
+        );
       } else {
-        await store.signInWithEmail(_emailOrId.text, _password.text);
+        await store.signInWithEmail(_email.text, _password.text);
       }
-    } on FirebaseAuthException catch (error) {
-      if (mounted) _showError(_messageFor(error.code));
     } on Object catch (error) {
-      if (mounted) _showError('$error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_cleanError(error))),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _google() async {
-    setState(() => _busy = true);
-    try {
-      await AppScope.read(context).signInWithGoogle();
-    } on Object catch (error) {
-      if (mounted) _showError('$error');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  String _cleanError(Object error) {
+    final text = '$error';
+    return text.startsWith('Bad state: ') ? text.substring(11) : text;
   }
-
-  Future<void> _facebook() async {
-    setState(() => _busy = true);
-    try {
-      await AppScope.read(context).signInWithFacebook();
-    } on Object catch (error) {
-      if (mounted) _showError('$error');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  String _messageFor(String code) => switch (code) {
-    'invalid-email' => 'Enter a valid email address.',
-    'invalid-credential' => 'Email or password is incorrect.',
-    'email-already-in-use' => 'An account already uses this email.',
-    'credential-already-in-use' =>
-      'This Google/Facebook account is connected to another Player ID.',
-    'weak-password' => 'Use a stronger password with at least 8 characters.',
-    'network-request-failed' => 'No internet. Continue offline or try again.',
-    _ => 'Firebase sign-in failed ($code).',
-  };
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -133,9 +109,9 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 34),
+          const SizedBox(height: 30),
           Text(
-            _creating ? 'Create your account.' : 'Welcome back.',
+            _registering ? 'Create your player.' : 'Welcome back.',
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
               fontWeight: FontWeight.w900,
               color: AppColors.ink,
@@ -143,23 +119,25 @@ class _AuthScreenState extends State<AuthScreen> {
               letterSpacing: -1.7,
             ),
           ),
-          const SizedBox(height: 10),
-          const Text(
-            'Use email and password, Google, or Facebook. One login opens one independent player account.',
-            style: TextStyle(color: AppColors.muted, height: 1.45),
+          const SizedBox(height: 9),
+          Text(
+            _registering
+                ? 'Name, email and password create one permanent CricXii Player ID. Sign in later with the same email and password.'
+                : 'Sign in with the email and password used when this Player ID was created.',
+            style: const TextStyle(color: AppColors.muted, height: 1.45),
           ),
-          const SizedBox(height: 24),
-          SegmentedButton<int>(
+          const SizedBox(height: 22),
+          SegmentedButton<bool>(
             showSelectedIcon: false,
             segments: const [
-              ButtonSegment(value: 0, label: Text('Sign in')),
-              ButtonSegment(value: 1, label: Text('Register')),
+              ButtonSegment(value: false, label: Text('Sign in')),
+              ButtonSegment(value: true, label: Text('Register')),
             ],
-            selected: {_mode},
+            selected: {_registering},
             onSelectionChanged: _busy
                 ? null
                 : (value) => setState(() {
-                    _mode = value.single;
+                    _registering = value.single;
                     _formKey.currentState?.reset();
                   }),
           ),
@@ -168,22 +146,40 @@ class _AuthScreenState extends State<AuthScreen> {
             key: _formKey,
             child: Column(
               children: [
+                if (_registering) ...[
+                  TextFormField(
+                    controller: _name,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Player name',
+                      prefixIcon: Icon(Icons.person_outline_rounded),
+                    ),
+                    validator: (value) => value == null || value.trim().length < 2
+                        ? 'Enter the player name'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextFormField(
-                  controller: _emailOrId,
+                  controller: _email,
                   keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [AutofillHints.email],
                   decoration: const InputDecoration(
                     labelText: 'Email',
-                    prefixIcon: Icon(Icons.alternate_email),
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
                   ),
                   validator: (value) {
                     final text = value?.trim() ?? '';
-                    return text.contains('@') ? null : 'Enter your email';
+                    return text.contains('@') ? null : 'Enter a valid email';
                   },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _password,
                   obscureText: _hidePassword,
+                  autofillHints: _registering
+                      ? const [AutofillHints.newPassword]
+                      : const [AutofillHints.password],
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline_rounded),
@@ -198,58 +194,110 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                   validator: (value) => value == null || value.length < 8
-                      ? 'Use at least 8 characters or digits'
+                      ? 'Use at least 8 characters'
                       : null,
                   onFieldSubmitted: (_) {
-                    if (!_busy) _submit();
+                    if (!_registering && !_busy) _submit();
                   },
                 ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _submit,
-                  icon: _busy
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          _creating
-                              ? Icons.person_add_alt_1_rounded
-                              : Icons.login_rounded,
+                if (_registering) ...[
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<BattingStyle>(
+                    value: _battingStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Batting style',
+                      prefixIcon: Icon(Icons.sports_cricket_rounded),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: BattingStyle.rightHanded,
+                        child: Text('Right handed'),
+                      ),
+                      DropdownMenuItem(
+                        value: BattingStyle.leftHanded,
+                        child: Text('Left handed'),
+                      ),
+                    ],
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(
+                            () => _battingStyle =
+                                value ?? BattingStyle.rightHanded,
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Choose avatar',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 9,
+                    runSpacing: 9,
+                    children: List.generate(5, (index) {
+                      final preset = index + 1;
+                      final selected = preset == _avatarPreset;
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: _busy
+                            ? null
+                            : () => setState(() => _avatarPreset = preset),
+                        child: Container(
+                          width: 58,
+                          height: 58,
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected
+                                  ? AppColors.greenDark
+                                  : const Color(0xFFDCE5E0),
+                              width: selected ? 3 : 1,
+                            ),
+                          ),
+                          child: ClipOval(
+                            child: Image.asset(
+                              'assets/avatars/avatar_$preset.png',
+                              fit: BoxFit.cover,
+                            ),
+                          ),
                         ),
-                  label: Text(_creating ? 'Register & continue' : 'Sign in'),
+                      );
+                    }),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _submit,
+                    icon: _busy
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            _registering
+                                ? Icons.person_add_alt_1_rounded
+                                : Icons.login_rounded,
+                          ),
+                    label: Text(
+                      _busy
+                          ? 'Please wait...'
+                          : _registering
+                          ? 'Create account'
+                          : 'Sign in',
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _google,
-            icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-            label: const Text('Continue with Google'),
-          ),
-          if (AppScope.of(context).facebookLoginConfigured)
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _facebook,
-              icon: const Icon(Icons.facebook_rounded),
-              label: const Text('Continue with Facebook'),
-            ),
-          const SizedBox(height: 8),
-          if (AppScope.of(context).canContinueOffline)
-            OutlinedButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => AppScope.read(context).continueOffline(),
-              icon: const Icon(Icons.signal_wifi_off_rounded),
-              label: const Text('Continue offline on this phone'),
-            ),
-          const SizedBox(height: 16),
-          Text(
-            AppScope.of(context).facebookLoginConfigured
-                ? 'Email, Google and Facebook are supported. Registered temporary players are claimed after sign-in using their Player ID.'
-                : 'Facebook login becomes available after its App ID and Client Token are added to the build.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
         ],
       ),

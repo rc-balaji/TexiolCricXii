@@ -50,6 +50,7 @@ class CricNotification {
     required this.createdAt,
     this.referenceId,
     this.read = false,
+    this.actionStatus,
   });
 
   final String id;
@@ -60,6 +61,7 @@ class CricNotification {
   final String? referenceId;
   final DateTime createdAt;
   bool read;
+  String? actionStatus;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -70,6 +72,7 @@ class CricNotification {
     'referenceId': referenceId,
     'createdAt': createdAt.toIso8601String(),
     'read': read,
+    'actionStatus': actionStatus,
   };
 
   factory CricNotification.fromJson(Map<String, dynamic> json) =>
@@ -84,5 +87,6 @@ class CricNotification {
         referenceId: json['referenceId'] as String?,
         createdAt: DateTime.parse(json['createdAt'] as String),
         read: json['read'] as bool? ?? false,
+        actionStatus: json['actionStatus'] as String?,
       );
 }

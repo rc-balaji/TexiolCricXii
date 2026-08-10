@@ -7,11 +7,11 @@ import 'package:crixx/domain/player.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('offline fallback Player IDs contain exactly six digits', () {
+  test('fresh account Player IDs contain exactly eight digits', () {
     final generator = IdGenerator(Random(42));
     final ids = List.generate(1000, (_) => generator.playerId());
 
-    expect(ids.every((value) => RegExp(r'^\d{6}$').hasMatch(value)), isTrue);
+    expect(ids.every((value) => RegExp(r'^\d{8}$').hasMatch(value)), isTrue);
   });
 
   test('profile JSON preserves playing styles, privacy and public age', () {
@@ -21,16 +21,14 @@ void main() {
       avatarColor: 0xFF19C37D,
       createdAt: DateTime.utc(2026, 8, 9),
       publicAge: 24,
-      email: 'private@example.com',
       phoneNumber: '9876543210',
       battingStyle: BattingStyle.leftHanded,
       bowlingStyles: ['Leg spin', 'Right-arm medium'],
       contactVisibility: {
-        'email': ProfileVisibility.selectedFriends,
-        'phone': ProfileVisibility.friends,
+        'phone': ProfileVisibility.selectedFriends,
       },
       contactAudienceIds: {
-        'email': ['100246'],
+        'phone': ['100246'],
       },
     );
 
@@ -45,7 +43,7 @@ void main() {
     expect(restored.bowlingStyles, contains('Leg spin'));
     expect(
       restored.canViewField(
-        'email',
+        'phone',
         viewerPlayerId: '100246',
         areFriends: true,
       ),
@@ -53,7 +51,7 @@ void main() {
     );
     expect(
       restored.canViewField(
-        'email',
+        'phone',
         viewerPlayerId: '100247',
         areFriends: true,
       ),
@@ -61,7 +59,7 @@ void main() {
     );
     expect(
       restored.canViewField(
-        'email',
+        'phone',
         viewerPlayerId: '100246',
         areFriends: false,
       ),
@@ -75,7 +73,6 @@ void main() {
       name: 'Dinesh',
       avatarColor: 0xFF19C37D,
       createdAt: DateTime.utc(2026, 8, 9),
-      email: 'private@example.com',
       phoneNumber: '9876543210',
       avatarSource: AvatarSource.customUrl,
       avatarUrl: 'https://example.com/private-avatar.png',
@@ -90,7 +87,6 @@ void main() {
     );
 
     final public = player.toPublicJson();
-    expect(public.containsKey('email'), isFalse);
     expect(public.containsKey('phoneNumber'), isFalse);
     expect(public.containsKey('privateAvatars'), isFalse);
     expect(public['avatarUrl'], isNull);

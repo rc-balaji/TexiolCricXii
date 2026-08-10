@@ -109,7 +109,6 @@ const builtInBowlingStyles = <String>[
 ];
 
 const sensitiveProfileFields = <String>[
-  'email',
   'phone',
   'whatsapp',
   'location',
@@ -121,9 +120,6 @@ class Player {
     required this.name,
     required this.avatarColor,
     required this.createdAt,
-    this.accountUid,
-    this.createdByPlayerId,
-    this.email,
     this.phoneNumber,
     this.whatsappNumber,
     this.location,
@@ -138,22 +134,16 @@ class Player {
     this.avatarSource = AvatarSource.preset,
     this.avatarPreset = 1,
     this.avatarUrl,
-    Map<String, String>? providerPhotoUrls,
     List<PrivateAvatar>? privateAvatars,
     Map<String, ProfileVisibility>? contactVisibility,
     Map<String, List<String>>? contactAudienceIds,
-    this.claimSecretHash,
-    this.claimSecretSalt,
-    this.claimed = false,
     this.archived = false,
-    this.pendingSync = false,
     this.gangId,
     this.gangRole,
     List<String>? friendIds,
     PlayerStats? stats,
     PlayerStats? teamStats,
   }) : bowlingStyles = bowlingStyles ?? <String>['Right-arm medium'],
-       providerPhotoUrls = providerPhotoUrls ?? <String, String>{},
        privateAvatars = privateAvatars ?? <PrivateAvatar>[],
        contactVisibility = contactVisibility ??
            <String, ProfileVisibility>{
@@ -167,9 +157,6 @@ class Player {
 
   final String id;
   String name;
-  String? accountUid;
-  String? createdByPlayerId;
-  String? email;
   String? phoneNumber;
   String? whatsappNumber;
   String? location;
@@ -184,24 +171,17 @@ class Player {
   AvatarSource avatarSource;
   int avatarPreset;
   String? avatarUrl;
-  final Map<String, String> providerPhotoUrls;
   final List<PrivateAvatar> privateAvatars;
   final Map<String, ProfileVisibility> contactVisibility;
   final Map<String, List<String>> contactAudienceIds;
-  final String? claimSecretHash;
-  final String? claimSecretSalt;
   int avatarColor;
-  bool claimed;
   bool archived;
-  bool pendingSync;
   String? gangId;
   GangRole? gangRole;
   final DateTime createdAt;
   final List<String> friendIds;
   final PlayerStats stats;
   final PlayerStats teamStats;
-
-  bool get isProvisional => !claimed && accountUid == null;
 
   int? get age {
     final dob = dateOfBirth;
@@ -225,8 +205,6 @@ class Player {
   String? get resolvedAvatarUrl => switch (avatarSource) {
     AvatarSource.preset => null,
     AvatarSource.customUrl => avatarUrl,
-    AvatarSource.google => providerPhotoUrls['google.com'],
-    AvatarSource.facebook => providerPhotoUrls['facebook.com'],
   };
 
   bool canViewField(
@@ -254,9 +232,6 @@ class Player {
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
-    'accountUid': accountUid,
-    'createdByPlayerId': createdByPlayerId,
-    'email': email,
     'phoneNumber': phoneNumber,
     'whatsappNumber': whatsappNumber,
     'location': location,
@@ -271,18 +246,13 @@ class Player {
     'avatarSource': avatarSource.name,
     'avatarPreset': avatarPreset,
     'avatarUrl': avatarUrl,
-    'providerPhotoUrls': providerPhotoUrls,
     'privateAvatars': privateAvatars.map((value) => value.toJson()).toList(),
     'contactVisibility': contactVisibility.map(
       (key, value) => MapEntry(key, value.name),
     ),
     'contactAudienceIds': contactAudienceIds,
-    'claimSecretHash': claimSecretHash,
-    'claimSecretSalt': claimSecretSalt,
     'avatarColor': avatarColor,
-    'claimed': claimed,
     'archived': archived,
-    'pendingSync': pendingSync,
     'gangId': gangId,
     'gangRole': gangRole?.name,
     'createdAt': createdAt.toIso8601String(),
@@ -293,7 +263,6 @@ class Player {
 
   Map<String, Object?> toPublicJson() => {
     'playerId': id,
-    'ownerUid': accountUid,
     'name': name,
     'bio': bio,
     'age': age,
@@ -305,16 +274,6 @@ class Player {
     'avatarSource': avatarSource.name,
     'avatarPreset': avatarPreset,
     'avatarUrl': avatarSource == AvatarSource.customUrl ? null : avatarUrl,
-    'providerPhotoUrls': switch (avatarSource) {
-      AvatarSource.google when providerPhotoUrls['google.com'] != null => {
-        'google.com': providerPhotoUrls['google.com']!,
-      },
-      AvatarSource.facebook when providerPhotoUrls['facebook.com'] != null => {
-        'facebook.com': providerPhotoUrls['facebook.com']!,
-      },
-      _ => <String, String>{},
-    },
-    'claimed': claimed,
     'archived': archived,
     'gangId': gangId,
     'gangRole': gangRole?.name,
@@ -354,9 +313,6 @@ class Player {
     return Player(
       id: json['id'].toString(),
       name: json['name'] as String,
-      accountUid: (json['accountUid'] ?? json['ownerUid']) as String?,
-      createdByPlayerId: json['createdByPlayerId'] as String?,
-      email: json['email'] as String?,
       phoneNumber: json['phoneNumber'] as String?,
       whatsappNumber: json['whatsappNumber'] as String?,
       location: json['location'] as String?,
@@ -383,9 +339,6 @@ class Player {
       ),
       avatarPreset: json['avatarPreset'] as int? ?? 1,
       avatarUrl: json['avatarUrl'] as String?,
-      providerPhotoUrls: Map<String, String>.from(
-        json['providerPhotoUrls'] as Map? ?? const {},
-      ),
       privateAvatars: privateAvatars,
       contactVisibility: visibilityRaw.map(
         (key, value) => MapEntry(
@@ -400,12 +353,8 @@ class Player {
       contactAudienceIds: audienceRaw.map(
         (key, value) => MapEntry(key, List<String>.from(value as List)),
       ),
-      claimSecretHash: json['claimSecretHash'] as String?,
-      claimSecretSalt: json['claimSecretSalt'] as String?,
       avatarColor: json['avatarColor'] as int? ?? 0xFF19C37D,
-      claimed: json['claimed'] as bool? ?? false,
       archived: json['archived'] as bool? ?? false,
-      pendingSync: json['pendingSync'] as bool? ?? false,
       gangId: json['gangId'] as String?,
       gangRole: json['gangRole'] == null
           ? null

@@ -11,10 +11,6 @@ android/app/google-services.json
 google-services.json
 google-services-base64.txt
 
-# Backend dependencies and compiled output
-functions/node_modules/
-functions/lib/
-
 # Signing material and local environment files
 *.jks
 *.keystore

@@ -6,13 +6,11 @@ class PlayerAvatar extends StatelessWidget {
   const PlayerAvatar({
     required this.player,
     this.radius = 24,
-    this.showClaimState = false,
     super.key,
   });
 
   final Player player;
   final double radius;
-  final bool showClaimState;
 
   @override
   Widget build(BuildContext context) {
@@ -43,11 +41,6 @@ class PlayerAvatar extends StatelessWidget {
         ),
       ),
     );
-    if (!showClaimState || player.claimed) return avatar;
-    return Badge(
-      backgroundColor: Colors.amber.shade700,
-      label: const Icon(Icons.key_rounded, size: 11, color: Colors.white),
-      child: avatar,
-    );
+    return avatar;
   }
 }

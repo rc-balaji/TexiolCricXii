@@ -41,17 +41,6 @@ class PublicPlayerProfileScreen extends StatelessWidget {
     final friends = viewer != null && store.areFriends(viewer.id, player.id);
     final contacts = <(IconData, String, String?)>[
       (
-        Icons.alternate_email_rounded,
-        'Email',
-        player.canViewField(
-          'email',
-          viewerPlayerId: viewer?.id,
-          areFriends: friends,
-        )
-            ? player.email
-            : null,
-      ),
-      (
         Icons.phone_outlined,
         'Phone',
         player.canViewField(
@@ -95,7 +84,7 @@ class PublicPlayerProfileScreen extends StatelessWidget {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  PlayerAvatar(player: player, radius: 46, showClaimState: true),
+                  PlayerAvatar(player: player, radius: 46),
                   const SizedBox(height: 12),
                   Text(
                     player.name,

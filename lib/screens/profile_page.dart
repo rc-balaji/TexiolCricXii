@@ -88,7 +88,7 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  PlayerAvatar(player: player, radius: 48, showClaimState: true),
+                  PlayerAvatar(player: player, radius: 48),
                   const SizedBox(height: 14),
                   Text(
                     player.name,
@@ -213,29 +213,22 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: Icon(
-                    store.cloudConnected
-                        ? Icons.cloud_done_rounded
-                        : Icons.cloud_off_rounded,
-                    color: store.cloudConnected
-                        ? AppColors.greenDark
-                        : AppColors.muted,
+                  leading: const Icon(
+                    Icons.verified_user_outlined,
+                    color: AppColors.greenDark,
                   ),
-                  title: Text(
-                    store.cloudConnected ? 'Account connected' : 'Offline session',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  title: const Text(
+                    'CricXii account',
+                    style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   subtitle: Text(
-                    store.needsPlayerIdSync
-                        ? 'Player ID upgrade pending'
-                        : store.cloudEmail ?? 'Data on this phone',
+                    '${store.accountEmail ?? 'No email'} • Player ID ${player.id}',
                   ),
-                  trailing: store.needsPlayerIdSync
-                      ? const Chip(label: Text('SYNC'))
-                      : null,
-                  onTap: store.cloudConnected
-                      ? null
-                      : store.requestCloudSignIn,
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    const AccountSettingsScreen(),
+                  ),
                 ),
               ],
             ),

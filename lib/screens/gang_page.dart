@@ -65,8 +65,8 @@ class GangPage extends StatelessWidget {
             onPressed: () => Navigator.pop(context, 'create'),
             child: const ListTile(
               leading: Icon(Icons.person_add_alt_1_rounded),
-              title: Text('Create player without phone'),
-              subtitle: Text('Generate a new ID and temporary login password.'),
+              title: Text('Create player account'),
+              subtitle: Text('Create a new Player ID with email and password.'),
             ),
           ),
         ],
@@ -86,7 +86,7 @@ class GangPage extends StatelessWidget {
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'Numeric Player ID',
-              hintText: '100000',
+              hintText: '18450231',
             ),
           ),
           actions: [
@@ -126,7 +126,7 @@ class GangPage extends StatelessWidget {
       return;
     }
 
-    final created = await showProvisionalPlayerRegistration(context);
+    final created = await showPlayerAccountRegistration(context);
     if (created == null || !context.mounted) return;
     await AppScope.read(context).addPlayerToGang(gangId, created.player.id);
   }
@@ -279,7 +279,7 @@ class GangPage extends StatelessWidget {
                       horizontal: 14,
                       vertical: 7,
                     ),
-                    leading: PlayerAvatar(player: player, showClaimState: true),
+                    leading: PlayerAvatar(player: player),
                     title: Text(
                       player.name,
                       style: const TextStyle(fontWeight: FontWeight.w900),

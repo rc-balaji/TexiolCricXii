@@ -2,7 +2,7 @@ enum GangRole { leader, coLeader, member }
 
 enum BattingStyle { rightHanded, leftHanded }
 
-enum AvatarSource { preset, customUrl, google, facebook }
+enum AvatarSource { preset, customUrl }
 
 enum ProfileVisibility {
   onlyMe,
@@ -58,8 +58,6 @@ extension AvatarSourceLabel on AvatarSource {
   String get label => switch (this) {
     AvatarSource.preset => 'CricXii avatar',
     AvatarSource.customUrl => 'Private URL',
-    AvatarSource.google => 'Google photo',
-    AvatarSource.facebook => 'Facebook photo',
   };
 }
 

@@ -105,7 +105,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   }
 
   Future<void> _addPlayer() async {
-    final created = await showProvisionalPlayerRegistration(context);
+    final created = await showPlayerAccountRegistration(context);
     if (created == null || !mounted) return;
     final addToMatch = await showDialog<bool>(
       context: context,
@@ -358,8 +358,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
                               }),
                         secondary: PlayerAvatar(
                           player: player,
-                          showClaimState: true,
-                        ),
+                                        ),
                         title: Text(
                           player.name,
                           style: const TextStyle(fontWeight: FontWeight.w900),

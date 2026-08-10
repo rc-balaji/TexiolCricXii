@@ -32,8 +32,8 @@ class _FriendsPageState extends State<FriendsPage> {
 
   Future<void> _findPlayer() async {
     final id = _playerIdSearch.text.trim();
-    if (!RegExp(r'^\d{6,}$').hasMatch(id)) {
-      _message('Enter a numeric Player ID with at least 6 digits.');
+    if (!RegExp(r'^\d{8}$').hasMatch(id)) {
+      _message('Enter a numeric Player ID with exactly 8 digits.');
       return;
     }
     setState(() {

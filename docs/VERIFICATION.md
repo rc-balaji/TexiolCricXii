@@ -1,27 +1,19 @@
-# CricXii v0.2.2+6 verification
+# CricXii v0.3.0+9 verification
 
-This package was prepared as the Spark-first test build.
+Static package verification performed before ZIP creation:
 
-## Checks completed in this package workspace
+- No Google sign-in package/import/flow.
+- No Facebook sign-in package/import/flow.
+- No Cloud Functions package/folder/runtime dependency.
+- No Firebase App Check dependency in this prototype build.
+- Anonymous Firebase session is the only Firebase Auth flow in source.
+- No temporary-player or claim flow references in `lib/`.
+- Login email is not stored inside the `Player` profile model.
+- Password plaintext is never written by AppStore; credential docs use salt + verifier.
+- Friend requests/notifications are keyed by Player IDs.
+- Social refresh uses single-field Firestore queries; custom composite indexes are empty.
+- Local account state keys bumped to v4 for the fresh reset.
+- GitHub release build command uses a YAML multiline shell block.
+- Source ZIP excludes `google-services.json`, service-account JSON and private-key files.
 
-- JSON configuration files parse successfully.
-- GitHub Actions YAML parses successfully.
-- `tool/bootstrap_android.sh` passes `bash -n`.
-- Dart source delimiter/string/comment balance scan passes for all `lib/` and `test/` files.
-- Firestore Rules delimiter/string/comment balance scan passes.
-- Avatar assets exist and are readable PNG images.
-- App icon exists and is a readable PNG image.
-- No `google-services.json`, service-account key, `.pem`, `.p12`, `.jks`, or obvious private-key/client-secret payload is bundled.
-- ZIP integrity is checked after packaging.
-
-## Checks delegated to GitHub Actions
-
-The current workspace does not contain a Flutter/Dart SDK, so the authoritative build checks run in `.github/workflows/android.yml` after push:
-
-1. `flutter pub get`
-2. launcher icon generation
-3. `flutter analyze --no-fatal-infos`
-4. `flutter test`
-5. release APK build
-
-The Android workflow is Spark-first and builds with `FUNCTIONS_ENABLED=false`. The legacy `functions/` folder is retained only for a future optional backend upgrade and does not block the APK workflow.
+The container used to prepare this package does not include the Flutter SDK, so final Flutter type analysis, unit tests and Android compilation run in the supplied GitHub Actions workflow.

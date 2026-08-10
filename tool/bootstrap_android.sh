@@ -18,9 +18,6 @@ if [[ ! -d android ]]; then
     .
 fi
 
-# `flutter create` adds its counter-demo widget test to an existing source
-# tree. CricXii has its own tests and app root, so remove only that generated
-# template before analysis.
 if [[ -f test/widget_test.dart ]] && grep -q 'pumpWidget(const MyApp())' test/widget_test.dart; then
   rm -f test/widget_test.dart
 fi
@@ -49,46 +46,6 @@ mkdir -p firebase android/app
 if [[ -n "${FIREBASE_CONFIG_B64:-}" ]]; then
   printf '%s' "$FIREBASE_CONFIG_B64" | base64 --decode > firebase/google-services.json
   chmod 600 firebase/google-services.json
-fi
-
-facebook_enabled=false
-facebook_app_id="${FACEBOOK_APP_ID:-000000000000000}"
-facebook_client_token="${FACEBOOK_CLIENT_TOKEN:-not_configured}"
-if [[ -n "${FACEBOOK_APP_ID:-}" || -n "${FACEBOOK_CLIENT_TOKEN:-}" ]]; then
-  if [[ -z "${FACEBOOK_APP_ID:-}" || -z "${FACEBOOK_CLIENT_TOKEN:-}" ]]; then
-    echo "Both FACEBOOK_APP_ID and FACEBOOK_CLIENT_TOKEN are required." >&2
-    exit 1
-  fi
-  if [[ ! "$FACEBOOK_APP_ID" =~ ^[0-9]+$ ]] ||
-    [[ ! "$FACEBOOK_CLIENT_TOKEN" =~ ^[A-Za-z0-9]+$ ]]; then
-    echo "Facebook credentials contain unexpected characters." >&2
-    exit 1
-  fi
-  facebook_enabled=true
-fi
-
-mkdir -p android/app/src/main/res/values
-printf '%s\n' \
-  '<?xml version="1.0" encoding="utf-8"?>' \
-  '<resources>' \
-  "    <string name=\"facebook_app_id\">${facebook_app_id}</string>" \
-  "    <string name=\"facebook_client_token\">${facebook_client_token}</string>" \
-  "    <string name=\"fb_login_protocol_scheme\">fb${facebook_app_id}</string>" \
-  '</resources>' > android/app/src/main/res/values/facebook_strings.xml
-
-if [[ -f "$manifest" ]] && ! grep -q 'com.facebook.sdk.ApplicationId' "$manifest"; then
-  sed -i '/<activity/i\        <meta-data android:name="com.facebook.sdk.ApplicationId" android:value="@string/facebook_app_id" />\
-        <meta-data android:name="com.facebook.sdk.ClientToken" android:value="@string/facebook_client_token" />' "$manifest"
-fi
-if [[ -f "$manifest" ]] &&
-  ! grep -q 'com.facebook.katana.provider.PlatformProvider' "$manifest"; then
-  if grep -q '<queries>' "$manifest"; then
-    sed -i '/<queries>/a\        <provider android:authorities="com.facebook.katana.provider.PlatformProvider" />' "$manifest"
-  else
-    sed -i '/<application/i\    <queries>\
-        <provider android:authorities="com.facebook.katana.provider.PlatformProvider" />\
-    </queries>' "$manifest"
-  fi
 fi
 
 firebase_enabled=false
@@ -122,7 +79,6 @@ fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   printf 'CRICXII_FIREBASE_ENABLED=%s\n' "$firebase_enabled" >> "$GITHUB_ENV"
-  printf 'CRICXII_FACEBOOK_ENABLED=%s\n' "$facebook_enabled" >> "$GITHUB_ENV"
 fi
 
-echo "Android shell ready: com.texiol.crixx (Firebase: $firebase_enabled, Facebook: $facebook_enabled)"
+echo "Android shell ready: com.texiol.crixx (Firebase: $firebase_enabled, Auth mode: Anonymous only)"

@@ -14,8 +14,6 @@ jobs:
     timeout-minutes: 30
     env:
       FIREBASE_CONFIG_B64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-      FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
-      FACEBOOK_CLIENT_TOKEN: ${{ secrets.FACEBOOK_CLIENT_TOKEN }}
 
     steps:
       - name: Check out source
@@ -53,10 +51,7 @@ jobs:
       - name: Build release APK
         run: |
           flutter build apk --release \
-            --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED} \
-            --dart-define=FUNCTIONS_ENABLED=false \
-            --dart-define=APP_CHECK_ENABLED=false \
-            --dart-define=FACEBOOK_ENABLED=${CRICXII_FACEBOOK_ENABLED}
+            --dart-define=FIREBASE_ENABLED=${CRICXII_FIREBASE_ENABLED}
 
       - name: Name APK
         run: cp build/app/outputs/flutter-apk/app-release.apk CricXii-Android-release.apk

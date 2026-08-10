@@ -20,7 +20,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _bio;
-  late final TextEditingController _email;
   late final TextEditingController _phone;
   late final TextEditingController _whatsapp;
   late final TextEditingController _location;
@@ -51,7 +50,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     final player = store.playerById(widget.playerId) ?? store.activePlayer!;
     _name = TextEditingController(text: player.name);
     _bio = TextEditingController(text: player.bio);
-    _email = TextEditingController(text: player.email);
     _phone = TextEditingController(text: player.phoneNumber);
     _whatsapp = TextEditingController(text: player.whatsappNumber);
     _location = TextEditingController(text: player.location);
@@ -88,7 +86,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     for (final controller in [
       _name,
       _bio,
-      _email,
       _phone,
       _whatsapp,
       _location,
@@ -149,7 +146,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       player
         ..name = _name.text
         ..bio = _bio.text
-        ..email = _email.text
         ..phoneNumber = _phone.text
         ..whatsappNumber = _whatsapp.text
         ..location = _location.text
@@ -338,30 +334,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 },
               ),
             ),
-            if (player.providerPhotoUrls.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                children: [
-                  if (player.providerPhotoUrls['google.com'] != null)
-                    ChoiceChip(
-                      label: const Text('Google photo'),
-                      selected: _avatarSource == AvatarSource.google,
-                      onSelected: (_) => setState(
-                        () => _avatarSource = AvatarSource.google,
-                      ),
-                    ),
-                  if (player.providerPhotoUrls['facebook.com'] != null)
-                    ChoiceChip(
-                      label: const Text('Facebook photo'),
-                      selected: _avatarSource == AvatarSource.facebook,
-                      onSelected: (_) => setState(
-                        () => _avatarSource = AvatarSource.facebook,
-                      ),
-                    ),
-                ],
-              ),
-            ],
             const SizedBox(height: 12),
             TextField(
               controller: _avatarName,
@@ -430,18 +402,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             const SizedBox(height: 24),
             const SectionLabel('Contact & privacy'),
             const SizedBox(height: 6),
-            _ContactEditor(
-              field: 'email',
-              label: 'Email',
-              icon: Icons.alternate_email_rounded,
-              controller: _email,
-              visibility: _visibility['email'] ?? ProfileVisibility.onlyMe,
-              selectedIds: _audiences['email'] ?? <String>{},
-              friends: friends,
-              onVisibilityChanged: (value) =>
-                  setState(() => _visibility['email'] = value),
-              onSelectedChanged: (value) =>
-                  setState(() => _audiences['email'] = value),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 2, 4, 10),
+              child: Text(
+                'Login email is managed in Account settings and is not asked again in the player profile.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
             ),
             _ContactEditor(
               field: 'phone',
@@ -536,9 +502,7 @@ class _ContactEditor extends StatelessWidget {
         children: [
           TextField(
             controller: controller,
-            keyboardType: field == 'email'
-                ? TextInputType.emailAddress
-                : field == 'location'
+            keyboardType: field == 'location'
                 ? TextInputType.streetAddress
                 : TextInputType.phone,
             decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),

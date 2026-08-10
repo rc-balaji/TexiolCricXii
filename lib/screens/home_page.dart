@@ -40,7 +40,7 @@ class HomePage extends StatelessWidget {
         children: [
           Row(
             children: [
-              PlayerAvatar(player: player, radius: 24, showClaimState: true),
+              PlayerAvatar(player: player, radius: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

@@ -52,7 +52,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v0.2.2',
+      creator: 'CricXii v0.3.0',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);

@@ -5,7 +5,6 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
-import 'profile_edit_screen.dart';
 import 'register_player_dialog.dart';
 
 class PlayerManagementScreen extends StatefulWidget {
@@ -22,15 +21,6 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
   void dispose() {
     _search.dispose();
     super.dispose();
-  }
-
-  Future<void> _edit(Player player) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProfileEditScreen(playerId: player.id),
-      ),
-    );
-    if (mounted) setState(() {});
   }
 
   Future<void> _delete(Player player) async {
@@ -61,10 +51,8 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
           SnackBar(
             content: Text(
               deleted
-                  ? 'Player removed.'
-                  : player.accountUid != null
-                  ? 'Claimed player hidden from this phone. Only that account owner can delete the account.'
-                  : 'Player archived because match history uses this ID.',
+                  ? 'Player removed from this phone.'
+                  : 'Player archived locally because match history uses this ID. The player account itself is unchanged.',
             ),
           ),
         );
@@ -100,16 +88,16 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
           const ScreenTitle(
             title: 'Known players',
             subtitle:
-                'These are independent opponents cached for matches. They are not switchable profiles under your account.',
+                'Each added player gets a separate CricXii email/password account and numeric Player ID. They edit their own profile after signing in.',
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: () async {
-              await showProvisionalPlayerRegistration(context);
+              await showPlayerAccountRegistration(context);
               if (mounted) setState(() {});
             },
             icon: const Icon(Icons.person_add_alt_1_rounded),
-            label: const Text('Register someone without a phone'),
+            label: const Text('Create another player account'),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -145,34 +133,25 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final player = players[index];
-                      final canEdit = player.isProvisional ||
-                          player.createdByPlayerId == store.activePlayerId;
                       return ListTile(
                         leading: PlayerAvatar(
                           player: player,
-                          showClaimState: true,
-                        ),
+                                        ),
                         title: Text(
                           player.name,
                           style: const TextStyle(fontWeight: FontWeight.w900),
                         ),
                         subtitle: Text(
-                          '${player.id} • ${player.archived ? 'Archived' : player.claimed ? 'Claimed' : 'Provisional'}',
+                          '${player.id} • ${player.archived ? 'Archived locally' : 'Registered account'}',
                         ),
                         trailing: PopupMenuButton<String>(
                           onSelected: (value) {
-                            if (value == 'edit') _edit(player);
                             if (value == 'delete') _delete(player);
                           },
-                          itemBuilder: (context) => [
-                            if (canEdit)
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Text('Edit provisional profile'),
-                              ),
-                            const PopupMenuItem(
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(
                               value: 'delete',
-                              child: Text('Remove / archive'),
+                              child: Text('Remove from this phone'),
                             ),
                           ],
                         ),

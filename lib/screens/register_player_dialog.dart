@@ -6,38 +6,39 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/ui_bits.dart';
 
-Future<CreatedPlayer?> showProvisionalPlayerRegistration(
+Future<CreatedPlayer?> showPlayerAccountRegistration(
   BuildContext context,
 ) => Navigator.of(context).push<CreatedPlayer>(
   MaterialPageRoute(
     fullscreenDialog: true,
-    builder: (_) => const _TemporaryPlayerRegistrationScreen(),
+    builder: (_) => const _PlayerAccountRegistrationScreen(),
   ),
 );
 
-class _TemporaryPlayerRegistrationScreen extends StatefulWidget {
-  const _TemporaryPlayerRegistrationScreen();
+class _PlayerAccountRegistrationScreen extends StatefulWidget {
+  const _PlayerAccountRegistrationScreen();
 
   @override
-  State<_TemporaryPlayerRegistrationScreen> createState() =>
-      _TemporaryPlayerRegistrationScreenState();
+  State<_PlayerAccountRegistrationScreen> createState() =>
+      _PlayerAccountRegistrationScreenState();
 }
 
-class _TemporaryPlayerRegistrationScreenState
-    extends State<_TemporaryPlayerRegistrationScreen> {
+class _PlayerAccountRegistrationScreenState
+    extends State<_PlayerAccountRegistrationScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _email = TextEditingController();
-  final _instagram = TextEditingController();
+  final _password = TextEditingController();
   BattingStyle _battingStyle = BattingStyle.rightHanded;
   int _avatarPreset = 1;
   bool _busy = false;
+  bool _hidePassword = true;
 
   @override
   void dispose() {
     _name.dispose();
     _email.dispose();
-    _instagram.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -45,27 +46,21 @@ class _TemporaryPlayerRegistrationScreenState
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
     try {
-      final store = AppScope.read(context);
-      final created = await store.createProvisionalPlayer(
+      final created = await AppScope.read(context).registerManagedPlayerAccount(
         name: _name.text,
         email: _email.text,
-        sendFriendRequest: false,
+        password: _password.text,
+        battingStyle: _battingStyle,
+        avatarPreset: _avatarPreset,
       );
-      created.player
-        ..instagramHandle = _instagram.text.trim().isEmpty
-            ? null
-            : _instagram.text.trim()
-        ..battingStyle = _battingStyle
-        ..avatarPreset = _avatarPreset
-        ..avatarSource = AvatarSource.preset;
-      await store.savePlayerProfile(created.player);
       if (!mounted) return;
       await _showRegistrationComplete(created);
       if (mounted) Navigator.of(context).pop(created);
     } on Object catch (error) {
       if (mounted) {
+        final text = '$error'.replaceFirst('Bad state: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
+          SnackBar(content: Text(text)),
         );
       }
     } finally {
@@ -78,7 +73,6 @@ class _TemporaryPlayerRegistrationScreenState
         context: context,
         isDismissible: false,
         enableDrag: false,
-        showDragHandle: false,
         builder: (context) => SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
@@ -93,14 +87,14 @@ class _TemporaryPlayerRegistrationScreenState
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Player registered',
+                  'Player account created',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'This Player ID is registered now. On the player’s phone, sign in or register with the same email, then claim this Player ID.',
+                  'This account is ready now. The player can open CricXii on their phone and sign in directly with the email and password you entered.',
                   style: TextStyle(color: AppColors.muted, height: 1.4),
                 ),
                 const SizedBox(height: 16),
@@ -114,7 +108,7 @@ class _TemporaryPlayerRegistrationScreenState
                   child: SelectableText(
                     'Name: ${created.player.name}\n'
                     'Player ID: ${created.player.id}\n'
-                    'Claim email: ${created.player.email ?? _email.text.trim()}',
+                    'Login email: ${created.loginEmail}',
                     style: const TextStyle(
                       height: 1.8,
                       fontWeight: FontWeight.w900,
@@ -126,7 +120,7 @@ class _TemporaryPlayerRegistrationScreenState
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Saved'),
+                    child: const Text('Done'),
                   ),
                 ),
               ],
@@ -137,7 +131,7 @@ class _TemporaryPlayerRegistrationScreenState
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Register player')),
+    appBar: AppBar(title: const Text('Create player account')),
     body: SafeArea(
       child: Form(
         key: _formKey,
@@ -145,19 +139,16 @@ class _TemporaryPlayerRegistrationScreenState
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
             const ScreenTitle(
-              title: 'Create a separate player',
+              title: 'Add another player',
               subtitle:
-                  'Register this person now with their email, playing style and avatar. They can claim the same Player ID on their own phone later.',
+                  'Create the account now. Only basic details are required. Instagram, phone, bio and other profile details can be added later by that player.',
             ),
             const SizedBox(height: 18),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SectionLabel('PLAYER DETAILS'),
-                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _name,
                       autofocus: true,
@@ -176,37 +167,38 @@ class _TemporaryPlayerRegistrationScreenState
                       controller: _email,
                       keyboardType: TextInputType.emailAddress,
                       decoration: const InputDecoration(
-                        labelText: 'Player email',
+                        labelText: 'Login email',
                         prefixIcon: Icon(Icons.alternate_email_rounded),
                       ),
                       validator: (value) {
                         final text = value?.trim() ?? '';
                         return text.contains('@')
                             ? null
-                            : 'Enter the email this player will use';
+                            : 'Enter a valid email';
                       },
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
-                      controller: _instagram,
-                      decoration: const InputDecoration(
-                        labelText: 'Instagram ID (optional)',
-                        prefixIcon: Icon(Icons.camera_alt_outlined),
+                      controller: _password,
+                      obscureText: _hidePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Login password',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded),
+                        suffixIcon: IconButton(
+                          onPressed: () =>
+                              setState(() => _hidePassword = !_hidePassword),
+                          icon: Icon(
+                            _hidePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                        ),
                       ),
+                      validator: (value) => value == null || value.length < 8
+                          ? 'Use at least 8 characters'
+                          : null,
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SectionLabel('PLAYING PROFILE'),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
                     DropdownButtonFormField<BattingStyle>(
                       value: _battingStyle,
                       decoration: const InputDecoration(
@@ -230,11 +222,18 @@ class _TemporaryPlayerRegistrationScreenState
                                   value ?? BattingStyle.rightHanded,
                             ),
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Choose avatar',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SectionLabel('STARTING AVATAR'),
                     const SizedBox(height: 10),
                     Wrap(
                       spacing: 10,
@@ -283,7 +282,7 @@ class _TemporaryPlayerRegistrationScreenState
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.how_to_reg_rounded),
-              label: Text(_busy ? 'Registering...' : 'Register Player'),
+              label: Text(_busy ? 'Creating...' : 'Create Player Account'),
             ),
           ],
         ),

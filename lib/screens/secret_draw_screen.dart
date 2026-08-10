@@ -180,8 +180,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                           PlayerAvatar(
                             player: nextPlayer,
                             radius: 34,
-                            showClaimState: true,
-                          ),
+                                            ),
                           const SizedBox(height: 12),
                           const Text(
                             'PASS THE PHONE TO',
