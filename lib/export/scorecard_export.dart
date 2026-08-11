@@ -403,7 +403,7 @@ class ScorecardExport {
               ),
               pw.Text(
                 'Player ID ${player.id}',
-                style: const pw.TextStyle(color: muted, fontSize: 6.8),
+                style: pw.TextStyle(color: muted, fontSize: 6.8),
               ),
             ],
           ),

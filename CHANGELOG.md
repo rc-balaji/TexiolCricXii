@@ -1,3 +1,9 @@
+# v0.3.1+12
+
+- Fixed PDF analyzer const error in winner Player ID text style.
+- Fixed non-const disabled friend-status buttons on public player profiles.
+- No feature or database behavior changes from build 11.
+
 # Changelog
 
 ## 0.3.0+9 — Fresh Start account architecture

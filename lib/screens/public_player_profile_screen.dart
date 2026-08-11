@@ -132,19 +132,19 @@ class PublicPlayerProfileScreen extends StatelessWidget {
                   if (viewer?.id != player.id) ...[
                     const SizedBox(height: 14),
                     if (friends)
-                      const FilledButton.icon(
+                      FilledButton.icon(
                         onPressed: null,
                         icon: Icon(Icons.people_rounded),
                         label: Text('Friends'),
                       )
                     else if (outgoingRequest)
-                      const FilledButton.icon(
+                      FilledButton.icon(
                         onPressed: null,
                         icon: Icon(Icons.schedule_send_rounded),
                         label: Text('Request sent'),
                       )
                     else if (incomingRequest)
-                      const FilledButton.icon(
+                      FilledButton.icon(
                         onPressed: null,
                         icon: Icon(Icons.notifications_active_outlined),
                         label: Text('Request received'),
