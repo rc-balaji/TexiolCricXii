@@ -6,6 +6,7 @@ import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
 import 'register_player_dialog.dart';
+import 'public_player_profile_screen.dart';
 
 class PlayerManagementScreen extends StatefulWidget {
   const PlayerManagementScreen({super.key});
@@ -144,6 +145,7 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
                         subtitle: Text(
                           '${player.id} • ${player.archived ? 'Archived locally' : 'Registered account'}',
                         ),
+                        onTap: () => openPlayerProfile(context, player.id),
                         trailing: PopupMenuButton<String>(
                           onSelected: (value) {
                             if (value == 'delete') _delete(player);

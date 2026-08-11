@@ -17,3 +17,9 @@
 - Sign out/delete now pop directly to the root Login screen.
 - Bumped local persistence keys/schema to v4 so the fresh architecture does not silently reuse v0.2.x local account state.
 - Retained Singles scoring, gangs, stats, sharing and the advanced avatar/ranking PDF scorecard.
+
+## 0.3.1+11
+- Friend request buttons on public profiles now reflect Request sent / Request received / Friends immediately.
+- Player identities are tappable from rankings, match winner, friends, sent requests, gangs, player management, notifications, match setup avatars, draw results, and live scoring headers.
+- Notifications retain sender Player ID so the sender profile can be opened from activity.
+- Scorecard PDF rebuilt as a compact single A4 page, with fixed-height podium cards, one-page match details, ASCII-safe separators, and compact ranking layout for larger matches.

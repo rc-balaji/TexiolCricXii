@@ -5,6 +5,7 @@ import '../domain/social.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/ui_bits.dart';
+import 'public_player_profile_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -295,6 +296,19 @@ class _NotificationCardState extends State<_NotificationCard> {
               ),
               const SizedBox(height: 8),
               Text(item.body, style: const TextStyle(height: 1.35)),
+              if ((item.fromPlayerId ?? request?.fromPlayerId) != null) ...[
+                const SizedBox(height: 6),
+                TextButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => openPlayerProfile(
+                          context,
+                          item.fromPlayerId ?? request!.fromPlayerId,
+                        ),
+                  icon: const Icon(Icons.person_outline_rounded, size: 18),
+                  label: const Text('View player profile'),
+                ),
+              ],
               if (status == 'accepted' || status == 'rejected') ...[
                 const SizedBox(height: 10),
                 _StatusChip(status: status!),

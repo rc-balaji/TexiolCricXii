@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'public_player_profile_screen.dart';
 
 import '../domain/enums.dart';
 import '../theme/app_theme.dart';
@@ -285,6 +286,7 @@ class GangPage extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                     subtitle: Text('${player.id} • ${entry.value.label}'),
+                    onTap: () => openPlayerProfile(context, player.id),
                     trailing:
                         active.gangRole == GangRole.leader &&
                             player.id != active.id

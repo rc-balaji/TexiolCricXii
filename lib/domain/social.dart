@@ -49,6 +49,7 @@ class CricNotification {
     required this.body,
     required this.createdAt,
     this.referenceId,
+    this.fromPlayerId,
     this.read = false,
     this.actionStatus,
   });
@@ -59,6 +60,7 @@ class CricNotification {
   final String title;
   final String body;
   final String? referenceId;
+  final String? fromPlayerId;
   final DateTime createdAt;
   bool read;
   String? actionStatus;
@@ -70,6 +72,7 @@ class CricNotification {
     'title': title,
     'body': body,
     'referenceId': referenceId,
+    'fromPlayerId': fromPlayerId,
     'createdAt': createdAt.toIso8601String(),
     'read': read,
     'actionStatus': actionStatus,
@@ -85,6 +88,7 @@ class CricNotification {
         title: json['title'] as String,
         body: json['body'] as String,
         referenceId: json['referenceId'] as String?,
+        fromPlayerId: json['fromPlayerId'] as String?,
         createdAt: DateTime.parse(json['createdAt'] as String),
         read: json['read'] as bool? ?? false,
         actionStatus: json['actionStatus'] as String?,

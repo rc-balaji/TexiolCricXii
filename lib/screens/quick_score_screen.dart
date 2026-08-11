@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import 'match_summary_screen.dart';
+import 'public_player_profile_screen.dart';
 
 class QuickScoreScreen extends StatefulWidget {
   const QuickScoreScreen({required this.matchId, super.key});
@@ -193,10 +194,12 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 36),
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppColors.ink,
+            GestureDetector(
+              onTap: () => openPlayerProfile(context, batter.id),
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.ink,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: Row(
@@ -230,7 +233,8 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
                       ],
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 20),

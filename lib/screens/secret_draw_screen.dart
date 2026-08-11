@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'tracker_screen.dart';
 
@@ -169,10 +170,12 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                   ),
                   const SizedBox(height: 22),
                   if (nextPlayer != null)
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: AppColors.ink,
+                    GestureDetector(
+                      onTap: () => openPlayerProfile(context, nextPlayer.id),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: AppColors.ink,
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: Column(
@@ -205,7 +208,8 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                             '${match.drawAssignments.length + 1} of ${match.participantIds.length}',
                             style: const TextStyle(color: Color(0xFFB8CCC2)),
                           ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   const SizedBox(height: 22),
@@ -428,6 +432,7 @@ class _DrawResult extends StatelessWidget {
                   ),
                   subtitle: Text(player.id),
                   trailing: PlayerAvatar(player: player, radius: 20),
+                  onTap: () => openPlayerProfile(context, player.id),
                 ),
               ),
             );

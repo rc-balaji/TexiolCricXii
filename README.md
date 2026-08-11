@@ -1,6 +1,6 @@
-# CricXii v0.3.0 Fresh Start
+# CricXii v0.3.1 Fresh Start
 
-CricXii is Texiol's Android-first local cricket scorer. `0.3.0+9` resets the account/social architecture while keeping the existing Singles scoring, gangs, player profiles, statistics, sharing and advanced PDF scorecard.
+CricXii is Texiol's Android-first local cricket scorer. `0.3.1+11` continues the Fresh Start foundation and the account/social architecture while keeping the existing Singles scoring, gangs, player profiles, statistics, sharing and advanced PDF scorecard.
 
 ## Fresh account model
 

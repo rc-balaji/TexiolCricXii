@@ -7,6 +7,14 @@ import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
 
+Future<void> openPlayerProfile(BuildContext context, String playerId) async {
+  await Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => PublicPlayerProfileScreen(playerId: playerId),
+    ),
+  );
+}
+
 class PublicPlayerProfileScreen extends StatelessWidget {
   const PublicPlayerProfileScreen({required this.playerId, super.key});
 
@@ -39,6 +47,13 @@ class PublicPlayerProfileScreen extends StatelessWidget {
       return const Scaffold(body: Center(child: Text('Player not found')));
     }
     final friends = viewer != null && store.areFriends(viewer.id, player.id);
+    final pendingRequest = viewer == null
+        ? null
+        : store.pendingRequestWith(player.id);
+    final outgoingRequest = pendingRequest != null &&
+        pendingRequest.fromPlayerId == viewer?.id;
+    final incomingRequest = pendingRequest != null &&
+        pendingRequest.toPlayerId == viewer?.id;
     final contacts = <(IconData, String, String?)>[
       (
         Icons.phone_outlined,
@@ -114,25 +129,49 @@ class PublicPlayerProfileScreen extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text(player.bio!, textAlign: TextAlign.center),
                   ],
-                  if (!friends && viewer?.id != player.id) ...[
+                  if (viewer?.id != player.id) ...[
                     const SizedBox(height: 14),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        try {
-                          await AppScope.read(
-                            context,
-                          ).sendFriendRequestTo(player.id, knownPlayer: player);
-                        } on Object catch (error) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('$error')),
+                    if (friends)
+                      const FilledButton.icon(
+                        onPressed: null,
+                        icon: Icon(Icons.people_rounded),
+                        label: Text('Friends'),
+                      )
+                    else if (outgoingRequest)
+                      const FilledButton.icon(
+                        onPressed: null,
+                        icon: Icon(Icons.schedule_send_rounded),
+                        label: Text('Request sent'),
+                      )
+                    else if (incomingRequest)
+                      const FilledButton.icon(
+                        onPressed: null,
+                        icon: Icon(Icons.notifications_active_outlined),
+                        label: Text('Request received'),
+                      )
+                    else
+                      FilledButton.icon(
+                        onPressed: () async {
+                          try {
+                            await AppScope.read(context).sendFriendRequestTo(
+                              player.id,
+                              knownPlayer: player,
                             );
+                          } on Object catch (error) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    '$error'.replaceFirst('Bad state: ', ''),
+                                  ),
+                                ),
+                              );
+                            }
                           }
-                        }
-                      },
-                      icon: const Icon(Icons.person_add_alt_1_rounded),
-                      label: const Text('Send friend request'),
-                    ),
+                        },
+                        icon: const Icon(Icons.person_add_alt_1_rounded),
+                        label: const Text('Send friend request'),
+                      ),
                   ],
                 ],
               ),

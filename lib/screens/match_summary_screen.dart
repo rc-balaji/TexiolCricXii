@@ -7,6 +7,7 @@ import '../export/scorecard_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'tracker_screen.dart';
 
@@ -123,9 +124,11 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 36),
           children: [
-            Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
+            GestureDetector(
+              onTap: () => openPlayerProfile(context, winner.id),
+              child: Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -170,6 +173,7 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                     style: const TextStyle(color: Color(0xFFB8CCC2)),
                   ),
                 ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -222,9 +226,12 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 9),
                 child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => openPlayerProfile(context, player.id),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
                       children: [
                         CircleAvatar(
                           backgroundColor: rank == 1
@@ -281,7 +288,8 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                             ),
                           ],
                         ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

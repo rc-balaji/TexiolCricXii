@@ -144,13 +144,7 @@ class _FriendsPageState extends State<FriendsPage> {
               pendingRequest: store.pendingRequestWith(_searchResult!.id),
               sending: _sending,
               onSend: () => _sendRequest(_searchResult!),
-              onView: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => PublicPlayerProfileScreen(
-                    playerId: _searchResult!.id,
-                  ),
-                ),
-              ),
+              onView: () => openPlayerProfile(context, _searchResult!.id),
             ),
           ],
           if (incoming.isNotEmpty) ...[
@@ -194,6 +188,9 @@ class _FriendsPageState extends State<FriendsPage> {
                   ),
                   subtitle: Text('Player ID ${request.toPlayerId}'),
                   trailing: const _PendingPill(),
+                  onTap: player == null
+                      ? null
+                      : () => openPlayerProfile(context, player.id),
                 ),
               );
             }),
@@ -294,13 +291,7 @@ class _FriendsPageState extends State<FriendsPage> {
                             ),
                           ],
                         ),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PublicPlayerProfileScreen(
-                              playerId: player.id,
-                            ),
-                          ),
-                        ),
+                        onTap: () => openPlayerProfile(context, player.id),
                       );
                     },
                   ),
@@ -460,6 +451,7 @@ class _SearchResultCard extends StatelessWidget {
                 'Player ID ${player.id}\n${player.stats.runs} runs • ${player.stats.wins} wins',
               ),
               isThreeLine: true,
+              onTap: onView,
               trailing: IconButton(
                 tooltip: 'View profile',
                 onPressed: onView,

@@ -17,7 +17,7 @@ class ScorecardExport {
   static String summaryText(CricketMatch match, Map<String, Player> players) {
     final rankings = ScoringEngine.rankings(match);
     final buffer = StringBuffer()
-      ..writeln('CRICXII • ${match.title}')
+      ..writeln('CRICXII - ${match.title}')
       ..writeln('Match ID: ${match.id}')
       ..writeln(
         'Official ranking: ${match.winnerMetric == MatchWinnerMetric.runs ? 'Runs' : 'Overall points'}',
@@ -27,7 +27,7 @@ class ScorecardExport {
       final stats = rankings[index];
       final player = players[stats.playerId];
       buffer.writeln(
-        '${index + 1}. ${player?.name ?? stats.playerId} — '
+        '${index + 1}. ${player?.name ?? stats.playerId} - '
         '${stats.runs} runs, ${stats.points} pts, ${stats.wickets} wkts',
       );
     }
@@ -52,7 +52,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v0.3.0',
+      creator: 'CricXii v0.3.1',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -67,328 +67,204 @@ class ScorecardExport {
 
     final winner = rankings.isEmpty ? null : rankings.first;
     final winnerPlayer = winner == null ? null : players[winner.playerId];
+    final podium = rankings.take(3).toList(growable: false);
+    final pageContentWidth = PdfPageFormat.a4.width - 44;
+    final podiumCardWidth = podium.isEmpty
+        ? pageContentWidth
+        : (pageContentWidth - ((podium.length - 1) * 8)) / podium.length;
+    final compactRanking = rankings.length > 6;
+    final shownRankings = rankings.take(12).toList(growable: false);
 
     document.addPage(
-      pw.MultiPage(
+      pw.Page(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(30, 26, 30, 30),
-        header: (context) => pw.Container(
-          margin: const pw.EdgeInsets.only(bottom: 18),
-          padding: const pw.EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-          decoration: pw.BoxDecoration(
-            color: ink,
-            borderRadius: pw.BorderRadius.circular(12),
-          ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'CRICXII',
-                    style: pw.TextStyle(
-                      color: PdfColors.white,
-                      fontSize: 21,
-                      fontWeight: pw.FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  pw.Text(
-                    'OFFICIAL MATCH SCORECARD',
-                    style: const pw.TextStyle(
-                      color: green,
-                      fontSize: 7.5,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                ],
-              ),
-              pw.Text(
-                'BY TEXIOL',
-                style: const pw.TextStyle(
-                  color: PdfColors.white,
-                  fontSize: 8,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-        footer: (context) => pw.Container(
-          margin: const pw.EdgeInsets.only(top: 12),
-          padding: const pw.EdgeInsets.only(top: 8),
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(top: pw.BorderSide(color: line, width: .6)),
-          ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                'CricXii • Local cricket, permanent history',
-                style: const pw.TextStyle(color: muted, fontSize: 7.5),
-              ),
-              pw.Text(
-                'Page ${context.pageNumber}/${context.pagesCount}',
-                style: const pw.TextStyle(color: muted, fontSize: 7.5),
-              ),
-            ],
-          ),
-        ),
-        build: (context) => [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      match.title,
-                      style: pw.TextStyle(
-                        color: ink,
-                        fontSize: 28,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 5),
-                    pw.Text(
-                      '${_date(match.createdAt)} • Match ID ${match.id}',
-                      style: const pw.TextStyle(color: muted, fontSize: 9.5),
-                    ),
-                  ],
-                ),
-              ),
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: pw.BoxDecoration(
-                  color: pale,
-                  borderRadius: pw.BorderRadius.circular(999),
-                ),
-                child: pw.Text(
-                  match.scoringMode == ScoringMode.ballByBall
-                      ? '${match.ballLimit} BALLS EACH'
-                      : 'DIRECT RUNS',
-                  style: pw.TextStyle(
-                    color: greenDark,
-                    fontSize: 8,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 16),
-          pw.Row(
-            children: [
-              _metricTile(
-                'PLAYERS',
-                '${rankings.length}',
-                icon: 'XI',
-                ink: ink,
-                muted: muted,
-                pale: pale,
-              ),
-              pw.SizedBox(width: 8),
-              _metricTile(
-                'WINNER BY',
-                match.winnerMetric == MatchWinnerMetric.runs
-                    ? 'RUNS'
-                    : 'POINTS',
-                icon: '#1',
-                ink: ink,
-                muted: muted,
-                pale: pale,
-              ),
-              pw.SizedBox(width: 8),
-              _metricTile(
-                'STATUS',
-                'FINAL',
-                icon: '✓',
-                ink: ink,
-                muted: muted,
-                pale: pale,
-              ),
-            ],
-          ),
-          if (winner != null && winnerPlayer != null) ...[
-            pw.SizedBox(height: 18),
-            pw.Container(
-              padding: const pw.EdgeInsets.all(18),
-              decoration: pw.BoxDecoration(
-                color: ink,
-                borderRadius: pw.BorderRadius.circular(16),
-              ),
-              child: pw.Row(
-                children: [
-                  _pdfAvatar(
-                    winnerPlayer,
-                    avatars[winnerPlayer.id],
-                    size: 66,
-                    background: green,
-                    textColor: ink,
-                  ),
-                  pw.SizedBox(width: 16),
-                  pw.Expanded(
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          'MATCH WINNER',
-                          style: const pw.TextStyle(
-                            color: green,
-                            fontSize: 8,
-                            letterSpacing: 1.1,
-                          ),
-                        ),
-                        pw.SizedBox(height: 4),
-                        pw.Text(
-                          winnerPlayer.name,
-                          style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontSize: 21,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                        pw.SizedBox(height: 4),
-                        pw.Text(
-                          'Player ID ${winnerPlayer.id}',
-                          style: const pw.TextStyle(
-                            color: muted,
-                            fontSize: 8.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+        margin: const pw.EdgeInsets.fromLTRB(22, 20, 22, 18),
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            _header(ink: ink, green: green),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        match.winnerMetric == MatchWinnerMetric.runs
-                            ? '${winner.runs}'
-                            : '${winner.points}',
+                        match.title,
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
                         style: pw.TextStyle(
-                          color: PdfColors.white,
-                          fontSize: 31,
+                          color: ink,
+                          fontSize: 22,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
+                      pw.SizedBox(height: 3),
                       pw.Text(
-                        match.winnerMetric == MatchWinnerMetric.runs
-                            ? 'RUNS'
-                            : 'POINTS',
-                        style: const pw.TextStyle(
-                          color: green,
-                          fontSize: 8,
-                          letterSpacing: 1,
-                        ),
+                        '${_date(match.createdAt)} | Match ID ${match.id}',
+                        style: const pw.TextStyle(color: muted, fontSize: 8.2),
                       ),
                     ],
+                  ),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    color: pale,
+                    borderRadius: pw.BorderRadius.circular(20),
+                  ),
+                  child: pw.Text(
+                    match.scoringMode == ScoringMode.ballByBall
+                        ? '${match.ballLimit} BALLS EACH'
+                        : 'DIRECT RUNS',
+                    style: pw.TextStyle(
+                      color: greenDark,
+                      fontSize: 7.5,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              children: [
+                _metricTile(
+                  'PLAYERS',
+                  '${rankings.length}',
+                  icon: 'XI',
+                  ink: ink,
+                  muted: muted,
+                  pale: pale,
+                ),
+                pw.SizedBox(width: 7),
+                _metricTile(
+                  'WINNER BY',
+                  match.winnerMetric == MatchWinnerMetric.runs
+                      ? 'RUNS'
+                      : 'POINTS',
+                  icon: '#1',
+                  ink: ink,
+                  muted: muted,
+                  pale: pale,
+                ),
+                pw.SizedBox(width: 7),
+                _metricTile(
+                  'STATUS',
+                  'FINAL',
+                  icon: 'OK',
+                  ink: ink,
+                  muted: muted,
+                  pale: pale,
+                ),
+              ],
+            ),
+            if (winner != null && winnerPlayer != null) ...[
+              pw.SizedBox(height: 10),
+              _winnerBanner(
+                match: match,
+                stats: winner,
+                player: winnerPlayer,
+                avatar: avatars[winnerPlayer.id],
+                ink: ink,
+                green: green,
+                muted: muted,
+              ),
+            ],
+            if (podium.isNotEmpty) ...[
+              pw.SizedBox(height: 11),
+              _sectionTitle('PODIUM', ink),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  for (var index = 0; index < podium.length; index++) ...[
+                    if (index > 0) pw.SizedBox(width: 8),
+                    _podiumCard(
+                      width: podiumCardWidth,
+                      rank: index + 1,
+                      stats: podium[index],
+                      player: players[podium[index].playerId],
+                      avatar: avatars[podium[index].playerId],
+                      accent: index == 0
+                          ? gold
+                          : index == 1
+                              ? silver
+                              : bronze,
+                      ink: ink,
+                      muted: muted,
+                    ),
+                  ],
+                ],
+              ),
+            ],
+            pw.SizedBox(height: 11),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                _sectionTitle('FINAL RANKING', ink),
+                if (rankings.length > shownRankings.length)
+                  pw.Text(
+                    'Top ${shownRankings.length} shown | Full ranking in app',
+                    style: const pw.TextStyle(color: muted, fontSize: 6.5),
+                  ),
+              ],
+            ),
+            pw.SizedBox(height: 5),
+            if (!compactRanking)
+              _rankingTable(
+                rankings: shownRankings,
+                players: players,
+                avatars: avatars,
+                ink: ink,
+                muted: muted,
+                line: line,
+                pale: pale,
+                green: greenDark,
+              )
+            else
+              _compactRankingGrid(
+                rankings: shownRankings,
+                players: players,
+                avatars: avatars,
+                ink: ink,
+                muted: muted,
+                line: line,
+                pale: pale,
+                green: greenDark,
+              ),
+            pw.SizedBox(height: 11),
+            _sectionTitle('MATCH DETAILS', ink),
+            pw.SizedBox(height: 5),
+            _matchDetails(match, ink: ink, muted: muted, pale: pale),
+            pw.Spacer(),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.only(top: 7),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(top: pw.BorderSide(color: line, width: .6)),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'CricXii | Local cricket, permanent history',
+                    style: const pw.TextStyle(color: muted, fontSize: 6.8),
+                  ),
+                  pw.Text(
+                    'Official scorecard | ${match.id}',
+                    style: const pw.TextStyle(color: muted, fontSize: 6.8),
                   ),
                 ],
               ),
             ),
           ],
-          if (rankings.isNotEmpty) ...[
-            pw.SizedBox(height: 20),
-            _sectionTitle('PODIUM', ink),
-            pw.SizedBox(height: 8),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
-                for (var index = 0; index < rankings.length && index < 3; index++) ...[
-                  if (index > 0) pw.SizedBox(width: 8),
-                  pw.Expanded(
-                    child: _podiumCard(
-                      rank: index + 1,
-                      stats: rankings[index],
-                      player: players[rankings[index].playerId],
-                      avatar: avatars[rankings[index].playerId],
-                      accent: index == 0
-                          ? gold
-                          : index == 1
-                          ? silver
-                          : bronze,
-                      ink: ink,
-                      muted: muted,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          pw.SizedBox(height: 20),
-          _sectionTitle('FINAL RANKING', ink),
-          pw.SizedBox(height: 8),
-          pw.Container(
-            decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: line, width: .7),
-              borderRadius: pw.BorderRadius.circular(12),
-            ),
-            child: pw.Column(
-              children: [
-                for (var index = 0; index < rankings.length; index++)
-                  _rankingRow(
-                    rank: index + 1,
-                    stats: rankings[index],
-                    player: players[rankings[index].playerId],
-                    avatar: avatars[rankings[index].playerId],
-                    showDivider: index != rankings.length - 1,
-                    ink: ink,
-                    muted: muted,
-                    line: line,
-                    pale: pale,
-                    green: greenDark,
-                  ),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 20),
-          _sectionTitle('MATCH DETAILS', ink),
-          pw.SizedBox(height: 8),
-          pw.Container(
-            width: double.infinity,
-            padding: const pw.EdgeInsets.all(14),
-            decoration: pw.BoxDecoration(
-              color: pale,
-              borderRadius: pw.BorderRadius.circular(12),
-            ),
-            child: pw.Wrap(
-              spacing: 18,
-              runSpacing: 8,
-              children: [
-                _detail('Scoring', match.scoringMode == ScoringMode.ballByBall
-                    ? 'Ball by ball'
-                    : 'Quick total', ink, muted),
-                _detail('Winner metric', match.winnerMetric == MatchWinnerMetric.runs
-                    ? 'Runs'
-                    : 'Overall points', ink, muted),
-                _detail('Run point', '${match.pointRules.run}', ink, muted),
-                _detail('Wicket', '${match.pointRules.wicket}', ink, muted),
-                _detail('Catch', '${match.pointRules.catchPoint}', ink, muted),
-                _detail('Direct RO', '${match.pointRules.directRunOut}', ink, muted),
-                _detail('Stumping', '${match.pointRules.stumping}', ink, muted),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 18),
-          pw.Container(
-            width: double.infinity,
-            padding: const pw.EdgeInsets.all(12),
-            decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: line),
-              borderRadius: pw.BorderRadius.circular(10),
-            ),
-            child: pw.Text(
-              'Generated from CricXii match data. Player avatar images use the selected CricXii preset or the available profile photo, with an offline fallback when a remote image cannot be loaded.',
-              style: const pw.TextStyle(color: muted, fontSize: 7.8),
-            ),
-          ),
-        ],
+        ),
       ),
     );
 
@@ -421,12 +297,143 @@ class ScorecardExport {
     final file = await createPdf(match, players);
     await SharePlus.instance.share(
       ShareParams(
-        subject: 'CricXii scorecard • ${match.title}',
+        subject: 'CricXii scorecard - ${match.title}',
         text: summaryText(match, players),
         files: [XFile(file.path, mimeType: 'application/pdf')],
       ),
     );
   }
+
+  static pw.Widget _header({
+    required PdfColor ink,
+    required PdfColor green,
+  }) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    decoration: pw.BoxDecoration(
+      color: ink,
+      borderRadius: pw.BorderRadius.circular(11),
+    ),
+    child: pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'CRICXII',
+              style: pw.TextStyle(
+                color: PdfColors.white,
+                fontSize: 18,
+                fontWeight: pw.FontWeight.bold,
+                letterSpacing: 1.1,
+              ),
+            ),
+            pw.SizedBox(height: 1),
+            pw.Text(
+              'OFFICIAL MATCH SCORECARD',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 6.8,
+                letterSpacing: 1,
+              ),
+            ),
+          ],
+        ),
+        pw.Text(
+          'BY TEXIOL',
+          style: const pw.TextStyle(
+            color: PdfColors.white,
+            fontSize: 7.2,
+            letterSpacing: 1.1,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  static pw.Widget _winnerBanner({
+    required CricketMatch match,
+    required PlayerMatchStats stats,
+    required Player player,
+    required pw.MemoryImage? avatar,
+    required PdfColor ink,
+    required PdfColor green,
+    required PdfColor muted,
+  }) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: pw.BoxDecoration(
+      color: ink,
+      borderRadius: pw.BorderRadius.circular(12),
+    ),
+    child: pw.Row(
+      children: [
+        _pdfAvatar(
+          player,
+          avatar,
+          size: 43,
+          background: green,
+          textColor: ink,
+        ),
+        pw.SizedBox(width: 11),
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'MATCH WINNER',
+                style: pw.TextStyle(
+                  color: green,
+                  fontSize: 6.6,
+                  fontWeight: pw.FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(
+                player.name,
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
+                style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.Text(
+                'Player ID ${player.id}',
+                style: const pw.TextStyle(color: muted, fontSize: 6.8),
+              ),
+            ],
+          ),
+        ),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text(
+              match.winnerMetric == MatchWinnerMetric.runs
+                  ? '${stats.runs}'
+                  : '${stats.points}',
+              style: pw.TextStyle(
+                color: PdfColors.white,
+                fontSize: 24,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.Text(
+              match.winnerMetric == MatchWinnerMetric.runs ? 'RUNS' : 'POINTS',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 6.5,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 
   static pw.Widget _metricTile(
     String label,
@@ -437,31 +444,31 @@ class ScorecardExport {
     required PdfColor pale,
   }) => pw.Expanded(
     child: pw.Container(
-      padding: const pw.EdgeInsets.all(11),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       decoration: pw.BoxDecoration(
         color: pale,
-        borderRadius: pw.BorderRadius.circular(10),
+        borderRadius: pw.BorderRadius.circular(9),
       ),
       child: pw.Row(
         children: [
           pw.Container(
-            width: 27,
-            height: 27,
+            width: 23,
+            height: 23,
             alignment: pw.Alignment.center,
             decoration: pw.BoxDecoration(
               color: PdfColors.white,
-              borderRadius: pw.BorderRadius.circular(8),
+              borderRadius: pw.BorderRadius.circular(7),
             ),
             child: pw.Text(
               icon,
               style: pw.TextStyle(
                 color: ink,
-                fontSize: 8,
+                fontSize: 6.6,
                 fontWeight: pw.FontWeight.bold,
               ),
             ),
           ),
-          pw.SizedBox(width: 8),
+          pw.SizedBox(width: 7),
           pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -469,16 +476,16 @@ class ScorecardExport {
                 label,
                 style: pw.TextStyle(
                   color: muted,
-                  fontSize: 6.5,
+                  fontSize: 5.6,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.SizedBox(height: 2),
+              pw.SizedBox(height: 1),
               pw.Text(
                 value,
                 style: pw.TextStyle(
                   color: ink,
-                  fontSize: 10,
+                  fontSize: 8.5,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -493,13 +500,14 @@ class ScorecardExport {
     text,
     style: pw.TextStyle(
       color: ink,
-      fontSize: 11,
+      fontSize: 9.2,
       fontWeight: pw.FontWeight.bold,
       letterSpacing: .7,
     ),
   );
 
   static pw.Widget _podiumCard({
+    required double width,
     required int rank,
     required PlayerMatchStats stats,
     required Player? player,
@@ -508,19 +516,23 @@ class ScorecardExport {
     required PdfColor ink,
     required PdfColor muted,
   }) => pw.Container(
-    padding: const pw.EdgeInsets.all(12),
+    width: width,
+    height: 72,
+    padding: const pw.EdgeInsets.all(8),
     decoration: pw.BoxDecoration(
       color: PdfColors.white,
-      border: pw.Border.all(color: accent, width: 1.2),
-      borderRadius: pw.BorderRadius.circular(12),
+      border: pw.Border.all(color: accent, width: 1),
+      borderRadius: pw.BorderRadius.circular(10),
     ),
-    child: pw.Column(
+    child: pw.Row(
       children: [
         pw.Container(
-          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          width: 28,
+          height: 28,
+          alignment: pw.Alignment.center,
           decoration: pw.BoxDecoration(
             color: accent,
-            borderRadius: pw.BorderRadius.circular(999),
+            borderRadius: pw.BorderRadius.circular(8),
           ),
           child: pw.Text(
             '#$rank',
@@ -531,30 +543,73 @@ class ScorecardExport {
             ),
           ),
         ),
-        pw.SizedBox(height: 8),
-        if (player != null)
+        pw.SizedBox(width: 7),
+        if (player != null) ...[
           _pdfAvatar(
             player,
             avatar,
-            size: 44,
+            size: 34,
             background: accent,
             textColor: ink,
           ),
-        pw.SizedBox(height: 7),
-        pw.Text(
-          player?.name ?? stats.playerId,
-          textAlign: pw.TextAlign.center,
-          style: pw.TextStyle(
-            color: ink,
-            fontSize: 10,
-            fontWeight: pw.FontWeight.bold,
+          pw.SizedBox(width: 7),
+        ],
+        pw.Expanded(
+          child: pw.Column(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                player?.name ?? stats.playerId,
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
+                style: pw.TextStyle(
+                  color: ink,
+                  fontSize: 8.5,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(
+                '${stats.runs} runs | ${stats.points} pts',
+                style: pw.TextStyle(color: muted, fontSize: 6.3),
+              ),
+            ],
           ),
         ),
-        pw.SizedBox(height: 4),
-        pw.Text(
-          '${stats.runs} runs • ${stats.points} pts',
-          style: pw.TextStyle(color: muted, fontSize: 7.5),
-        ),
+      ],
+    ),
+  );
+
+  static pw.Widget _rankingTable({
+    required List<PlayerMatchStats> rankings,
+    required Map<String, Player> players,
+    required Map<String, pw.MemoryImage?> avatars,
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required PdfColor pale,
+    required PdfColor green,
+  }) => pw.Container(
+    decoration: pw.BoxDecoration(
+      border: pw.Border.all(color: line, width: .7),
+      borderRadius: pw.BorderRadius.circular(10),
+    ),
+    child: pw.Column(
+      children: [
+        for (var index = 0; index < rankings.length; index++)
+          _rankingRow(
+            rank: index + 1,
+            stats: rankings[index],
+            player: players[rankings[index].playerId],
+            avatar: avatars[rankings[index].playerId],
+            showDivider: index != rankings.length - 1,
+            ink: ink,
+            muted: muted,
+            line: line,
+            pale: pale,
+            green: green,
+          ),
       ],
     ),
   );
@@ -571,7 +626,7 @@ class ScorecardExport {
     required PdfColor pale,
     required PdfColor green,
   }) => pw.Container(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    padding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 6),
     decoration: pw.BoxDecoration(
       color: rank == 1 ? pale : PdfColors.white,
       border: showDivider
@@ -581,13 +636,13 @@ class ScorecardExport {
     child: pw.Row(
       children: [
         pw.Container(
-          width: 24,
+          width: 20,
           alignment: pw.Alignment.center,
           child: pw.Text(
             '$rank',
             style: pw.TextStyle(
               color: rank == 1 ? green : ink,
-              fontSize: 11,
+              fontSize: 9,
               fontWeight: pw.FontWeight.bold,
             ),
           ),
@@ -596,38 +651,160 @@ class ScorecardExport {
           _pdfAvatar(
             player,
             avatar,
-            size: 34,
+            size: 27,
             background: pale,
             textColor: ink,
           ),
-          pw.SizedBox(width: 9),
+          pw.SizedBox(width: 7),
         ],
         pw.Expanded(
-          flex: 3,
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
                 player?.name ?? stats.playerId,
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
                 style: pw.TextStyle(
                   color: ink,
-                  fontSize: 9.5,
+                  fontSize: 8.2,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.SizedBox(height: 2),
               pw.Text(
                 'ID ${player?.id ?? stats.playerId}',
-                style: pw.TextStyle(color: muted, fontSize: 6.8),
+                style: pw.TextStyle(color: muted, fontSize: 5.8),
               ),
             ],
           ),
         ),
         _tinyStat('RUNS', '${stats.runs}', ink, muted),
-        pw.SizedBox(width: 12),
+        pw.SizedBox(width: 10),
         _tinyStat('WKTS', '${stats.wickets}', ink, muted),
-        pw.SizedBox(width: 12),
+        pw.SizedBox(width: 10),
         _tinyStat('PTS', '${stats.points}', ink, muted),
+      ],
+    ),
+  );
+
+  static pw.Widget _compactRankingGrid({
+    required List<PlayerMatchStats> rankings,
+    required Map<String, Player> players,
+    required Map<String, pw.MemoryImage?> avatars,
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required PdfColor pale,
+    required PdfColor green,
+  }) {
+    final rows = <pw.Widget>[];
+    for (var index = 0; index < rankings.length; index += 2) {
+      rows.add(
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 5),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: _compactRankingCard(
+                  rank: index + 1,
+                  stats: rankings[index],
+                  player: players[rankings[index].playerId],
+                  avatar: avatars[rankings[index].playerId],
+                  ink: ink,
+                  muted: muted,
+                  line: line,
+                  pale: pale,
+                  green: green,
+                ),
+              ),
+              pw.SizedBox(width: 7),
+              pw.Expanded(
+                child: index + 1 < rankings.length
+                    ? _compactRankingCard(
+                        rank: index + 2,
+                        stats: rankings[index + 1],
+                        player: players[rankings[index + 1].playerId],
+                        avatar: avatars[rankings[index + 1].playerId],
+                        ink: ink,
+                        muted: muted,
+                        line: line,
+                        pale: pale,
+                        green: green,
+                      )
+                    : pw.SizedBox(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return pw.Column(children: rows);
+  }
+
+  static pw.Widget _compactRankingCard({
+    required int rank,
+    required PlayerMatchStats stats,
+    required Player? player,
+    required pw.MemoryImage? avatar,
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required PdfColor pale,
+    required PdfColor green,
+  }) => pw.Container(
+    height: 43,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+    decoration: pw.BoxDecoration(
+      color: rank == 1 ? pale : PdfColors.white,
+      border: pw.Border.all(color: line, width: .7),
+      borderRadius: pw.BorderRadius.circular(8),
+    ),
+    child: pw.Row(
+      children: [
+        pw.Container(
+          width: 18,
+          alignment: pw.Alignment.center,
+          child: pw.Text(
+            '$rank',
+            style: pw.TextStyle(
+              color: rank == 1 ? green : ink,
+              fontSize: 8.2,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        if (player != null) ...[
+          _pdfAvatar(
+            player,
+            avatar,
+            size: 25,
+            background: pale,
+            textColor: ink,
+          ),
+          pw.SizedBox(width: 5),
+        ],
+        pw.Expanded(
+          child: pw.Column(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                player?.name ?? stats.playerId,
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
+                style: pw.TextStyle(
+                  color: ink,
+                  fontSize: 7.2,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.Text(
+                '${stats.runs} R | ${stats.points} P | ${stats.wickets} W',
+                style: pw.TextStyle(color: muted, fontSize: 5.5),
+              ),
+            ],
+          ),
+        ),
       ],
     ),
   );
@@ -640,41 +817,93 @@ class ScorecardExport {
   ) => pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.end,
     children: [
-      pw.Text(label, style: pw.TextStyle(color: muted, fontSize: 6)),
-      pw.SizedBox(height: 2),
+      pw.Text(label, style: pw.TextStyle(color: muted, fontSize: 5.2)),
+      pw.SizedBox(height: 1),
       pw.Text(
         value,
         style: pw.TextStyle(
           color: ink,
-          fontSize: 10,
+          fontSize: 8.4,
           fontWeight: pw.FontWeight.bold,
         ),
       ),
     ],
   );
 
+  static pw.Widget _matchDetails(
+    CricketMatch match, {
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor pale,
+  }) {
+    final values = <(String, String)>[
+      (
+        'Scoring',
+        match.scoringMode == ScoringMode.ballByBall ? 'Ball by ball' : 'Quick total',
+      ),
+      (
+        'Winner metric',
+        match.winnerMetric == MatchWinnerMetric.runs ? 'Runs' : 'Overall points',
+      ),
+      ('Run point', '${match.pointRules.run}'),
+      ('Wicket', '${match.pointRules.wicket}'),
+      ('Catch', '${match.pointRules.catchPoint}'),
+      ('Direct RO', '${match.pointRules.directRunOut}'),
+      ('Stumping', '${match.pointRules.stumping}'),
+    ];
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: pw.BoxDecoration(
+        color: pale,
+        borderRadius: pw.BorderRadius.circular(10),
+      ),
+      child: pw.Column(
+        children: [
+          pw.Row(
+            children: [
+              for (var index = 0; index < 4; index++)
+                pw.Expanded(
+                  child: _detail(values[index].$1, values[index].$2, ink, muted),
+                ),
+            ],
+          ),
+          pw.SizedBox(height: 6),
+          pw.Row(
+            children: [
+              for (var index = 4; index < values.length; index++)
+                pw.Expanded(
+                  child: _detail(values[index].$1, values[index].$2, ink, muted),
+                ),
+              if (values.length < 8) pw.Spacer(),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   static pw.Widget _detail(
     String label,
     String value,
     PdfColor ink,
     PdfColor muted,
-  ) => pw.Container(
-    width: 115,
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Text(label, style: pw.TextStyle(color: muted, fontSize: 6.5)),
-        pw.SizedBox(height: 2),
-        pw.Text(
-          value,
-          style: pw.TextStyle(
-            color: ink,
-            fontSize: 8.5,
-            fontWeight: pw.FontWeight.bold,
-          ),
+  ) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Text(label, style: pw.TextStyle(color: muted, fontSize: 5.5)),
+      pw.SizedBox(height: 1),
+      pw.Text(
+        value,
+        maxLines: 1,
+        overflow: pw.TextOverflow.clip,
+        style: pw.TextStyle(
+          color: ink,
+          fontSize: 7,
+          fontWeight: pw.FontWeight.bold,
         ),
-      ],
-    ),
+      ),
+    ],
   );
 
   static pw.Widget _pdfAvatar(
@@ -689,7 +918,7 @@ class ScorecardExport {
     alignment: pw.Alignment.center,
     decoration: pw.BoxDecoration(
       color: background,
-      borderRadius: pw.BorderRadius.circular(size * .24),
+      borderRadius: pw.BorderRadius.circular(size * .22),
     ),
     child: image != null
         ? pw.Image(image, width: size, height: size, fit: pw.BoxFit.cover)

@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import 'match_summary_screen.dart';
+import 'public_player_profile_screen.dart';
 
 class TrackerScreen extends StatefulWidget {
   const TrackerScreen({required this.matchId, super.key});
@@ -221,9 +222,11 @@ class _TrackerScreenState extends State<TrackerScreen> {
         top: false,
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
-              child: Row(
+            GestureDetector(
+              onTap: () => openPlayerProfile(context, batter.id),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+                child: Row(
                 children: [
                   PlayerAvatar(player: batter, radius: 31),
                   const SizedBox(width: 13),
@@ -275,7 +278,8 @@ class _TrackerScreenState extends State<TrackerScreen> {
                       ),
                     ],
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
             Expanded(

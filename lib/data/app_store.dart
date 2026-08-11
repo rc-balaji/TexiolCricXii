@@ -1432,6 +1432,7 @@ class AppStore extends ChangeNotifier {
               _ => 'Your CricXii account has an update.',
             },
             referenceId: data['requestId']?.toString(),
+            fromPlayerId: fromId,
             createdAt: _dateFromCloud(data['createdAt']),
             read: data['read'] as bool? ?? false,
             actionStatus: data['actionStatus']?.toString(),

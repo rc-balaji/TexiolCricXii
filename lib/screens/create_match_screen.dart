@@ -8,6 +8,7 @@ import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
 import 'register_player_dialog.dart';
 import 'secret_draw_screen.dart';
+import 'public_player_profile_screen.dart';
 
 class CreateMatchScreen extends StatefulWidget {
   const CreateMatchScreen({super.key});
@@ -356,9 +357,10 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
                                   _selected.remove(player.id);
                                 }
                               }),
-                        secondary: PlayerAvatar(
-                          player: player,
-                                        ),
+                        secondary: GestureDetector(
+                          onTap: () => openPlayerProfile(context, player.id),
+                          child: PlayerAvatar(player: player),
+                        ),
                         title: Text(
                           player.name,
                           style: const TextStyle(fontWeight: FontWeight.w900),

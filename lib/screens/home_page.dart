@@ -9,6 +9,7 @@ import '../widgets/ui_bits.dart';
 import 'create_match_screen.dart';
 import 'match_summary_screen.dart';
 import 'notifications_screen.dart';
+import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'secret_draw_screen.dart';
 import 'tracker_screen.dart';
@@ -40,7 +41,10 @@ class HomePage extends StatelessWidget {
         children: [
           Row(
             children: [
-              PlayerAvatar(player: player, radius: 24),
+              GestureDetector(
+                onTap: () => openPlayerProfile(context, player.id),
+                child: PlayerAvatar(player: player, radius: 24),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -55,12 +59,15 @@ class HomePage extends StatelessWidget {
                         letterSpacing: 1.4,
                       ),
                     ),
-                    Text(
-                      player.name,
+                    GestureDetector(
+                      onTap: () => openPlayerProfile(context, player.id),
+                      child: Text(
+                        player.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ],
