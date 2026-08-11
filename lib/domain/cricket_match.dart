@@ -3,12 +3,12 @@ import 'enums.dart';
 class PointRules {
   const PointRules({
     this.run = 1,
-    this.wicket = 20,
-    this.catchPoint = 10,
-    this.directRunOut = 15,
-    this.assistedRunOut = 8,
-    this.stumping = 12,
-    this.notOutBonus = 5,
+    this.wicket = 5,
+    this.catchPoint = 2,
+    this.directRunOut = 3,
+    this.assistedRunOut = 1,
+    this.stumping = 2,
+    this.notOutBonus = 2,
   });
 
   final int run;
@@ -31,12 +31,42 @@ class PointRules {
 
   factory PointRules.fromJson(Map<String, dynamic> json) => PointRules(
     run: json['run'] as int? ?? 1,
-    wicket: json['wicket'] as int? ?? 20,
-    catchPoint: json['catchPoint'] as int? ?? 10,
-    directRunOut: json['directRunOut'] as int? ?? 15,
-    assistedRunOut: json['assistedRunOut'] as int? ?? 8,
-    stumping: json['stumping'] as int? ?? 12,
-    notOutBonus: json['notOutBonus'] as int? ?? 5,
+    wicket: json['wicket'] as int? ?? 5,
+    catchPoint: json['catchPoint'] as int? ?? 2,
+    directRunOut: json['directRunOut'] as int? ?? 3,
+    assistedRunOut: json['assistedRunOut'] as int? ?? 1,
+    stumping: json['stumping'] as int? ?? 2,
+    notOutBonus: json['notOutBonus'] as int? ?? 2,
+  );
+}
+
+class PointPreset {
+  const PointPreset({
+    required this.id,
+    required this.name,
+    required this.rules,
+    this.builtIn = false,
+  });
+
+  final String id;
+  final String name;
+  final PointRules rules;
+  final bool builtIn;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'rules': rules.toJson(),
+    'builtIn': builtIn,
+  };
+
+  factory PointPreset.fromJson(Map<String, dynamic> json) => PointPreset(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    rules: PointRules.fromJson(
+      Map<String, dynamic>.from(json['rules'] as Map? ?? const {}),
+    ),
+    builtIn: json['builtIn'] as bool? ?? false,
   );
 }
 
@@ -75,6 +105,106 @@ class DrawAssignment {
   factory DrawAssignment.fromJson(Map<String, dynamic> json) => DrawAssignment(
     playerId: json['playerId'] as String,
     card: DrawCard.fromJson(Map<String, dynamic>.from(json['card'] as Map)),
+  );
+}
+
+class BowlingBlock {
+  BowlingBlock({
+    required this.batterId,
+    required this.blockIndex,
+    required this.startLegalBall,
+    required this.legalBalls,
+    required this.bowlerId,
+  });
+
+  final String batterId;
+  final int blockIndex;
+  final int startLegalBall;
+  final int legalBalls;
+  String bowlerId;
+
+  Map<String, Object?> toJson() => {
+    'batterId': batterId,
+    'blockIndex': blockIndex,
+    'startLegalBall': startLegalBall,
+    'legalBalls': legalBalls,
+    'bowlerId': bowlerId,
+  };
+
+  factory BowlingBlock.fromJson(Map<String, dynamic> json) => BowlingBlock(
+    batterId: json['batterId'] as String,
+    blockIndex: json['blockIndex'] as int? ?? 0,
+    startLegalBall: json['startLegalBall'] as int? ?? 0,
+    legalBalls: json['legalBalls'] as int? ?? 6,
+    bowlerId: json['bowlerId'] as String,
+  );
+}
+
+class BowlerChange {
+  const BowlerChange({
+    required this.batterId,
+    required this.legalBallNumber,
+    required this.fromBowlerId,
+    required this.toBowlerId,
+    required this.createdAt,
+    this.reason = 'Replacement',
+    this.alsoNextBlock = false,
+  });
+
+  final String batterId;
+  final int legalBallNumber;
+  final String fromBowlerId;
+  final String toBowlerId;
+  final DateTime createdAt;
+  final String reason;
+  final bool alsoNextBlock;
+
+  Map<String, Object?> toJson() => {
+    'batterId': batterId,
+    'legalBallNumber': legalBallNumber,
+    'fromBowlerId': fromBowlerId,
+    'toBowlerId': toBowlerId,
+    'createdAt': createdAt.toIso8601String(),
+    'reason': reason,
+    'alsoNextBlock': alsoNextBlock,
+  };
+
+  factory BowlerChange.fromJson(Map<String, dynamic> json) => BowlerChange(
+    batterId: json['batterId'] as String,
+    legalBallNumber: json['legalBallNumber'] as int? ?? 0,
+    fromBowlerId: json['fromBowlerId'] as String,
+    toBowlerId: json['toBowlerId'] as String,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+    reason: json['reason'] as String? ?? 'Replacement',
+    alsoNextBlock: json['alsoNextBlock'] as bool? ?? false,
+  );
+}
+
+class MatchAuditEntry {
+  const MatchAuditEntry({
+    required this.type,
+    required this.createdAt,
+    this.playerId,
+    this.note,
+  });
+
+  final String type;
+  final DateTime createdAt;
+  final String? playerId;
+  final String? note;
+
+  Map<String, Object?> toJson() => {
+    'type': type,
+    'createdAt': createdAt.toIso8601String(),
+    'playerId': playerId,
+    'note': note,
+  };
+
+  factory MatchAuditEntry.fromJson(Map<String, dynamic> json) => MatchAuditEntry(
+    type: json['type'] as String,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+    playerId: json['playerId'] as String?,
+    note: json['note'] as String?,
   );
 }
 
@@ -155,14 +285,27 @@ class CricketMatch {
     this.winnerMetric = MatchWinnerMetric.overallPoints,
     this.trackerPlayerId,
     this.pointRules = const PointRules(),
+    this.pointPresetName = 'Balanced',
+    this.autoBowlingPlan = true,
+    this.orderSource = BattingOrderSource.secretDraw,
+    this.startedAt,
+    this.completedAt,
     List<String>? battingOrder,
+    List<String>? drawPlayerOrder,
     List<DrawCard>? drawPool,
     Map<String, DrawAssignment>? drawAssignments,
+    List<BowlingBlock>? bowlingPlan,
+    List<BowlerChange>? bowlerChanges,
+    List<MatchAuditEntry>? auditTrail,
     List<ScoreEvent>? events,
     this.statsApplied = false,
   }) : battingOrder = battingOrder ?? <String>[],
+       drawPlayerOrder = drawPlayerOrder ?? <String>[],
        drawPool = drawPool ?? <DrawCard>[],
        drawAssignments = drawAssignments ?? <String, DrawAssignment>{},
+       bowlingPlan = bowlingPlan ?? <BowlingBlock>[],
+       bowlerChanges = bowlerChanges ?? <BowlerChange>[],
+       auditTrail = auditTrail ?? <MatchAuditEntry>[],
        events = events ?? <ScoreEvent>[];
 
   final String id;
@@ -171,14 +314,23 @@ class CricketMatch {
   ScoringMode scoringMode;
   int ballLimit;
   final DateTime createdAt;
+  DateTime? startedAt;
+  DateTime? completedAt;
   MatchStatus status;
   MatchWinnerMetric winnerMetric;
   String? trackerPlayerId;
   PointRules pointRules;
+  String pointPresetName;
+  bool autoBowlingPlan;
+  BattingOrderSource orderSource;
   final List<String> participantIds;
   final List<String> battingOrder;
+  final List<String> drawPlayerOrder;
   final List<DrawCard> drawPool;
   final Map<String, DrawAssignment> drawAssignments;
+  final List<BowlingBlock> bowlingPlan;
+  final List<BowlerChange> bowlerChanges;
+  final List<MatchAuditEntry> auditTrail;
   final List<ScoreEvent> events;
   bool statsApplied;
 
@@ -189,16 +341,25 @@ class CricketMatch {
     'scoringMode': scoringMode.name,
     'ballLimit': ballLimit,
     'createdAt': createdAt.toIso8601String(),
+    'startedAt': startedAt?.toIso8601String(),
+    'completedAt': completedAt?.toIso8601String(),
     'status': status.name,
     'winnerMetric': winnerMetric.name,
     'trackerPlayerId': trackerPlayerId,
     'pointRules': pointRules.toJson(),
+    'pointPresetName': pointPresetName,
+    'autoBowlingPlan': autoBowlingPlan,
+    'orderSource': orderSource.name,
     'participantIds': participantIds,
     'battingOrder': battingOrder,
+    'drawPlayerOrder': drawPlayerOrder,
     'drawPool': drawPool.map((card) => card.toJson()).toList(),
     'drawAssignments': drawAssignments.map(
       (key, value) => MapEntry(key, value.toJson()),
     ),
+    'bowlingPlan': bowlingPlan.map((value) => value.toJson()).toList(),
+    'bowlerChanges': bowlerChanges.map((value) => value.toJson()).toList(),
+    'auditTrail': auditTrail.map((value) => value.toJson()).toList(),
     'events': events.map((event) => event.toJson()).toList(),
     'statsApplied': statsApplied,
   };
@@ -211,6 +372,12 @@ class CricketMatch {
     ballLimit: json['ballLimit'] as int,
     participantIds: List<String>.from(json['participantIds'] as List),
     createdAt: DateTime.parse(json['createdAt'] as String),
+    startedAt: json['startedAt'] == null
+        ? null
+        : DateTime.tryParse(json['startedAt'].toString()),
+    completedAt: json['completedAt'] == null
+        ? null
+        : DateTime.tryParse(json['completedAt'].toString()),
     status: MatchStatus.values.byName(json['status'] as String),
     winnerMetric: MatchWinnerMetric.values.byName(
       json['winnerMetric'] as String? ?? MatchWinnerMetric.overallPoints.name,
@@ -219,7 +386,15 @@ class CricketMatch {
     pointRules: PointRules.fromJson(
       Map<String, dynamic>.from(json['pointRules'] as Map? ?? const {}),
     ),
+    pointPresetName: json['pointPresetName'] as String? ?? 'Balanced',
+    autoBowlingPlan: json['autoBowlingPlan'] as bool? ?? true,
+    orderSource: BattingOrderSource.values.byName(
+      json['orderSource'] as String? ?? BattingOrderSource.secretDraw.name,
+    ),
     battingOrder: List<String>.from(json['battingOrder'] as List? ?? const []),
+    drawPlayerOrder: List<String>.from(
+      json['drawPlayerOrder'] as List? ?? json['participantIds'] as List,
+    ),
     drawPool: (json['drawPool'] as List? ?? const [])
         .map(
           (value) => DrawCard.fromJson(Map<String, dynamic>.from(value as Map)),
@@ -234,6 +409,24 @@ class CricketMatch {
             DrawAssignment.fromJson(Map<String, dynamic>.from(value as Map)),
           ),
         ),
+    bowlingPlan: (json['bowlingPlan'] as List? ?? const [])
+        .map(
+          (value) =>
+              BowlingBlock.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
+        .toList(),
+    bowlerChanges: (json['bowlerChanges'] as List? ?? const [])
+        .map(
+          (value) =>
+              BowlerChange.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
+        .toList(),
+    auditTrail: (json['auditTrail'] as List? ?? const [])
+        .map(
+          (value) =>
+              MatchAuditEntry.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
+        .toList(),
     events: (json['events'] as List? ?? const [])
         .map(
           (value) =>

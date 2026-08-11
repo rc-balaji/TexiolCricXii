@@ -1,4 +1,4 @@
-# Firebase setup — CricXii v0.3.0
+# Firebase setup — CricXii v1.0.0
 
 ## Authentication
 

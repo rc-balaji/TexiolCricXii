@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import 'live_match_screen.dart';
 import 'match_summary_screen.dart';
 import 'public_player_profile_screen.dart';
 
@@ -158,6 +160,7 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
         .where((player) => player.id != batter.id)
         .toList();
     final playerIndex = match.battingOrder.indexOf(batter.id) + 1;
+    final currentStats = ScoringEngine.calculateStats(match)[batter.id]!;
 
     return Scaffold(
       appBar: AppBar(
@@ -172,6 +175,15 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Live ranking & match controls',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LiveMatchScreen(matchId: match.id),
+              ),
+            ),
+            icon: const Icon(Icons.leaderboard_rounded),
+          ),
           IconButton(
             tooltip: 'Undo last entry',
             onPressed: _busy ? null : _undo,
@@ -200,44 +212,121 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: AppColors.ink,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
-                children: [
-                  PlayerAvatar(player: batter, radius: 31),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Row(
+                  children: [
+                    PlayerAvatar(player: batter, radius: 31),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'BATTER $playerIndex OF ${match.battingOrder.length}',
+                            style: const TextStyle(
+                              color: AppColors.green,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            batter.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            OversFormat.setupOversLabel(match.ballLimit),
+                            style: const TextStyle(
+                              color: Color(0xFFB8CCC2),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'BATTER $playerIndex OF ${match.battingOrder.length}',
+                          '${currentStats.points} PTS',
                           style: const TextStyle(
                             color: AppColors.green,
-                            fontSize: 9,
+                            fontSize: 18,
                             fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
                           ),
                         ),
-                        const SizedBox(height: 3),
                         Text(
-                          batter.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          '${currentStats.wickets} WKTS',
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 24,
+                            fontSize: 12,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
                       ],
                     ),
-                  ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
+            if (match.autoBowlingPlan) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'FIXED BOWLING PLAN',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...BowlingScheduler.blocksForBatter(match, batter.id)
+                          .map((block) {
+                            final bowler = store.playerById(block.bowlerId);
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 5),
+                              child: Text(
+                                '${block.legalBalls == 6 ? 'Over ${block.blockIndex + 1}' : 'Final ${block.legalBalls} balls'} • ${bowler?.name ?? block.bowlerId}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            );
+                          }),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${OversFormat.setupOversLabel(match.ballLimit)} per batter • Direct runs stores the final total, while this plan helps the ground-side bowling order.',
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+            ] else
+              const SizedBox(height: 6),
             TextField(
               controller: _runs,
               autofocus: true,

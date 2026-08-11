@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
 import 'create_match_screen.dart';
+import 'daily_performance_screen.dart';
 import 'match_summary_screen.dart';
 import 'notifications_screen.dart';
 import 'public_player_profile_screen.dart';
@@ -137,7 +139,7 @@ class HomePage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
-                    'SINGLES MATCH • V1',
+                    'SINGLES MATCH • V1.0.0',
                     style: TextStyle(
                       color: AppColors.green,
                       fontSize: 10,
@@ -210,6 +212,37 @@ class HomePage extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 22),
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(16),
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE7F8F0),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(
+                  Icons.insights_rounded,
+                  color: AppColors.greenDark,
+                ),
+              ),
+              title: const Text(
+                "Today's performance",
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: const Text(
+                'Overall ranking, match timeline and performance PDF for any date.',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const DailyPerformanceScreen(),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 26),
           const SectionLabel('Continue playing'),
           const SizedBox(height: 12),
@@ -261,7 +294,7 @@ class HomePage extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                     subtitle: Text(
-                      '${match.id}  •  ${match.scoringMode.label}  •  ${match.ballLimit} balls',
+                      '${match.id}  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}',
                     ),
                     trailing: const Icon(
                       Icons.arrow_forward_ios_rounded,

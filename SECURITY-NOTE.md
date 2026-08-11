@@ -1,6 +1,6 @@
 # Security note — Anonymous-only prototype
 
-CricXii v0.3.0 deliberately uses Firebase Anonymous Authentication only because this build is being tested on the Firebase Spark plan with the requested simplified architecture.
+CricXii v1.0.0 deliberately uses Firebase Anonymous Authentication only because this build is being tested on the Firebase Spark plan with the requested simplified architecture.
 
 The visible email/password account is implemented in the client and Firestore. Passwords are never stored in plain text. A random salt and an iterated SHA-256 verifier are stored in `loginCredentials`.
 

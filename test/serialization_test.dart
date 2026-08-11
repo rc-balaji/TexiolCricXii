@@ -16,10 +16,22 @@ void main() {
       battingOrder: ['100002', '100001'],
       createdAt: DateTime.utc(2026, 8, 9),
       status: MatchStatus.live,
+      startedAt: DateTime.utc(2026, 8, 9, 9, 30),
+      pointPresetName: 'Ground Rules',
+      autoBowlingPlan: true,
       pointRules: const PointRules(wicket: 25, catchPoint: 12),
       drawPool: const [
         DrawCard(id: 'card-a', order: 1, colorValue: 0xFF19C37D),
         DrawCard(id: 'card-b', order: 2, colorValue: 0xFFFFB020),
+      ],
+      bowlingPlan: [
+        BowlingBlock(
+          batterId: '100002',
+          blockIndex: 0,
+          startLegalBall: 0,
+          legalBalls: 6,
+          bowlerId: '100001',
+        ),
       ],
       events: [
         ScoreEvent(
@@ -43,6 +55,9 @@ void main() {
     expect(restored.battingOrder, ['100002', '100001']);
     expect(restored.pointRules.wicket, 25);
     expect(restored.drawPool.length, 2);
+    expect(restored.pointPresetName, 'Ground Rules');
+    expect(restored.startedAt, DateTime.utc(2026, 8, 9, 9, 30));
+    expect(restored.bowlingPlan.single.bowlerId, '100001');
     expect(restored.events.single.batRuns, 6);
   });
 }

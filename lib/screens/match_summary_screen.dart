@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 import '../export/scorecard_export.dart';
@@ -9,6 +10,7 @@ import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
+import 'secret_draw_screen.dart';
 import 'tracker_screen.dart';
 
 class MatchSummaryScreen extends StatefulWidget {
@@ -88,6 +90,34 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
     Navigator.of(
       context,
     ).pushReplacement(MaterialPageRoute(builder: (_) => page));
+  }
+
+  Future<void> _startRankRematch() async {
+    try {
+      final match = await AppScope.read(context).createRankRematch(
+        widget.matchId,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => SecretDrawScreen(matchId: match.id),
+        ),
+      );
+    } on StateError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
+  String _time(DateTime? value) {
+    if (value == null) return '--';
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final minute = value.minute.toString().padLeft(2, '0');
+    final suffix = value.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $suffix';
   }
 
   @override
@@ -193,7 +223,7 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                     const SizedBox(height: 6),
                     Text(
                       '${match.id} • ${match.scoringMode.label} • '
-                      '${match.scoringMode == ScoringMode.ballByBall ? '${match.ballLimit} balls each' : 'final totals'}',
+                      '${OversFormat.setupOversLabel(match.ballLimit)} each',
                       style: const TextStyle(color: AppColors.muted),
                     ),
                     const SizedBox(height: 6),
@@ -202,6 +232,14 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                       style: const TextStyle(
                         color: AppColors.greenDark,
                         fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Started ${_time(match.startedAt)} • Completed ${_time(match.completedAt)} • Points preset: ${match.pointPresetName}',
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -259,11 +297,12 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                                 ),
                               ),
                               Text(
-                                '${stats.wickets} wkts • ${stats.catches} catches • '
+                                '${stats.wickets} WKTS • ${stats.catches} catches • '
                                 '${stats.directRunOuts + stats.assistedRunOuts} run-outs',
                                 style: const TextStyle(
-                                  color: AppColors.muted,
+                                  color: AppColors.ink,
                                   fontSize: 11,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                             ],
@@ -280,10 +319,11 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                               ),
                             ),
                             Text(
-                              '${stats.points} pts${match.scoringMode == ScoringMode.ballByBall ? ' • ${stats.balls}b' : ''}',
+                              '${stats.points} PTS${match.scoringMode == ScoringMode.ballByBall ? ' • ${stats.balls}b' : ''}',
                               style: const TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 10,
+                                color: AppColors.greenDark,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ],
@@ -297,6 +337,12 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
             }),
             const SizedBox(height: 18),
             FilledButton.icon(
+              onPressed: _startRankRematch,
+              icon: const Icon(Icons.replay_circle_filled_rounded),
+              label: const Text('Start new match with this rank order'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
               onPressed: _exporting ? null : _share,
               icon: _exporting
                   ? const SizedBox.square(

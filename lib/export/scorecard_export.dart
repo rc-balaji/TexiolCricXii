@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 
@@ -43,6 +44,8 @@ class ScorecardExport {
     Directory? outputDirectory,
   }) async {
     final rankings = ScoringEngine.rankings(match);
+    final logoData = await rootBundle.load('assets/branding/cricxii_app_icon.png');
+    final logo = pw.MemoryImage(logoData.buffer.asUint8List());
     final avatars = <String, pw.MemoryImage?>{};
     for (final stats in rankings) {
       final player = players[stats.playerId];
@@ -52,7 +55,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v0.3.1',
+      creator: 'CricXii v1.0.0',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -82,7 +85,7 @@ class ScorecardExport {
         build: (context) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            _header(ink: ink, green: green),
+            _header(logo: logo, ink: ink, green: green),
             pw.SizedBox(height: 12),
             pw.Row(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -120,8 +123,8 @@ class ScorecardExport {
                   ),
                   child: pw.Text(
                     match.scoringMode == ScoringMode.ballByBall
-                        ? '${match.ballLimit} BALLS EACH'
-                        : 'DIRECT RUNS',
+                        ? '${OversFormat.setupOversLabel(match.ballLimit).toUpperCase()} EACH'
+                        : 'DIRECT RUNS • ${OversFormat.setupOversLabel(match.ballLimit).toUpperCase()}',
                     style: pw.TextStyle(
                       color: greenDark,
                       fontSize: 7.5,
@@ -305,6 +308,7 @@ class ScorecardExport {
   }
 
   static pw.Widget _header({
+    required pw.MemoryImage logo,
     required PdfColor ink,
     required PdfColor green,
   }) => pw.Container(
@@ -317,10 +321,21 @@ class ScorecardExport {
     child: pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
+        pw.Row(
           children: [
-            pw.Text(
+            pw.Container(
+              width: 31,
+              height: 31,
+              decoration: pw.BoxDecoration(
+                borderRadius: pw.BorderRadius.circular(8),
+              ),
+              child: pw.Image(logo, fit: pw.BoxFit.cover),
+            ),
+            pw.SizedBox(width: 9),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
               'CRICXII',
               style: pw.TextStyle(
                 color: PdfColors.white,
@@ -330,13 +345,15 @@ class ScorecardExport {
               ),
             ),
             pw.SizedBox(height: 1),
-            pw.Text(
-              'OFFICIAL MATCH SCORECARD',
-              style: pw.TextStyle(
-                color: green,
-                fontSize: 6.8,
-                letterSpacing: 1,
-              ),
+                pw.Text(
+                  'OFFICIAL MATCH SCORECARD',
+                  style: pw.TextStyle(
+                    color: green,
+                    fontSize: 6.8,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -839,17 +856,15 @@ class ScorecardExport {
     final values = <(String, String)>[
       (
         'Scoring',
-        match.scoringMode == ScoringMode.ballByBall ? 'Ball by ball' : 'Quick total',
+        match.scoringMode == ScoringMode.ballByBall ? 'Ball tracker' : 'Direct runs',
       ),
-      (
-        'Winner metric',
-        match.winnerMetric == MatchWinnerMetric.runs ? 'Runs' : 'Overall points',
-      ),
-      ('Run point', '${match.pointRules.run}'),
-      ('Wicket', '${match.pointRules.wicket}'),
-      ('Catch', '${match.pointRules.catchPoint}'),
-      ('Direct RO', '${match.pointRules.directRunOut}'),
-      ('Stumping', '${match.pointRules.stumping}'),
+      ('Format', OversFormat.setupOversLabel(match.ballLimit)),
+      ('Preset', match.pointPresetName),
+      ('Wicket', '${match.pointRules.wicket} pts'),
+      ('Catch', '${match.pointRules.catchPoint} pts'),
+      ('Direct RO', '${match.pointRules.directRunOut} pts'),
+      ('Started', _time(match.startedAt ?? match.createdAt)),
+      ('Finished', match.completedAt == null ? '-' : _time(match.completedAt!)),
     ];
     return pw.Container(
       width: double.infinity,
@@ -860,24 +875,22 @@ class ScorecardExport {
       ),
       child: pw.Column(
         children: [
-          pw.Row(
-            children: [
-              for (var index = 0; index < 4; index++)
-                pw.Expanded(
-                  child: _detail(values[index].$1, values[index].$2, ink, muted),
-                ),
-            ],
-          ),
-          pw.SizedBox(height: 6),
-          pw.Row(
-            children: [
-              for (var index = 4; index < values.length; index++)
-                pw.Expanded(
-                  child: _detail(values[index].$1, values[index].$2, ink, muted),
-                ),
-              if (values.length < 8) pw.Spacer(),
-            ],
-          ),
+          for (var row = 0; row < 2; row++) ...[
+            pw.Row(
+              children: [
+                for (var column = 0; column < 4; column++)
+                  pw.Expanded(
+                    child: _detail(
+                      values[(row * 4) + column].$1,
+                      values[(row * 4) + column].$2,
+                      ink,
+                      muted,
+                    ),
+                  ),
+              ],
+            ),
+            if (row == 0) pw.SizedBox(height: 6),
+          ],
         ],
       ),
     );
@@ -965,6 +978,12 @@ class ScorecardExport {
     } finally {
       client.close(force: true);
     }
+  }
+
+  static String _time(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$hour:$minute ${value.hour >= 12 ? 'PM' : 'AM'}';
   }
 
   static String _date(DateTime value) {

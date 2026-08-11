@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'public_player_profile_screen.dart';
 import 'register_player_dialog.dart';
 import 'secret_draw_screen.dart';
-import 'public_player_profile_screen.dart';
 
 class CreateMatchScreen extends StatefulWidget {
   const CreateMatchScreen({super.key});
@@ -18,7 +19,7 @@ class CreateMatchScreen extends StatefulWidget {
 }
 
 class _CreateMatchScreenState extends State<CreateMatchScreen> {
-  final _title = TextEditingController(text: 'Evening Singles');
+  final _title = TextEditingController();
   final _playerSearch = TextEditingController();
   final Set<String> _selected = <String>{};
   ScoringMode _mode = ScoringMode.ballByBall;
@@ -26,6 +27,8 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   int _ballLimit = 9;
   String? _trackerPlayerId;
   PointRules _pointRules = const PointRules();
+  String _pointPresetName = 'Balanced';
+  String _pointPresetId = 'balanced';
   bool _initialized = false;
   bool _busy = false;
 
@@ -55,6 +58,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
             ? _trackerPlayerId
             : null,
         pointRules: _pointRules,
+        pointPresetName: _pointPresetName,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -71,32 +75,62 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     }
   }
 
-  Future<void> _customBalls() async {
-    final controller = TextEditingController(text: '9');
+  Future<void> _customOvers() async {
+    final controller = TextEditingController(
+      text: _ballLimit % 3 == 0
+          ? (_ballLimit / 6).toString().replaceFirst(RegExp(r'\.0$'), '')
+          : '',
+    );
+    String? validation;
     final value = await showDialog<int>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Custom legal balls'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Balls per player',
-            helperText: 'Example: 1.5 overs = 9 balls in CricXii',
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Overs per player'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Overs',
+                  hintText: '1.5',
+                  errorText: validation,
+                  helperText: 'CricXii setup: 1.5 overs = 9 legal balls.',
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Use whole or half overs: 1, 1.5, 2, 2.5 ...',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final balls = OversFormat.setupOversToBalls(controller.text);
+                if (balls == null) {
+                  setDialogState(
+                    () => validation = 'Enter whole or half overs only.',
+                  );
+                  return;
+                }
+                Navigator.pop(dialogContext, balls);
+              },
+              child: const Text('Use overs'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, int.tryParse(controller.text)),
-            child: const Text('Use balls'),
-          ),
-        ],
       ),
     );
     controller.dispose();
@@ -113,7 +147,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       builder: (context) => AlertDialog(
         title: Text('Add ${created.player.name} to this match?'),
         content: const Text(
-          'The account was created separately. Choose whether this player should participate now.',
+          'The account is ready. Add this player to today’s match now?',
         ),
         actions: [
           TextButton(
@@ -140,68 +174,101 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     final assist = TextEditingController(text: '${_pointRules.assistedRunOut}');
     final stumping = TextEditingController(text: '${_pointRules.stumping}');
     final notOut = TextEditingController(text: '${_pointRules.notOutBonus}');
-    final result = await showModalBottomSheet<bool>(
+    final presetName = TextEditingController();
+    var makeDefault = false;
+    final result = await showModalBottomSheet<_PointEditResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          0,
-          20,
-          MediaQuery.viewInsetsOf(context).bottom + 24,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Points rules',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewInsetsOf(context).bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Points rules',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'These values lock when the match starts.',
-                style: TextStyle(color: AppColors.muted),
-              ),
-              const SizedBox(height: 18),
-              _NumberField(controller: run, label: 'Per run'),
-              _NumberField(controller: wicket, label: 'Wicket'),
-              _NumberField(controller: catchPoint, label: 'Catch'),
-              _NumberField(controller: direct, label: 'Direct run out'),
-              _NumberField(
-                controller: assist,
-                label: 'Assisted run out (each)',
-              ),
-              _NumberField(controller: stumping, label: 'Stumping'),
-              _NumberField(controller: notOut, label: 'Not-out bonus'),
-              const SizedBox(height: 8),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Save points'),
-              ),
-            ],
+                const SizedBox(height: 6),
+                const Text(
+                  'Balanced default: wicket 5, catch 2, direct run-out 3. Match rules lock when play starts.',
+                  style: TextStyle(color: AppColors.muted),
+                ),
+                const SizedBox(height: 18),
+                _NumberField(controller: run, label: 'Per run'),
+                _NumberField(controller: wicket, label: 'Wicket'),
+                _NumberField(controller: catchPoint, label: 'Catch'),
+                _NumberField(controller: direct, label: 'Direct run out'),
+                _NumberField(
+                  controller: assist,
+                  label: 'Assisted run out (each)',
+                ),
+                _NumberField(controller: stumping, label: 'Stumping'),
+                _NumberField(controller: notOut, label: 'Not-out bonus'),
+                const Divider(height: 26),
+                TextField(
+                  controller: presetName,
+                  textCapitalization: TextCapitalization.words,
+                  onChanged: (_) => setSheetState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Save as preset (optional)',
+                    hintText: 'Weekend Ground Rules',
+                    prefixIcon: Icon(Icons.bookmark_add_outlined),
+                  ),
+                ),
+                if (presetName.text.trim().isNotEmpty)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: makeDefault,
+                    onChanged: (value) =>
+                        setSheetState(() => makeDefault = value),
+                    title: const Text(
+                      'Use as default for new matches',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: () {
+                    int value(TextEditingController controller, int fallback) =>
+                        int.tryParse(controller.text) ?? fallback;
+                    Navigator.pop(
+                      context,
+                      _PointEditResult(
+                        rules: PointRules(
+                          run: value(run, _pointRules.run),
+                          wicket: value(wicket, _pointRules.wicket),
+                          catchPoint: value(catchPoint, _pointRules.catchPoint),
+                          directRunOut: value(direct, _pointRules.directRunOut),
+                          assistedRunOut: value(
+                            assist,
+                            _pointRules.assistedRunOut,
+                          ),
+                          stumping: value(stumping, _pointRules.stumping),
+                          notOutBonus: value(notOut, _pointRules.notOutBonus),
+                        ),
+                        presetName: presetName.text.trim(),
+                        makeDefault: makeDefault,
+                      ),
+                    );
+                  },
+                  child: const Text('Use these points'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
-    if (result == true && mounted) {
-      int value(TextEditingController controller, int fallback) =>
-          int.tryParse(controller.text) ?? fallback;
-      setState(() {
-        _pointRules = PointRules(
-          run: value(run, 1),
-          wicket: value(wicket, 20),
-          catchPoint: value(catchPoint, 10),
-          directRunOut: value(direct, 15),
-          assistedRunOut: value(assist, 8),
-          stumping: value(stumping, 12),
-          notOutBonus: value(notOut, 5),
-        );
-      });
-    }
     for (final controller in [
       run,
       wicket,
@@ -210,8 +277,37 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       assist,
       stumping,
       notOut,
+      presetName,
     ]) {
       controller.dispose();
+    }
+    if (result == null || !mounted) return;
+
+    var presetId = 'custom';
+    var presetLabel = 'Custom';
+    if (result.presetName.isNotEmpty) {
+      try {
+        final preset = await AppScope.read(context).savePointPreset(
+          name: result.presetName,
+          rules: result.rules,
+          makeDefault: result.makeDefault,
+        );
+        presetId = preset.id;
+        presetLabel = preset.name;
+      } on StateError catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(error.message)));
+        }
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _pointRules = result.rules;
+        _pointPresetId = presetId;
+        _pointPresetName = presetLabel;
+      });
     }
   }
 
@@ -220,6 +316,11 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     final store = AppScope.of(context);
     if (!_initialized) {
       _selected.add(store.activePlayer!.id);
+      _title.text = store.suggestMatchTitle();
+      final preset = store.defaultPointPreset;
+      _pointRules = preset.rules;
+      _pointPresetId = preset.id;
+      _pointPresetName = preset.name;
       _initialized = true;
     }
     final selectedPlayers = store.visiblePlayers
@@ -237,6 +338,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     if (_trackerPlayerId != null && !_selected.contains(_trackerPlayerId)) {
       _trackerPlayerId = null;
     }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Create singles match')),
       body: ListView(
@@ -245,7 +347,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
           const ScreenTitle(
             title: 'Match setup',
             subtitle:
-                'One batting turn per player. Out or the selected ball limit ends the turn.',
+                'Set overs, players and points. The secret draw randomises both pass order and hidden card numbers.',
           ),
           const SizedBox(height: 22),
           TextField(
@@ -255,6 +357,11 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
               labelText: 'Match name',
               prefixIcon: Icon(Icons.edit_outlined),
             ),
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'Default name is generated from today’s match number and time of day. You can edit it.',
+            style: TextStyle(color: AppColors.muted, fontSize: 12),
           ),
           const SizedBox(height: 22),
           const SectionLabel('Scoring method'),
@@ -279,33 +386,41 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
           const SizedBox(height: 10),
           Text(
             _mode == ScoringMode.ballByBall
-                ? 'Track every ball: 0, 1, 2, 3, 4, 5, 6, extras and wicket.'
-                : 'After each player finishes, enter only their total runs and optional out details.',
+                ? 'Every delivery is stored with time, bowler, runs, extras and wicket details.'
+                : 'Fast entry: save each batter’s final total and dismissal. The fixed bowling plan is still visible.',
             style: const TextStyle(color: AppColors.muted, height: 1.35),
           ),
           const SizedBox(height: 24),
-          const SectionLabel('Balls per player'),
+          const SectionLabel('Overs per player'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final preset in const [6, 9, 12, 18, 36])
+              for (final preset in const <int>[6, 9, 12, 15, 18, 24])
                 ChoiceChip(
-                  label: Text(preset == 9 ? '9 • 1½ overs' : '$preset balls'),
+                  label: Text(OversFormat.setupOversLabel(preset)),
                   selected: _ballLimit == preset,
                   onSelected: (_) => setState(() => _ballLimit = preset),
                 ),
               ActionChip(
                 avatar: const Icon(Icons.tune_rounded, size: 18),
                 label: Text(
-                  const [6, 9, 12, 18, 36].contains(_ballLimit)
+                  const <int>[6, 9, 12, 15, 18, 24].contains(_ballLimit)
                       ? 'Custom'
-                      : '$_ballLimit balls',
+                      : OversFormat.setupOversLabel(_ballLimit),
                 ),
-                onPressed: _customBalls,
+                onPressed: _customOvers,
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${OversFormat.setupOversLabel(_ballLimit)} = $_ballLimit legal balls for each batting turn.',
+            style: const TextStyle(
+              color: AppColors.greenDark,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 24),
           SectionLabel(
@@ -421,23 +536,56 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
             onSelectionChanged: (value) =>
                 setState(() => _winnerMetric = value.single),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            initialValue: store.pointPresets.any(
+              (preset) => preset.id == _pointPresetId,
+            )
+                ? _pointPresetId
+                : null,
+            decoration: const InputDecoration(
+              labelText: 'Points preset',
+              prefixIcon: Icon(Icons.bookmarks_outlined),
+            ),
+            items: store.pointPresets
+                .map(
+                  (preset) => DropdownMenuItem(
+                    value: preset.id,
+                    child: Text(
+                      '${preset.name}${preset.id == store.defaultPointPresetId ? ' • Default' : ''}',
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              final preset = store.pointPresets.firstWhere(
+                (item) => item.id == value,
+              );
+              setState(() {
+                _pointPresetId = preset.id;
+                _pointPresetName = preset.name;
+                _pointRules = preset.rules;
+              });
+            },
+          ),
+          const SizedBox(height: 10),
           Card(
             child: ListTile(
               leading: const Icon(
                 Icons.calculate_outlined,
                 color: AppColors.greenDark,
               ),
-              title: const Text(
-                'Local All-Rounder points',
-                style: TextStyle(fontWeight: FontWeight.w900),
+              title: Text(
+                '$_pointPresetName points',
+                style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               subtitle: Text(
-                '${_pointRules.run}/run • ${_pointRules.wicket}/wicket • ${_pointRules.catchPoint}/catch',
+                '${_pointRules.run}/run • ${_pointRules.wicket}/wicket • ${_pointRules.catchPoint}/catch • ${_pointRules.directRunOut}/direct RO',
               ),
               trailing: TextButton(
                 onPressed: _editPoints,
-                child: const Text('Edit'),
+                child: const Text('Edit / Save'),
               ),
             ),
           ),
@@ -458,6 +606,18 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       ),
     );
   }
+}
+
+class _PointEditResult {
+  const _PointEditResult({
+    required this.rules,
+    required this.presetName,
+    required this.makeDefault,
+  });
+
+  final PointRules rules;
+  final String presetName;
+  final bool makeDefault;
 }
 
 class _NumberField extends StatelessWidget {

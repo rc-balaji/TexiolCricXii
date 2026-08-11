@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
@@ -38,7 +39,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
         builder: (context) => AlertDialog(
           backgroundColor: Color(assignment.card.colorValue),
           title: const Text(
-            'Your secret draw',
+            'Your secret number',
             style: TextStyle(color: Colors.white),
           ),
           content: Column(
@@ -61,7 +62,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Remember it. Do not show the next player.',
+                'Remember it, hide it, then pass the phone. Both the card positions and player pass order are random.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -98,9 +99,9 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset every selection?'),
+        title: const Text('Generate a fresh random draw?'),
         content: const Text(
-          'All chosen cards will be cleared and a new draw will be generated.',
+          'Chosen cards, hidden numbers and the pass-to-player order will all be randomised again.',
         ),
         actions: [
           TextButton(
@@ -109,7 +110,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Reset draw'),
+            child: const Text('Fresh draw'),
           ),
         ],
       ),
@@ -128,9 +129,9 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
     final page = match.scoringMode == ScoringMode.ballByBall
         ? TrackerScreen(matchId: match.id)
         : QuickScoreScreen(matchId: match.id);
-    Navigator.of(
-      context,
-    ).pushReplacement(MaterialPageRoute(builder: (_) => page));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => page),
+    );
   }
 
   @override
@@ -145,13 +146,14 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
     final available = store.availableDrawCards(match);
     final drawComplete =
         match.battingOrder.length == match.participantIds.length;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(match.id),
         actions: [
           if (!drawComplete)
             IconButton(
-              tooltip: 'Reset draw',
+              tooltip: 'Fresh random draw',
               onPressed: match.drawAssignments.isEmpty ? null : _reset,
               icon: const Icon(Icons.refresh_rounded),
             ),
@@ -166,7 +168,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                   const ScreenTitle(
                     title: 'Secret order draw',
                     subtitle:
-                        'Each player privately chooses one face-down card. The last card is assigned automatically.',
+                        'CricXii randomises who receives the phone next and also shuffles the hidden numbered cards. No fixed player/card pattern.',
                   ),
                   const SizedBox(height: 22),
                   if (nextPlayer != null)
@@ -176,38 +178,35 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           color: AppColors.ink,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Column(
-                        children: [
-                          PlayerAvatar(
-                            player: nextPlayer,
-                            radius: 34,
-                                            ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'PASS THE PHONE TO',
-                            style: TextStyle(
-                              color: AppColors.green,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.4,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Column(
+                          children: [
+                            PlayerAvatar(player: nextPlayer, radius: 34),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'RANDOM PASS TO',
+                              style: TextStyle(
+                                color: AppColors.green,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.4,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            nextPlayer.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 25,
-                              fontWeight: FontWeight.w900,
+                            const SizedBox(height: 5),
+                            Text(
+                              nextPlayer.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            '${match.drawAssignments.length + 1} of ${match.participantIds.length}',
-                            style: const TextStyle(color: Color(0xFFB8CCC2)),
-                          ),
+                            const SizedBox(height: 5),
+                            Text(
+                              '${match.drawAssignments.length + 1} of ${match.participantIds.length}',
+                              style: const TextStyle(color: Color(0xFFB8CCC2)),
+                            ),
                           ],
                         ),
                       ),
@@ -224,7 +223,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                   else ...[
                     const Center(
                       child: Text(
-                        'Choose one card',
+                        'Choose any face-down card',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w900,
@@ -262,20 +261,22 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                                 color: const Color(0xFF3A6654),
                               ),
                             ),
-                            child: Column(
+                            child: const Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.sports_cricket,
                                   color: AppColors.green,
                                   size: 30,
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8),
                                 Text(
-                                  '${index + 1}',
-                                  style: const TextStyle(
+                                  'CARD',
+                                  style: TextStyle(
                                     color: Colors.white,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.1,
                                   ),
                                 ),
                               ],
@@ -301,7 +302,7 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Previous colours and positions stay hidden until everyone finishes.',
+                            'Hidden numbers stay secret until everyone finishes. Reset generates a new pass sequence and new shuffled card layout.',
                             style: TextStyle(
                               color: Color(0xFF6D4B0F),
                               height: 1.35,
@@ -344,7 +345,7 @@ class _DrawResult extends StatelessWidget {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                   ),
                   subtitle: Text(
-                    'Drag players only when the ground situation requires it.',
+                    'Before the first ball, every player can still be moved.',
                   ),
                 ),
                 Expanded(
@@ -393,23 +394,123 @@ class _DrawResult extends StatelessWidget {
     }
   }
 
+  Future<void> _showBowlingPlan(BuildContext context) async {
+    final store = AppScope.read(context);
+    final match = store.matchById(matchId)!;
+    if (match.bowlingPlan.isEmpty && match.autoBowlingPlan) {
+      await store.regenerateBowlingPlan(matchId);
+    }
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * .78,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                title: const Text(
+                  'Balanced bowling plan',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+                subtitle: Text(
+                  '${OversFormat.setupOversLabel(match.ballLimit)} each. Full overs stay with one bowler; a final half-over is a separate 3-ball block.',
+                ),
+                trailing: IconButton(
+                  tooltip: 'Generate a different balanced plan',
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await store.regenerateBowlingPlan(matchId);
+                  },
+                  icon: const Icon(Icons.shuffle_rounded),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: match.battingOrder.length,
+                  itemBuilder: (context, index) {
+                    final batterId = match.battingOrder[index];
+                    final batter = store.playerById(batterId)!;
+                    final blocks = BowlingScheduler.blocksForBatter(
+                      match,
+                      batterId,
+                    );
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(child: Text('${index + 1}')),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    '${batter.name} batting',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ...blocks.map((block) {
+                              final bowler = store.playerById(block.bowlerId);
+                              final label = block.legalBalls == 6
+                                  ? 'Over ${block.blockIndex + 1}'
+                                  : 'Final ${block.legalBalls} balls';
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 5),
+                                child: Text(
+                                  '$label  •  ${bowler?.name ?? block.bowlerId}',
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
     final match = store.matchById(matchId)!;
+    final fromRanking = match.orderSource == BattingOrderSource.previousRanking;
+
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 34),
         children: [
-          const ScreenTitle(
-            title: 'Batting order',
-            subtitle:
-                'The secret draw is complete. Review the order before starting.',
+          ScreenTitle(
+            title: fromRanking ? 'Previous rank order' : 'Batting order',
+            subtitle: fromRanking
+                ? 'A new match is ready in the exact final-ranking order from the previous match. Review it before starting.'
+                : 'The random secret draw is complete. Review the order before starting.',
           ),
           const SizedBox(height: 22),
           ...match.battingOrder.asMap().entries.map((entry) {
             final player = store.playerById(entry.value)!;
-            final assignment = match.drawAssignments[player.id]!;
+            final assignment = match.drawAssignments[player.id];
             return Padding(
               padding: const EdgeInsets.only(bottom: 9),
               child: Card(
@@ -419,8 +520,12 @@ class _DrawResult extends StatelessWidget {
                     vertical: 8,
                   ),
                   leading: CircleAvatar(
-                    backgroundColor: Color(assignment.card.colorValue),
-                    foregroundColor: Colors.white,
+                    backgroundColor: assignment == null
+                        ? const Color(0xFFE7F8F0)
+                        : Color(assignment.card.colorValue),
+                    foregroundColor: assignment == null
+                        ? AppColors.ink
+                        : Colors.white,
                     child: Text(
                       '${entry.key + 1}',
                       style: const TextStyle(fontWeight: FontWeight.w900),
@@ -437,23 +542,50 @@ class _DrawResult extends StatelessWidget {
               ),
             );
           }),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            value: match.autoBowlingPlan,
+            onChanged: (value) =>
+                AppScope.read(context).setAutoBowlingPlan(matchId, value),
+            title: const Text(
+              'Fixed balanced random bowling plan',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            subtitle: const Text(
+              'CricXii assigns each full/half over fairly, avoids unnecessary consecutive overs and never assigns the batter as bowler.',
+            ),
+            secondary: const Icon(Icons.sports_baseball_rounded),
+          ),
+          if (match.autoBowlingPlan) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _showBowlingPlan(context),
+              icon: const Icon(Icons.format_list_numbered_rounded),
+              label: const Text('Review / reshuffle bowling plan'),
+            ),
+          ],
+          const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () => _adjustOrder(context),
             icon: const Icon(Icons.swap_vert_rounded),
-            label: const Text('Adjust order if needed'),
+            label: const Text('Adjust batting order if needed'),
           ),
           const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: onStart,
             icon: const Icon(Icons.play_arrow_rounded),
-            label: Text('Start ${match.ballLimit}-ball match'),
+            label: Text(
+              'Start ${OversFormat.setupOversLabel(match.ballLimit)} match',
+            ),
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () => AppScope.read(context).resetDraw(matchId),
             icon: const Icon(Icons.shuffle_rounded),
-            label: const Text('Reset and draw again'),
+            label: Text(
+              fromRanking ? 'Use a fresh secret draw instead' : 'Reset and draw again',
+            ),
           ),
         ],
       ),

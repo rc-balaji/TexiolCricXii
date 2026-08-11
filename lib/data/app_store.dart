@@ -10,8 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/id_generator.dart';
 import '../domain/cricket_match.dart';
+import '../domain/daily_performance.dart';
 import '../domain/enums.dart';
 import '../domain/gang.dart';
+import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 import '../domain/social.dart';
@@ -54,6 +56,8 @@ class AppStore extends ChangeNotifier {
   final List<CricketMatch> matches = <CricketMatch>[];
   final List<FriendRequest> friendRequests = <FriendRequest>[];
   final List<CricNotification> notifications = <CricNotification>[];
+  final List<PointPreset> pointPresets = <PointPreset>[];
+  String defaultPointPresetId = 'balanced';
 
   bool initialized = false;
   String? activePlayerId;
@@ -65,6 +69,33 @@ class AppStore extends ChangeNotifier {
       firebaseEnabled && firebaseUser != null && _accountSignedIn;
 
   Player? get activePlayer => playerById(activePlayerId);
+
+  PointPreset get defaultPointPreset {
+    _ensurePointPresets();
+    return pointPresets.firstWhere(
+      (preset) => preset.id == defaultPointPresetId,
+      orElse: () => pointPresets.first,
+    );
+  }
+
+  DailyPerformanceSummary performanceForDate(DateTime date) =>
+      DailyPerformanceSummary.build(date, matches);
+
+  String suggestMatchTitle([DateTime? at]) {
+    final now = at ?? DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    final end = start.add(const Duration(days: 1));
+    final number = matches.where((match) {
+      return !match.createdAt.isBefore(start) && match.createdAt.isBefore(end);
+    }).length + 1;
+    final period = switch (now.hour) {
+      < 12 => 'Morning',
+      < 17 => 'Afternoon',
+      < 21 => 'Evening',
+      _ => 'Night',
+    };
+    return '$period Match $number';
+  }
 
   List<Player> get visiblePlayers => players
       .where((player) => !player.archived)
@@ -164,6 +195,7 @@ class AppStore extends ChangeNotifier {
       _clearState();
       _accountSignedIn = false;
     }
+    _ensurePointPresets();
     initialized = true;
     notifyListeners();
   }
@@ -1004,6 +1036,69 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+
+  void _ensurePointPresets() {
+    if (!pointPresets.any((preset) => preset.id == 'balanced')) {
+      pointPresets.insert(
+        0,
+        const PointPreset(
+          id: 'balanced',
+          name: 'Balanced',
+          rules: PointRules(),
+          builtIn: true,
+        ),
+      );
+    }
+    if (!pointPresets.any((preset) => preset.id == defaultPointPresetId)) {
+      defaultPointPresetId = 'balanced';
+    }
+  }
+
+  Future<PointPreset> savePointPreset({
+    required String name,
+    required PointRules rules,
+    bool makeDefault = false,
+  }) async {
+    final cleanName = name.trim();
+    if (cleanName.length < 2) {
+      throw StateError('Enter a preset name.');
+    }
+    final existingIndex = pointPresets.indexWhere(
+      (preset) => preset.name.toLowerCase() == cleanName.toLowerCase(),
+    );
+    final preset = PointPreset(
+      id: existingIndex >= 0 && !pointPresets[existingIndex].builtIn
+          ? pointPresets[existingIndex].id
+          : 'preset_${DateTime.now().microsecondsSinceEpoch}',
+      name: cleanName,
+      rules: rules,
+    );
+    if (existingIndex >= 0 && !pointPresets[existingIndex].builtIn) {
+      pointPresets[existingIndex] = preset;
+    } else {
+      pointPresets.add(preset);
+    }
+    if (makeDefault) defaultPointPresetId = preset.id;
+    await _commit();
+    return preset;
+  }
+
+  Future<void> setDefaultPointPreset(String presetId) async {
+    if (!pointPresets.any((preset) => preset.id == presetId)) {
+      throw StateError('Point preset not found.');
+    }
+    defaultPointPresetId = presetId;
+    await _commit();
+  }
+
+  Future<void> deletePointPreset(String presetId) async {
+    final index = pointPresets.indexWhere((value) => value.id == presetId);
+    if (index < 0 || pointPresets[index].builtIn) return;
+    pointPresets.removeAt(index);
+    if (defaultPointPresetId == presetId) defaultPointPresetId = 'balanced';
+    await _commit();
+  }
+
   Future<CricketMatch> createMatch({
     required String title,
     required ScoringMode scoringMode,
@@ -1011,7 +1106,9 @@ class AppStore extends ChangeNotifier {
     required List<String> participantIds,
     required MatchWinnerMetric winnerMetric,
     String? trackerPlayerId,
-    PointRules pointRules = const PointRules(),
+    PointRules? pointRules,
+    String? pointPresetName,
+    bool autoBowlingPlan = true,
   }) async {
     final creator = activePlayer;
     if (creator == null) throw StateError('Create a player profile first.');
@@ -1019,7 +1116,7 @@ class AppStore extends ChangeNotifier {
     if (uniqueParticipants.length < 2) {
       throw StateError('A singles match needs at least two players.');
     }
-    if (ballLimit < 1) throw StateError('Ball limit must be at least one.');
+    if (ballLimit < 1) throw StateError('Over limit must be at least one ball.');
     if (uniqueParticipants.any((id) => playerById(id) == null)) {
       throw StateError('Every participant needs a valid Player ID.');
     }
@@ -1027,9 +1124,10 @@ class AppStore extends ChangeNotifier {
         !uniqueParticipants.contains(trackerPlayerId)) {
       throw StateError('The selected tracker must be in this match.');
     }
+    final selectedPreset = defaultPointPreset;
     final match = CricketMatch(
       id: _uniqueMatchId(),
-      title: title.trim().isEmpty ? 'Local Singles Match' : title.trim(),
+      title: title.trim().isEmpty ? suggestMatchTitle() : title.trim(),
       creatorPlayerId: creator.id,
       scoringMode: scoringMode,
       ballLimit: ballLimit,
@@ -1038,9 +1136,65 @@ class AppStore extends ChangeNotifier {
       status: MatchStatus.drawing,
       winnerMetric: winnerMetric,
       trackerPlayerId: trackerPlayerId,
-      pointRules: pointRules,
+      pointRules: pointRules ?? selectedPreset.rules,
+      pointPresetName: pointPresetName ?? selectedPreset.name,
+      autoBowlingPlan: autoBowlingPlan,
     );
     _createDrawPool(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'created', createdAt: match.createdAt),
+    );
+    matches.add(match);
+    await _commit();
+    return match;
+  }
+
+  Future<CricketMatch> createRankRematch(String sourceMatchId) async {
+    final source = matchById(sourceMatchId);
+    if (source == null || source.status != MatchStatus.completed) {
+      throw StateError('Complete the source match first.');
+    }
+    final rankings = ScoringEngine.rankings(source);
+    final order = rankings.map((value) => value.playerId).toList();
+    if (order.length < 2) throw StateError('Not enough ranked players.');
+    final creator = activePlayer;
+    if (creator == null) throw StateError('Sign in first.');
+    final match = CricketMatch(
+      id: _uniqueMatchId(),
+      title: suggestMatchTitle(),
+      creatorPlayerId: creator.id,
+      scoringMode: source.scoringMode,
+      ballLimit: source.ballLimit,
+      participantIds: List<String>.from(order),
+      battingOrder: List<String>.from(order),
+      createdAt: DateTime.now(),
+      status: MatchStatus.drawing,
+      winnerMetric: source.winnerMetric,
+      trackerPlayerId: source.trackerPlayerId,
+      pointRules: source.pointRules,
+      pointPresetName: source.pointPresetName,
+      autoBowlingPlan: source.autoBowlingPlan,
+      orderSource: BattingOrderSource.previousRanking,
+    );
+    _seedOrderAssignments(match, order);
+    if (match.autoBowlingPlan) {
+      match.bowlingPlan
+        ..clear()
+        ..addAll(
+          BowlingScheduler.generate(
+            battingOrder: match.battingOrder,
+            participantIds: match.participantIds,
+            ballLimit: match.ballLimit,
+          ),
+        );
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'rank_rematch_created',
+        createdAt: match.createdAt,
+        note: source.id,
+      ),
+    );
     matches.add(match);
     await _commit();
     return match;
@@ -1054,7 +1208,10 @@ class AppStore extends ChangeNotifier {
   }
 
   String? nextDrawPlayerId(CricketMatch match) {
-    for (final playerId in match.participantIds) {
+    final order = match.drawPlayerOrder.isEmpty
+        ? match.participantIds
+        : match.drawPlayerOrder;
+    for (final playerId in order) {
       if (!match.drawAssignments.containsKey(playerId)) return playerId;
     }
     return null;
@@ -1079,7 +1236,7 @@ class AppStore extends ChangeNotifier {
     final assignment = DrawAssignment(playerId: playerId, card: card);
     match.drawAssignments[playerId] = assignment;
 
-    final remainingPlayers = match.participantIds
+    final remainingPlayers = match.drawPlayerOrder
         .where((id) => !match.drawAssignments.containsKey(id))
         .toList();
     final remainingCards = availableDrawCards(match);
@@ -1103,7 +1260,12 @@ class AppStore extends ChangeNotifier {
     }
     match.drawAssignments.clear();
     match.battingOrder.clear();
+    match.orderSource = BattingOrderSource.secretDraw;
+    match.bowlingPlan.clear();
     _createDrawPool(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'draw_reset', createdAt: DateTime.now()),
+    );
     await _commit();
   }
 
@@ -1112,16 +1274,29 @@ class AppStore extends ChangeNotifier {
     if (match == null ||
         match.status != MatchStatus.drawing ||
         match.battingOrder.length != match.participantIds.length) {
-      throw StateError('Complete the secret draw first.');
+      throw StateError('Complete or confirm the batting order first.');
+    }
+    if (match.autoBowlingPlan && match.bowlingPlan.isEmpty) {
+      match.bowlingPlan.addAll(
+        BowlingScheduler.generate(
+          battingOrder: match.battingOrder,
+          participantIds: match.participantIds,
+          ballLimit: match.ballLimit,
+        ),
+      );
     }
     match.status = MatchStatus.live;
+    match.startedAt = DateTime.now();
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'started', createdAt: match.startedAt!),
+    );
     await _commit();
   }
 
   Future<void> setBattingOrder(String matchId, List<String> order) async {
     final match = matchById(matchId);
     if (match == null || match.status != MatchStatus.drawing) {
-      throw StateError('Batting order can be changed only before the match.');
+      throw StateError('Use remaining-order controls after the match starts.');
     }
     if (order.length != match.participantIds.length ||
         order.toSet().length != match.participantIds.length ||
@@ -1133,6 +1308,118 @@ class AppStore extends ChangeNotifier {
     match.battingOrder
       ..clear()
       ..addAll(order);
+    if (match.autoBowlingPlan) {
+      match.bowlingPlan
+        ..clear()
+        ..addAll(
+          BowlingScheduler.generate(
+            battingOrder: match.battingOrder,
+            participantIds: match.participantIds,
+            ballLimit: match.ballLimit,
+          ),
+        );
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'order_adjusted', createdAt: DateTime.now()),
+    );
+    await _commit();
+  }
+
+  Future<void> setAutoBowlingPlan(String matchId, bool enabled) async {
+    final match = matchById(matchId);
+    if (match == null || match.status != MatchStatus.drawing) return;
+    match.autoBowlingPlan = enabled;
+    match.bowlingPlan.clear();
+    if (enabled && match.battingOrder.isNotEmpty) {
+      match.bowlingPlan.addAll(
+        BowlingScheduler.generate(
+          battingOrder: match.battingOrder,
+          participantIds: match.participantIds,
+          ballLimit: match.ballLimit,
+        ),
+      );
+    }
+    await _commit();
+  }
+
+  Future<void> regenerateBowlingPlan(String matchId) async {
+    final match = matchById(matchId);
+    if (match == null || match.battingOrder.isEmpty) return;
+    if (match.status == MatchStatus.live) {
+      _regenerateFutureBowlingPlan(match);
+    } else {
+      match.bowlingPlan
+        ..clear()
+        ..addAll(
+          BowlingScheduler.generate(
+            battingOrder: match.battingOrder,
+            participantIds: match.participantIds,
+            ballLimit: match.ballLimit,
+          ),
+        );
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'bowling_plan_regenerated', createdAt: DateTime.now()),
+    );
+    await _commit();
+  }
+
+  List<String> remainingReorderablePlayerIds(CricketMatch match) {
+    final states = ScoringEngine.rebuildTurns(match);
+    final current = ScoringEngine.currentBatterId(match);
+    return match.battingOrder.where((id) {
+      if (id == current) return false;
+      return !(states[id]?.isComplete(match.ballLimit) ?? false);
+    }).toList();
+  }
+
+  Future<void> reorderRemainingPlayers(
+    String matchId,
+    List<String> remainingOrder,
+  ) async {
+    final match = matchById(matchId);
+    if (match == null || match.status != MatchStatus.live) {
+      throw StateError('The match is not live.');
+    }
+    final allowed = remainingReorderablePlayerIds(match);
+    if (remainingOrder.length != allowed.length ||
+        remainingOrder.toSet().length != allowed.length ||
+        !remainingOrder.toSet().containsAll(allowed)) {
+      throw StateError('Only unplayed players can be reordered.');
+    }
+    final allowedSet = allowed.toSet();
+    var next = 0;
+    for (var index = 0; index < match.battingOrder.length; index++) {
+      if (allowedSet.contains(match.battingOrder[index])) {
+        match.battingOrder[index] = remainingOrder[next++];
+      }
+    }
+    _regenerateFutureBowlingPlan(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'live_order_changed', createdAt: DateTime.now()),
+    );
+    await _commit();
+  }
+
+  Future<void> addPlayerToLiveMatch(String matchId, String playerId) async {
+    final match = matchById(matchId);
+    if (match == null || match.status != MatchStatus.live) {
+      throw StateError('The match is not live.');
+    }
+    if (playerById(playerId) == null) throw StateError('Player not found.');
+    if (match.participantIds.contains(playerId)) {
+      throw StateError('That player is already in this match.');
+    }
+    match.participantIds.add(playerId);
+    match.battingOrder.add(playerId);
+    _regenerateFutureBowlingPlan(match);
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'player_added_live',
+        playerId: playerId,
+        createdAt: DateTime.now(),
+      ),
+    );
     await _commit();
   }
 
@@ -1153,6 +1440,66 @@ class AppStore extends ChangeNotifier {
     match.battingOrder
       ..remove(current)
       ..add(current);
+    _regenerateFutureBowlingPlan(match);
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'current_batter_moved',
+        playerId: current,
+        createdAt: DateTime.now(),
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> replaceCurrentBowler(
+    String matchId, {
+    required String newBowlerId,
+    String reason = 'Replacement / injury',
+    bool alsoNextBlock = false,
+  }) async {
+    final match = matchById(matchId);
+    if (match == null || match.status != MatchStatus.live) {
+      throw StateError('The match is not live.');
+    }
+    final batterId = ScoringEngine.currentBatterId(match);
+    if (batterId == null) throw StateError('No active batter.');
+    if (newBowlerId == batterId || !match.participantIds.contains(newBowlerId)) {
+      throw StateError('Choose another player as bowler.');
+    }
+    final turn = ScoringEngine.rebuildTurns(match)[batterId]!;
+    final block = BowlingScheduler.blockFor(match, batterId, turn.legalBalls);
+    if (block == null) throw StateError('No bowling block is active.');
+    final oldBowler = block.bowlerId;
+    if (oldBowler == newBowlerId) return;
+    block.bowlerId = newBowlerId;
+    if (alsoNextBlock) {
+      final blocks = BowlingScheduler.blocksForBatter(match, batterId);
+      final nextIndex = blocks.indexWhere(
+        (value) => value.blockIndex == block.blockIndex + 1,
+      );
+      if (nextIndex >= 0 && newBowlerId != batterId) {
+        blocks[nextIndex].bowlerId = newBowlerId;
+      }
+    }
+    match.bowlerChanges.add(
+      BowlerChange(
+        batterId: batterId,
+        legalBallNumber: turn.legalBalls,
+        fromBowlerId: oldBowler,
+        toBowlerId: newBowlerId,
+        createdAt: DateTime.now(),
+        reason: reason,
+        alsoNextBlock: alsoNextBlock,
+      ),
+    );
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'bowler_replaced',
+        playerId: newBowlerId,
+        createdAt: DateTime.now(),
+        note: '$oldBowler->$newBowlerId at ball ${turn.legalBalls + 1}',
+      ),
+    );
     await _commit();
   }
 
@@ -1181,6 +1528,12 @@ class AppStore extends ChangeNotifier {
       bowlerId: bowlerId,
       fielderIds: fielderIds,
     );
+    if (match.status == MatchStatus.completed && match.completedAt == null) {
+      match.completedAt = DateTime.now();
+      match.auditTrail.add(
+        MatchAuditEntry(type: 'completed', createdAt: match.completedAt!),
+      );
+    }
     _applyStatsIfComplete(match);
     await _commit();
   }
@@ -1204,6 +1557,12 @@ class AppStore extends ChangeNotifier {
       bowlerId: bowlerId,
       fielderIds: fielderIds,
     );
+    if (match.status == MatchStatus.completed && match.completedAt == null) {
+      match.completedAt = DateTime.now();
+      match.auditTrail.add(
+        MatchAuditEntry(type: 'completed', createdAt: match.completedAt!),
+      );
+    }
     _applyStatsIfComplete(match);
     await _commit();
   }
@@ -1213,6 +1572,9 @@ class AppStore extends ChangeNotifier {
     if (match == null) return false;
     if (match.statsApplied) _revertAppliedStats(match);
     final changed = ScoringEngine.undoLast(match);
+    if (changed && match.status != MatchStatus.completed) {
+      match.completedAt = null;
+    }
     await _commit();
     return changed;
   }
@@ -1242,7 +1604,9 @@ class AppStore extends ChangeNotifier {
     'matches': matches.map((value) => value.toJson()).toList(),
     'friendRequests': friendRequests.map((value) => value.toJson()).toList(),
     'notifications': notifications.map((value) => value.toJson()).toList(),
-    'schemaVersion': 4,
+    'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
+    'defaultPointPresetId': defaultPointPresetId,
+    'schemaVersion': 5,
   };
 
   void _replaceState(Map<String, dynamic> json) {
@@ -1277,6 +1641,16 @@ class AppStore extends ChangeNotifier {
             CricNotification.fromJson(Map<String, dynamic>.from(value as Map)),
       ),
     );
+    pointPresets.addAll(
+      (json['pointPresets'] as List? ?? const []).map(
+        (value) => PointPreset.fromJson(
+          Map<String, dynamic>.from(value as Map),
+        ),
+      ),
+    );
+    defaultPointPresetId =
+        json['defaultPointPresetId'] as String? ?? 'balanced';
+    _ensurePointPresets();
   }
 
   void _clearState() {
@@ -1286,6 +1660,8 @@ class AppStore extends ChangeNotifier {
     matches.clear();
     friendRequests.clear();
     notifications.clear();
+    pointPresets.clear();
+    defaultPointPresetId = 'balanced';
     activePlayerId = null;
   }
 
@@ -1296,7 +1672,7 @@ class AppStore extends ChangeNotifier {
     try {
       await firestore.collection('accountStates').doc(player.id).set({
         'state': jsonEncode(state),
-        'schemaVersion': 4,
+        'schemaVersion': 5,
         'updatedAt': FieldValue.serverTimestamp(),
       });
       final playerRef = firestore.collection('players').doc(player.id);
@@ -1554,18 +1930,54 @@ class AppStore extends ChangeNotifier {
       0xFFA855F7,
       0xFF84CC16,
     ];
+    final random = Random.secure();
+    final previousPlayerOrder = List<String>.from(match.drawPlayerOrder);
+    final previousCardOrder = match.drawPool
+        .map((card) => card.order.toString())
+        .toList(growable: false);
+    final playerOrder = List<String>.from(match.participantIds);
+    for (var attempt = 0; attempt < 8; attempt++) {
+      playerOrder.shuffle(random);
+      if (playerOrder.length < 2 || !_sameOrder(playerOrder, previousPlayerOrder)) {
+        break;
+      }
+    }
+    match.drawPlayerOrder
+      ..clear()
+      ..addAll(playerOrder);
+
+    final cardColors = <int>[
+      for (var index = 0; index < match.participantIds.length; index++)
+        colors[index % colors.length],
+    ]..shuffle(random);
+    final cards = List.generate(
+      match.participantIds.length,
+      (index) => DrawCard(
+        id: _ids.cardId(),
+        order: index + 1,
+        colorValue: cardColors[index],
+      ),
+    );
+    for (var attempt = 0; attempt < 8; attempt++) {
+      cards.shuffle(random);
+      final nextPattern = cards
+          .map((card) => card.order.toString())
+          .toList(growable: false);
+      if (cards.length < 2 || !_sameOrder(nextPattern, previousCardOrder)) {
+        break;
+      }
+    }
     match.drawPool
       ..clear()
-      ..addAll(
-        List.generate(
-          match.participantIds.length,
-          (index) => DrawCard(
-            id: _ids.cardId(),
-            order: index + 1,
-            colorValue: colors[index % colors.length],
-          ),
-        )..shuffle(Random.secure()),
-      );
+      ..addAll(cards);
+  }
+
+  bool _sameOrder(List<String> first, List<String> second) {
+    if (first.length != second.length) return false;
+    for (var index = 0; index < first.length; index++) {
+      if (first[index] != second[index]) return false;
+    }
+    return true;
   }
 
   void _finalizeDraw(CricketMatch match) {
@@ -1574,6 +1986,76 @@ class AppStore extends ChangeNotifier {
     match.battingOrder
       ..clear()
       ..addAll(ordered.map((value) => value.playerId));
+    match.orderSource = BattingOrderSource.secretDraw;
+    if (match.autoBowlingPlan) {
+      match.bowlingPlan
+        ..clear()
+        ..addAll(
+          BowlingScheduler.generate(
+            battingOrder: match.battingOrder,
+            participantIds: match.participantIds,
+            ballLimit: match.ballLimit,
+          ),
+        );
+    }
+  }
+
+  void _seedOrderAssignments(CricketMatch match, List<String> order) {
+    _createDrawPool(match);
+    final cards = List<DrawCard>.from(match.drawPool)
+      ..sort((a, b) => a.order.compareTo(b.order));
+    match.drawAssignments.clear();
+    for (var index = 0; index < order.length; index++) {
+      match.drawAssignments[order[index]] = DrawAssignment(
+        playerId: order[index],
+        card: cards[index],
+      );
+    }
+  }
+
+  void _regenerateFutureBowlingPlan(CricketMatch match) {
+    if (!match.autoBowlingPlan) {
+      match.bowlingPlan.clear();
+      return;
+    }
+    final states = ScoringEngine.rebuildTurns(match);
+    final current = ScoringEngine.currentBatterId(match);
+    final lockedBatters = <String>{
+      for (final id in match.battingOrder)
+        if (states[id]?.isComplete(match.ballLimit) ?? false) id,
+      if (current != null) current,
+    };
+    final fixed = match.bowlingPlan
+        .where((block) => lockedBatters.contains(block.batterId))
+        .toList();
+    final orderIndex = <String, int>{
+      for (var index = 0; index < match.battingOrder.length; index++)
+        match.battingOrder[index]: index,
+    };
+    fixed.sort((a, b) {
+      final batter = (orderIndex[a.batterId] ?? 0).compareTo(
+        orderIndex[b.batterId] ?? 0,
+      );
+      return batter != 0 ? batter : a.blockIndex.compareTo(b.blockIndex);
+    });
+    final loads = <String, int>{for (final id in match.participantIds) id: 0};
+    for (final block in fixed) {
+      loads[block.bowlerId] = (loads[block.bowlerId] ?? 0) + block.legalBalls;
+    }
+    final futureBatters = match.battingOrder
+        .where((id) => !lockedBatters.contains(id))
+        .toList();
+    final generated = BowlingScheduler.generate(
+      battingOrder: futureBatters,
+      participantIds: match.participantIds,
+      ballLimit: match.ballLimit,
+      initialLoads: loads,
+      previousBowlerId: fixed.isEmpty ? null : fixed.last.bowlerId,
+    );
+    match.bowlingPlan
+      ..clear()
+      ..addAll(fixed)
+      ..addAll(generated);
   }
 
   void _applyStatsIfComplete(CricketMatch match) {

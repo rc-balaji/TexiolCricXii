@@ -22,6 +22,8 @@ enum ScoringMode { ballByBall, quickTotal }
 
 enum MatchWinnerMetric { overallPoints, runs }
 
+enum BattingOrderSource { secretDraw, previousRanking }
+
 enum ScoreEventType { delivery, quickSummary }
 
 enum ExtraType { none, wide, noBall, bye, legBye }

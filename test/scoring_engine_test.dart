@@ -85,9 +85,9 @@ void main() {
       final stats = ScoringEngine.calculateStats(match);
       expect(stats['p1']!.runs, 4);
       expect(stats['p2']!.wickets, 1);
-      expect(stats['p2']!.points, 20);
+      expect(stats['p2']!.points, 5);
       expect(stats['p3']!.catches, 1);
-      expect(stats['p3']!.points, 10);
+      expect(stats['p3']!.points, 2);
     });
 
     test('direct run-out gives no bowler wicket', () {
@@ -104,7 +104,7 @@ void main() {
       final stats = ScoringEngine.calculateStats(match);
       expect(stats['p2']!.wickets, 0);
       expect(stats['p3']!.directRunOuts, 1);
-      expect(stats['p3']!.points, 15);
+      expect(stats['p3']!.points, 3);
     });
 
     test('assisted run-out credits both fielders', () {
@@ -120,8 +120,8 @@ void main() {
       final stats = ScoringEngine.calculateStats(match);
       expect(stats['p3']!.assistedRunOuts, 1);
       expect(stats['p4']!.assistedRunOuts, 1);
-      expect(stats['p3']!.points, 8);
-      expect(stats['p4']!.points, 8);
+      expect(stats['p3']!.points, 1);
+      expect(stats['p4']!.points, 1);
     });
 
     test('stumping credits the bowler and wicketkeeper', () {
@@ -137,9 +137,9 @@ void main() {
 
       final stats = ScoringEngine.calculateStats(match);
       expect(stats['p2']!.wickets, 1);
-      expect(stats['p2']!.points, 20);
+      expect(stats['p2']!.points, 5);
       expect(stats['p3']!.stumpings, 1);
-      expect(stats['p3']!.points, 12);
+      expect(stats['p3']!.points, 2);
     });
 
     test('runs-only ranking ignores a higher fielding-points total', () {

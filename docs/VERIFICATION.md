@@ -1,19 +1,9 @@
-# CricXii v0.3.0+9 verification
+# CricXii v1.0.0 verification
 
-Static package verification performed before ZIP creation:
+Final release verification should run in GitHub Actions:
 
-- No Google sign-in package/import/flow.
-- No Facebook sign-in package/import/flow.
-- No Cloud Functions package/folder/runtime dependency.
-- No Firebase App Check dependency in this prototype build.
-- Anonymous Firebase session is the only Firebase Auth flow in source.
-- No temporary-player or claim flow references in `lib/`.
-- Login email is not stored inside the `Player` profile model.
-- Password plaintext is never written by AppStore; credential docs use salt + verifier.
-- Friend requests/notifications are keyed by Player IDs.
-- Social refresh uses single-field Firestore queries; custom composite indexes are empty.
-- Local account state keys bumped to v4 for the fresh reset.
-- GitHub release build command uses a YAML multiline shell block.
-- Source ZIP excludes `google-services.json`, service-account JSON and private-key files.
+1. `flutter analyze --no-fatal-infos`
+2. `flutter test`
+3. `flutter build apk --release ...`
 
-The container used to prepare this package does not include the Flutter SDK, so final Flutter type analysis, unit tests and Android compilation run in the supplied GitHub Actions workflow.
+Additional V1 tests cover over conversion and bowling-plan edge cases, including two-player all-overs assignment, no self-bowling, adjacent-over diversity and workload balancing.

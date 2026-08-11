@@ -1,20 +1,17 @@
-# CricXii product plan after v0.3.0 reset
+# CricXii product plan — after v1.0.0
 
-## v0.3.0 — Fresh account/social foundation
+## v1.0.0 — Singles Match V1
 
-- Anonymous Firebase transport identity only
-- CricXii email/password login mapped to numeric Player ID
-- One-step main registration
-- Full account creation when adding another player
-- Exact Player ID friend search
-- Manual-refresh in-app notifications
-- Accept/reject, accepted notification, read/unread/delete
-- Existing Singles scoring, gangs, profiles and advanced PDF retained
+Complete local/Spark-friendly Singles engine: Ball Tracker, Direct Runs, over-based formats, random batting draw, balanced bowling plan, bowler replacement, future-order editing, add-player-during-match, live local ranking, point presets, timestamps, rank rematch, date performance and branded PDFs.
 
-## Next candidate work
+## Deferred next layer — Remote Live Match
 
-1. Stabilize v0.3.0 on two real Android devices and validate account/friend lifecycle.
-2. Add password recovery only after deciding on a trusted authentication/backend strategy.
-3. Add richer notification grouping/history only if real usage needs it.
-4. Then move to shared/multi-phone match synchronization.
-5. Team Match comes after the account/social base is stable.
+Only after v1.0.0 is stable on real devices:
+
+1. Shareable live-match link.
+2. Browser/app live score viewer.
+3. Live comments.
+4. Ask to Join request.
+5. Host accept/reject and remaining-order insertion.
+
+These are intentionally not part of v1.0.0.

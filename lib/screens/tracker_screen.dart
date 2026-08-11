@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
+import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import 'live_match_screen.dart';
 import 'match_summary_screen.dart';
 import 'public_player_profile_screen.dart';
 
@@ -102,6 +104,78 @@ class _TrackerScreenState extends State<TrackerScreen> {
     );
   }
 
+  Future<void> _changeBowler({
+    required CricketMatch match,
+    required String newBowlerId,
+    required String currentBowlerId,
+  }) async {
+    if (newBowlerId == currentBowlerId) return;
+    if (!match.autoBowlingPlan) {
+      setState(() => _bowlerId = newBowlerId);
+      return;
+    }
+    var alsoNext = false;
+    final accepted = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Replace bowler from the next ball?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Balls already recorded keep the old bowler. No delivery is replayed. Use this for injury or a ground-side change.',
+                  style: TextStyle(color: AppColors.muted, height: 1.35),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: alsoNext,
+                  onChanged: (value) => setSheetState(() => alsoNext = value),
+                  title: const Text(
+                    'Use the same replacement for the next over too',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Applied only when the same batter has another bowling block.',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Confirm replacement'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    try {
+      await AppScope.read(context).replaceCurrentBowler(
+        widget.matchId,
+        newBowlerId: newBowlerId,
+        alsoNextBlock: alsoNext,
+      );
+      if (mounted) setState(() => _bowlerId = null);
+    } on StateError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
   Future<void> _undo() async {
     final changed = await AppScope.read(context).undoLast(widget.matchId);
     if (mounted && !changed) {
@@ -167,13 +241,27 @@ class _TrackerScreenState extends State<TrackerScreen> {
     final possibleBowlers = players
         .where((player) => player.id != batter.id)
         .toList();
-    final effectiveBowler =
-        possibleBowlers.any((player) => player.id == _bowlerId)
+    final turn = ScoringEngine.rebuildTurns(match)[batter.id]!;
+    final currentStats = ScoringEngine.calculateStats(match)[batter.id]!;
+    final plannedBowler = BowlingScheduler.plannedBowlerId(
+      match,
+      batter.id,
+      turn.legalBalls,
+    );
+    final effectiveBowler = possibleBowlers.any(
+      (player) => player.id == _bowlerId,
+    )
         ? _bowlerId
+        : possibleBowlers.any((player) => player.id == plannedBowler)
+        ? plannedBowler
         : possibleBowlers.isEmpty
         ? null
         : possibleBowlers.first.id;
-    final turn = ScoringEngine.rebuildTurns(match)[batter.id]!;
+    final currentBlock = BowlingScheduler.blockFor(
+      match,
+      batter.id,
+      turn.legalBalls,
+    );
     final turnEvents = match.events
         .where((event) => event.batterId == batter.id)
         .toList();
@@ -198,6 +286,15 @@ class _TrackerScreenState extends State<TrackerScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Live ranking & match controls',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LiveMatchScreen(matchId: match.id),
+              ),
+            ),
+            icon: const Icon(Icons.leaderboard_rounded),
+          ),
           IconButton(
             tooltip: 'Undo last ball',
             onPressed: _busy ? null : _undo,
@@ -269,11 +366,20 @@ class _TrackerScreenState extends State<TrackerScreen> {
                         ),
                       ),
                       Text(
-                        '${turn.legalBalls}/${match.ballLimit} balls',
+                        '${OversFormat.progressLabel(turn.legalBalls)} • target ${OversFormat.setupOversLabel(match.ballLimit)}',
                         style: const TextStyle(
                           color: Color(0xFF9DB4A9),
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${currentStats.points} PTS • ${currentStats.wickets} WKTS',
+                        style: const TextStyle(
+                          color: AppColors.green,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ],
@@ -293,22 +399,55 @@ class _TrackerScreenState extends State<TrackerScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
                   children: [
                     if (possibleBowlers.isNotEmpty)
-                      DropdownButtonFormField<String>(
-                        key: ValueKey('${batter.id}-bowler'),
-                        initialValue: effectiveBowler,
-                        decoration: const InputDecoration(
-                          labelText: 'Current bowler',
-                          prefixIcon: Icon(Icons.sports_baseball_rounded),
-                        ),
-                        items: possibleBowlers
-                            .map(
-                              (player) => DropdownMenuItem(
-                                value: player.id,
-                                child: Text(player.name),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DropdownButtonFormField<String>(
+                            key: ValueKey(
+                              '${batter.id}-${turn.legalBalls}-bowler',
+                            ),
+                            initialValue: effectiveBowler,
+                            decoration: InputDecoration(
+                              labelText: currentBlock == null
+                                  ? 'Current bowler'
+                                  : currentBlock.legalBalls == 6
+                                  ? 'Over ${currentBlock.blockIndex + 1} bowler'
+                                  : 'Final ${currentBlock.legalBalls}-ball bowler',
+                              prefixIcon: const Icon(
+                                Icons.sports_baseball_rounded,
                               ),
-                            )
-                            .toList(),
-                        onChanged: (value) => setState(() => _bowlerId = value),
+                            ),
+                            items: possibleBowlers
+                                .map(
+                                  (player) => DropdownMenuItem(
+                                    value: player.id,
+                                    child: Text(player.name),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _busy || effectiveBowler == null
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    _changeBowler(
+                                      match: match,
+                                      newBowlerId: value,
+                                      currentBowlerId: effectiveBowler,
+                                    );
+                                  },
+                          ),
+                          if (match.autoBowlingPlan && currentBlock != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 7, left: 4),
+                              child: Text(
+                                'Fixed plan active • changing this replaces only future balls; previous deliveries keep their bowler.',
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     const SizedBox(height: 20),
                     const Text(

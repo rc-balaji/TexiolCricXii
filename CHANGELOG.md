@@ -1,31 +1,40 @@
-# v0.3.1+12
+# CricXii changelog
 
-- Fixed PDF analyzer const error in winner Player ID text style.
-- Fixed non-const disabled friend-status buttons on public player profiles.
-- No feature or database behavior changes from build 11.
+## 1.0.0+13 — Singles Match V1
 
-# Changelog
+- Promoted the app to the first `1.0.0` Singles release.
+- Added over-based match setup with half-over convention (`1.5 = 9 legal balls`).
+- Kept both Ball Tracker and Direct Runs modes.
+- Added randomized phone-pass order plus shuffled face-down secret cards.
+- Added optional balanced random bowling-plan generation after batting order confirmation.
+- Added full-over / final-partial-over bowling blocks and fairness constraints.
+- Added mid-over bowler replacement/injury handling without rewriting past deliveries.
+- Added live-match controls to add a player and reorder only uncompleted future players.
+- Added local Live Match ranking / current batter / next order / recent balls screen.
+- Rebalanced default scoring to wicket 5, catch 2, direct run-out 3, assisted run-out 1, stumping 2.
+- Added reusable saved point presets and default-preset selection.
+- Added match/event/audit timestamps and dynamic daypart match names.
+- Added rank-order rematch action after completion.
+- Added date-wise overall performance view and multi-page performance PDF.
+- Upgraded match scorecard to one-page CricXii-branded output using the real app logo.
+- Added bowling planner tests and updated scoring tests for balanced defaults.
+- Explicitly deferred remote live-share link, web viewer, comments and Ask-to-Join.
+
+## 0.3.1+12
+
+- Analyzer fixes for the profile/PDF build.
+
+## 0.3.1+11
+
+- Friend-request profile state and profile navigation improvements.
+- One-page scorecard redesign.
+
+## 0.3.0+10
+
+- Fresh Start analyzer fixes.
 
 ## 0.3.0+9 — Fresh Start account architecture
 
-- Replaced the v0.2.x provider/claim account architecture with a fresh Anonymous-only Firebase transport session plus a simple CricXii email/password account layer.
-- Removed Google sign-in, Facebook sign-in, Firebase App Check and Cloud Functions dependencies from the app/build.
-- Removed temporary Player IDs, claim flow, provider avatar identity and legacy account UID state from the Player model.
-- Main registration now asks for name, login email, password, batting style and avatar once and opens Home directly.
-- Player Management/Match/Gang add-player flow now creates a separate full account immediately.
-- Login email is no longer a Player profile field and is not requested again in Profile Edit.
-- Added random eight-digit numeric Player IDs with Firestore transaction collision checks.
-- Reworked friends around exact Player ID search and Player-ID based request documents.
-- Reworked notification refresh for initial sync plus explicit manual Refresh instead of continuous polling.
-- Accepting a friend request marks the receiver request notification accepted/read and creates a new unread accepted notification for the sender.
-- Added notification Mark read, Mark unread, Delete and Delete All. Pending request deletion rejects the request first.
-- Removed social refresh composite-index dependency by querying one Player-ID field at a time and filtering status in Dart.
-- Sign out/delete now pop directly to the root Login screen.
-- Bumped local persistence keys/schema to v4 so the fresh architecture does not silently reuse v0.2.x local account state.
-- Retained Singles scoring, gangs, stats, sharing and the advanced avatar/ranking PDF scorecard.
-
-## 0.3.1+11
-- Friend request buttons on public profiles now reflect Request sent / Request received / Friends immediately.
-- Player identities are tappable from rankings, match winner, friends, sent requests, gangs, player management, notifications, match setup avatars, draw results, and live scoring headers.
-- Notifications retain sender Player ID so the sender profile can be opened from activity.
-- Scorecard PDF rebuilt as a compact single A4 page, with fixed-height podium cards, one-page match details, ASCII-safe separators, and compact ranking layout for larger matches.
+- Anonymous Firebase session foundation with custom CricXii account layer.
+- Google/Facebook/claim flow removed.
+- Simplified player/social collections and notification lifecycle.
