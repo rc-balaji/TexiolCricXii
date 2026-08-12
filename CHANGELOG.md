@@ -1,5 +1,17 @@
 # CricXii changelog
 
+## 1.0.2+15 — Shared Participant History
+
+- Fixed the creator-only history bug: completed Singles matches now have a canonical shared Firestore record under `matches/{matchId}`.
+- Every registered participant loads completed matches by their numeric Player ID, regardless of who created the match.
+- Career Runs, Points, Wickets, Catches, Matches and Wins are rebuilt from the active player's completed participant history on sign-in/startup.
+- Added one-time migration for Build 14-and-older creator-side completed matches; existing Match IDs are reused so migration does not duplicate games.
+- Added Profile → Singles career stats Sync button for manual history/stat refresh when another device has just completed a match.
+- Shared match records are creator-write / participant-read in Firestore rules.
+- Reopening a previously completed match removes its stale shared completed copy until it is completed again.
+- Reset Local Cricket Cache now preserves completed shared match history.
+- Added shared-history tests proving a player receives career credit for matches created by another player.
+
 ## 1.0.1+14 — Singles Match V1
 
 - Promoted the app to the first `1.0.0` Singles release.

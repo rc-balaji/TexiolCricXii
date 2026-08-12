@@ -15,6 +15,7 @@ import '../domain/enums.dart';
 import '../domain/gang.dart';
 import '../domain/match_planning.dart';
 import '../domain/player.dart';
+import '../domain/player_history.dart';
 import '../domain/scoring_engine.dart';
 import '../domain/social.dart';
 
@@ -57,6 +58,7 @@ class AppStore extends ChangeNotifier {
   final List<FriendRequest> friendRequests = <FriendRequest>[];
   final List<CricNotification> notifications = <CricNotification>[];
   final List<PointPreset> pointPresets = <PointPreset>[];
+  final Set<String> _sharedCompletedMatchIds = <String>{};
   String defaultPointPresetId = 'balanced';
 
   bool initialized = false;
@@ -199,7 +201,10 @@ class AppStore extends ChangeNotifier {
       if (firebaseUser != null) {
         await _bindCurrentSession(savedPlayerId);
         await _restoreCloudState(replaceLocal: players.isEmpty);
+        await _refreshSharedMatchHistory(migrateLegacy: true);
         await _refreshSocialGraph();
+        await _persistLocal();
+        await _syncActivePlayerPublicProfile();
       }
     } else {
       _clearState();
@@ -407,7 +412,9 @@ class AppStore extends ChangeNotifier {
       _addOrReplacePlayer(player);
       activePlayerId = playerId;
     }
+    await _refreshSharedMatchHistory(migrateLegacy: true);
     await _persistLocal();
+    await _syncActivePlayerPublicProfile();
     await _refreshSocialGraph();
     notifyListeners();
   }
@@ -501,6 +508,13 @@ class AppStore extends ChangeNotifier {
 
   Future<void> refreshSocialGraph() => _refreshSocialGraph();
 
+  Future<void> refreshMatchHistory() async {
+    await _refreshSharedMatchHistory(migrateLegacy: true);
+    await _persistLocal();
+    await _syncActivePlayerPublicProfile();
+    notifyListeners();
+  }
+
   Player? playerById(String? id) {
     if (id == null) return null;
     return _playerIndex[id];
@@ -571,12 +585,21 @@ class AppStore extends ChangeNotifier {
   Future<void> resetActivePlayerData() async {
     final player = activePlayer;
     if (player == null) return;
-    matches.removeWhere((match) => match.participantIds.contains(player.id));
+    // Completed shared matches are permanent participant history. Reset only
+    // unfinished local match state and cached social data.
+    matches.removeWhere(
+      (match) =>
+          match.participantIds.contains(player.id) &&
+          match.status != MatchStatus.completed,
+    );
     for (final cached in players) {
       cached.friendIds.remove(player.id);
     }
     player.friendIds.clear();
-    _clearStats(player.stats);
+    PlayerHistory.copyStats(
+      player.stats,
+      PlayerHistory.calculateSinglesCareer(player.id, matches),
+    );
     _clearStats(player.teamStats);
     friendRequests.removeWhere(
       (request) =>
@@ -1580,12 +1603,18 @@ class AppStore extends ChangeNotifier {
   Future<bool> undoLast(String matchId) async {
     final match = matchById(matchId);
     if (match == null) return false;
+    final wasSharedCompleted =
+        match.status == MatchStatus.completed &&
+        _sharedCompletedMatchIds.contains(match.id);
     if (match.statsApplied) _revertAppliedStats(match);
     final changed = ScoringEngine.undoLast(match);
     if (changed && match.status != MatchStatus.completed) {
       match.completedAt = null;
     }
     await _commit();
+    if (changed && wasSharedCompleted && match.status != MatchStatus.completed) {
+      await _deleteSharedMatchRecord(match.id);
+    }
     return changed;
   }
 
@@ -1616,7 +1645,7 @@ class AppStore extends ChangeNotifier {
     'notifications': notifications.map((value) => value.toJson()).toList(),
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
     'defaultPointPresetId': defaultPointPresetId,
-    'schemaVersion': 6,
+    'schemaVersion': 7,
   };
 
   void _replaceState(Map<String, dynamic> json) {
@@ -1671,6 +1700,7 @@ class AppStore extends ChangeNotifier {
     friendRequests.clear();
     notifications.clear();
     pointPresets.clear();
+    _sharedCompletedMatchIds.clear();
     defaultPointPresetId = 'balanced';
     activePlayerId = null;
   }
@@ -1682,9 +1712,21 @@ class AppStore extends ChangeNotifier {
     try {
       await firestore.collection('accountStates').doc(player.id).set({
         'state': jsonEncode(state),
-        'schemaVersion': 6,
+        'schemaVersion': 7,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      await _syncActivePlayerPublicProfile();
+      await _syncCompletedMatchesToShared();
+    } on FirebaseException {
+      // Local scoring remains available and sync can retry on the next change.
+    }
+  }
+
+  Future<void> _syncActivePlayerPublicProfile() async {
+    final firestore = _firestore;
+    final player = activePlayer;
+    if (!cloudConnected || firestore == null || player == null) return;
+    try {
       final playerRef = firestore.collection('players').doc(player.id);
       await playerRef.set({
         ...player.toPublicJson(),
@@ -1710,7 +1752,144 @@ class AppStore extends ChangeNotifier {
       }
       await batch.commit();
     } on FirebaseException {
-      // Local scoring remains available and sync can retry on the next change.
+      // Public profile/stat sync can retry on the next app change.
+    }
+  }
+
+  Map<String, dynamic> _sharedMatchDocument(CricketMatch match) => {
+    'matchId': match.id,
+    'creatorPlayerId': match.creatorPlayerId,
+    'participantIds': List<String>.from(match.participantIds),
+    'status': match.status.name,
+    'title': match.title,
+    'createdAt': Timestamp.fromDate(match.createdAt),
+    'completedAt': Timestamp.fromDate(match.completedAt ?? match.createdAt),
+    'matchJson': jsonEncode(match.toJson()),
+    'schemaVersion': 1,
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  CricketMatch? _matchFromSharedDocument(Map<String, dynamic> data) {
+    try {
+      final raw = data['matchJson'];
+      if (raw is String && raw.isNotEmpty) {
+        return CricketMatch.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
+        );
+      }
+      final payload = data['match'];
+      if (payload is Map) {
+        return CricketMatch.fromJson(Map<String, dynamic>.from(payload));
+      }
+    } on Object {
+      return null;
+    }
+    return null;
+  }
+
+  Future<void> _syncCompletedMatchesToShared() async {
+    final firestore = _firestore;
+    final playerId = activePlayerId;
+    if (!cloudConnected || firestore == null || playerId == null) return;
+    final pending = matches.where(
+      (match) =>
+          match.status == MatchStatus.completed &&
+          match.creatorPlayerId == playerId &&
+          !_sharedCompletedMatchIds.contains(match.id),
+    );
+    for (final match in pending) {
+      try {
+        await firestore
+            .collection('matches')
+            .doc(match.id)
+            .set(_sharedMatchDocument(match), SetOptions(merge: true));
+        _sharedCompletedMatchIds.add(match.id);
+      } on FirebaseException {
+        // Keep the local permanent record and retry on the next sync.
+      }
+    }
+  }
+
+  Future<void> _deleteSharedMatchRecord(String matchId) async {
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null) return;
+    try {
+      await firestore.collection('matches').doc(matchId).delete();
+      _sharedCompletedMatchIds.remove(matchId);
+    } on FirebaseException {
+      // A later refresh/sync can reconcile a stale shared record.
+    }
+  }
+
+  Future<void> _refreshSharedMatchHistory({
+    required bool migrateLegacy,
+  }) async {
+    final firestore = _firestore;
+    final playerId = activePlayerId;
+    if (!cloudConnected || firestore == null || playerId == null) return;
+
+    try {
+      final snapshot = await firestore
+          .collection('matches')
+          .where('participantIds', arrayContains: playerId)
+          .get();
+
+      final remoteMatches = <String, CricketMatch>{};
+      _sharedCompletedMatchIds.clear();
+      for (final document in snapshot.docs) {
+        final data = document.data();
+        final match = _matchFromSharedDocument(data);
+        if (match == null ||
+            match.status != MatchStatus.completed ||
+            !match.participantIds.contains(playerId)) {
+          continue;
+        }
+
+        final localIndex = matches.indexWhere((value) => value.id == match.id);
+        if (localIndex >= 0 && matches[localIndex].status != MatchStatus.completed) {
+          // If this device is the creator and a completed match was reopened,
+          // remove the old shared copy instead of resurrecting it locally.
+          if (matches[localIndex].creatorPlayerId == playerId) {
+            await _deleteSharedMatchRecord(match.id);
+          }
+          continue;
+        }
+        remoteMatches[match.id] = match;
+        _sharedCompletedMatchIds.add(match.id);
+      }
+
+      for (final remote in remoteMatches.values) {
+        final localIndex = matches.indexWhere((value) => value.id == remote.id);
+        if (localIndex < 0) {
+          matches.add(remote);
+        } else if (matches[localIndex].status == MatchStatus.completed) {
+          matches[localIndex] = remote;
+        }
+      }
+
+      if (migrateLegacy) {
+        // Build 14 and older kept completed matches only inside the creator's
+        // private account state. Upload each old match once using the same ID.
+        await _syncCompletedMatchesToShared();
+      }
+
+      final relevantMatches = PlayerHistory.completedMatchesFor(playerId, matches);
+      final missingParticipantIds = <String>{
+        for (final match in relevantMatches) ...match.participantIds,
+      }..removeWhere((id) => playerById(id) != null);
+      for (final participantId in missingParticipantIds) {
+        await findPublicPlayer(participantId, bypassSignedInGate: true);
+      }
+
+      final player = activePlayer;
+      if (player != null) {
+        PlayerHistory.copyStats(
+          player.stats,
+          PlayerHistory.calculateSinglesCareer(player.id, matches),
+        );
+      }
+    } on FirebaseException {
+      // Cached/offline history remains available; Refresh can retry later.
     }
   }
 

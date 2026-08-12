@@ -81,9 +81,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset cricket data?'),
+        title: const Text('Reset local cricket cache?'),
         content: const Text(
-          'Your Player ID and login stay. Local match history, stats and cached social data for this player are cleared.',
+          'Your Player ID and login stay. Unfinished local matches and cached social data are cleared. Completed shared match history stays permanent.',
         ),
         actions: [
           TextButton(
@@ -216,8 +216,8 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               children: [
                 ListTile(
                   leading: const Icon(Icons.restart_alt_rounded),
-                  title: const Text('Reset cricket data'),
-                  subtitle: const Text('Keep login and Player ID'),
+                  title: const Text('Reset local cricket cache'),
+                  subtitle: const Text('Completed shared history stays'),
                   onTap: _busy ? null : _reset,
                 ),
                 const Divider(height: 1),

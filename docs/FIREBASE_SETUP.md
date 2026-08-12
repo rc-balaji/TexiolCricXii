@@ -1,4 +1,4 @@
-# Firebase setup — CricXii v1.0.0
+# Firebase setup — CricXii v1.0.2
 
 ## Authentication
 
@@ -22,7 +22,17 @@ npx --yes firebase-tools@latest deploy \
   --only "firestore:rules,firestore:indexes"
 ```
 
-The app's current social queries use single fields, so no custom composite indexes are required in `firestore.indexes.json`.
+The app's social queries use single fields. Shared match history uses the built-in array index on `participantIds` (`array-contains activePlayerId`), so no custom composite index is required in `firestore.indexes.json`.
+
+
+## Shared-history migration test
+
+- Keep the original creator account/device data from Build 14 or older.
+- Deploy the new Firestore rules first.
+- Open v1.0.2 as the creator and press Profile → Singles career stats → Sync if needed.
+- Confirm `matches/{matchId}` documents are created once with `creatorPlayerId` and all `participantIds`.
+- Sign in as a registered participant on another device/account.
+- Confirm their own Profile shows the applicable completed matches and rebuilt Runs/Points/Wickets/Catches/Matches/Wins even though they did not create those matches.
 
 ## Required tests
 

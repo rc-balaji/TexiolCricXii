@@ -20,9 +20,22 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   bool _teamHistory = false;
+  bool _refreshingHistory = false;
 
   void _open(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  Future<void> _refreshHistory(BuildContext context) async {
+    if (_refreshingHistory) return;
+    setState(() => _refreshingHistory = true);
+    final store = AppScope.of(context);
+    await store.refreshMatchHistory();
+    if (!mounted || !context.mounted) return;
+    setState(() => _refreshingHistory = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Match history and career stats refreshed.')),
+    );
   }
 
   Future<void> _openLink(BuildContext context, String value, {bool instagram = false}) async {
@@ -234,7 +247,20 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           const SizedBox(height: 24),
-          const SectionLabel('Singles career stats'),
+          SectionLabel(
+            'Singles career stats',
+            trailing: IconButton(
+              tooltip: 'Refresh shared match history',
+              onPressed: _refreshingHistory ? null : () => _refreshHistory(context),
+              icon: _refreshingHistory
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync_rounded),
+            ),
+          ),
           const SizedBox(height: 12),
           GridView.count(
             crossAxisCount: 2,

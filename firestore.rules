@@ -127,16 +127,41 @@ service cloud.firestore {
         resource.data.recipientPlayerId == currentPlayerId();
     }
 
-    // These remain available for the existing cricket features. The private
-    // account state is still protected by accountStates/{playerId}.
+    // Gang data remains available to signed-in CricXii sessions.
     match /gangs/{gangId} {
       allow read, write: if hasSession();
     }
 
+    // Completed Singles matches are shared permanent records. A participant
+    // can read their own history from any device/account session. Only the
+    // match creator can create/update/delete the canonical shared record.
     match /matches/{matchId} {
-      allow read, write: if hasSession();
+      allow read: if hasSession() &&
+        resource.data.participantIds is list &&
+        currentPlayerId() in resource.data.participantIds;
+      allow create: if hasSession() &&
+        request.resource.data.matchId == matchId &&
+        request.resource.data.creatorPlayerId == currentPlayerId() &&
+        request.resource.data.participantIds is list &&
+        currentPlayerId() in request.resource.data.participantIds &&
+        request.resource.data.status == 'completed';
+      allow update: if hasSession() &&
+        resource.data.creatorPlayerId == currentPlayerId() &&
+        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
+        request.resource.data.participantIds is list &&
+        currentPlayerId() in request.resource.data.participantIds;
+      allow delete: if hasSession() &&
+        resource.data.creatorPlayerId == currentPlayerId();
+
       match /events/{eventId} {
-        allow read, write: if hasSession();
+        allow read: if hasSession() &&
+          currentPlayerId() in get(
+            /databases/$(database)/documents/matches/$(matchId)
+          ).data.participantIds;
+        allow write: if hasSession() &&
+          get(
+            /databases/$(database)/documents/matches/$(matchId)
+          ).data.creatorPlayerId == currentPlayerId();
       }
     }
 

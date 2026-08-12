@@ -1,6 +1,6 @@
-# CricXii v1.0.1 — Singles Match V1
+# CricXii v1.0.2 — Singles Match V1
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.0.1+14` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.0.2+15` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
 
 ## V1 Singles features
 
@@ -21,6 +21,13 @@ CricXii is Texiol's Android-first local cricket scorer. Version `1.0.1+14` promo
 - Date-wise **Performance** screen aggregates completed matches, rankings and player totals.
 - Premium one-page Match Scorecard PDF uses the CricXii app logo and player avatars.
 - Daily Performance PDF is intentionally multi-page and includes CricXii branding, overall ranking, player cards and match timeline.
+
+
+## Shared participant match history
+
+Completed Singles matches are no longer owned only by the device/account that created them. Each completed match is written once to `matches/{matchId}` with its `creatorPlayerId` and `participantIds`. On app start/sign-in, CricXii queries the active numeric Player ID, merges all completed matches where that Player ID participated, and rebuilds that player's career stats from those canonical match records.
+
+Build 14-and-older completed matches are migrated by the original match creator the first time that creator opens/syncs this version. Existing Match IDs are preserved, so the migration is idempotent and does not create duplicate history. After migration, every registered participant can sign in on their own account/device and see the same applicable match history. Profile includes a manual Sync action for newly completed matches from another device.
 
 ## Account / Firebase foundation
 
