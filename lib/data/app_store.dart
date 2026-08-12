@@ -163,6 +163,16 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  Future<void> cancelMatch(String matchId) async {
+    final index = matches.indexWhere((match) => match.id == matchId);
+    if (index < 0) return;
+    if (matches[index].status == MatchStatus.completed) {
+      throw StateError('Completed matches stay in history.');
+    }
+    matches.removeAt(index);
+    await _commit();
+  }
+
   Future<void> initialize() async {
     if (firebaseEnabled) {
       _auth = FirebaseAuth.instance;
@@ -1606,7 +1616,7 @@ class AppStore extends ChangeNotifier {
     'notifications': notifications.map((value) => value.toJson()).toList(),
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
     'defaultPointPresetId': defaultPointPresetId,
-    'schemaVersion': 5,
+    'schemaVersion': 6,
   };
 
   void _replaceState(Map<String, dynamic> json) {
@@ -1672,7 +1682,7 @@ class AppStore extends ChangeNotifier {
     try {
       await firestore.collection('accountStates').doc(player.id).set({
         'state': jsonEncode(state),
-        'schemaVersion': 5,
+        'schemaVersion': 6,
         'updatedAt': FieldValue.serverTimestamp(),
       });
       final playerRef = firestore.collection('players').doc(player.id);

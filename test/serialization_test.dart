@@ -19,7 +19,7 @@ void main() {
       startedAt: DateTime.utc(2026, 8, 9, 9, 30),
       pointPresetName: 'Ground Rules',
       autoBowlingPlan: true,
-      pointRules: const PointRules(wicket: 25, catchPoint: 12),
+      pointRules: const PointRules(wicket: 25, bowledBonus: 7, catchPoint: 12),
       drawPool: const [
         DrawCard(id: 'card-a', order: 1, colorValue: 0xFF19C37D),
         DrawCard(id: 'card-b', order: 2, colorValue: 0xFFFFB020),
@@ -54,6 +54,7 @@ void main() {
     expect(restored.ballLimit, 9);
     expect(restored.battingOrder, ['100002', '100001']);
     expect(restored.pointRules.wicket, 25);
+    expect(restored.pointRules.bowledBonus, 7);
     expect(restored.drawPool.length, 2);
     expect(restored.pointPresetName, 'Ground Rules');
     expect(restored.startedAt, DateTime.utc(2026, 8, 9, 9, 30));

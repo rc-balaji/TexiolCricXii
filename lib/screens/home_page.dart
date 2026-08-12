@@ -32,6 +32,35 @@ class HomePage extends StatelessWidget {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
+  Future<void> _cancelMatch(BuildContext context, CricketMatch match) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this match?'),
+        content: Text(
+          '${match.title} will be cleared from Continue playing. Any unfinished score in this match will be discarded.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep match'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel & clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await AppScope.read(context).cancelMatch(match.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unfinished match cleared.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -139,7 +168,7 @@ class HomePage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
-                    'SINGLES MATCH • V1.0.0',
+                    'SINGLES MATCH • V1.0.1',
                     style: TextStyle(
                       color: AppColors.green,
                       fontSize: 10,
@@ -275,32 +304,61 @@ class HomePage extends StatelessWidget {
               (match) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Card(
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.all(14),
-                    leading: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE7F8F0),
-                        borderRadius: BorderRadius.circular(15),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        contentPadding: const EdgeInsets.fromLTRB(14, 14, 8, 8),
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE7F8F0),
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          child: const Icon(
+                            Icons.sports_cricket,
+                            color: AppColors.greenDark,
+                          ),
+                        ),
+                        title: Text(
+                          match.title,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          '${match.id}  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}',
+                        ),
+                        trailing: const Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 16,
+                        ),
+                        onTap: () => _openMatch(context, match),
                       ),
-                      child: const Icon(
-                        Icons.sports_cricket,
-                        color: AppColors.greenDark,
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: () => _openMatch(context, match),
+                                icon: const Icon(Icons.play_arrow_rounded),
+                                label: const Text('Resume'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: () => _cancelMatch(context, match),
+                                icon: const Icon(Icons.close_rounded),
+                                label: const Text('Cancel / clear'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.redAccent,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    title: Text(
-                      match.title,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    subtitle: Text(
-                      '${match.id}  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}',
-                    ),
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      size: 16,
-                    ),
-                    onTap: () => _openMatch(context, match),
+                    ],
                   ),
                 ),
               ),

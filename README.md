@@ -1,6 +1,6 @@
-# CricXii v1.0.0 — Singles Match V1
+# CricXii v1.0.1 — Singles Match V1
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.0.0+13` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.0.1+14` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
 
 ## V1 Singles features
 

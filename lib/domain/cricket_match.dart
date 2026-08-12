@@ -4,6 +4,7 @@ class PointRules {
   const PointRules({
     this.run = 1,
     this.wicket = 5,
+    this.bowledBonus = 2,
     this.catchPoint = 2,
     this.directRunOut = 3,
     this.assistedRunOut = 1,
@@ -13,6 +14,7 @@ class PointRules {
 
   final int run;
   final int wicket;
+  final int bowledBonus;
   final int catchPoint;
   final int directRunOut;
   final int assistedRunOut;
@@ -22,6 +24,7 @@ class PointRules {
   Map<String, int> toJson() => {
     'run': run,
     'wicket': wicket,
+    'bowledBonus': bowledBonus,
     'catchPoint': catchPoint,
     'directRunOut': directRunOut,
     'assistedRunOut': assistedRunOut,
@@ -32,6 +35,7 @@ class PointRules {
   factory PointRules.fromJson(Map<String, dynamic> json) => PointRules(
     run: json['run'] as int? ?? 1,
     wicket: json['wicket'] as int? ?? 5,
+    bowledBonus: json['bowledBonus'] as int? ?? 2,
     catchPoint: json['catchPoint'] as int? ?? 2,
     directRunOut: json['directRunOut'] as int? ?? 3,
     assistedRunOut: json['assistedRunOut'] as int? ?? 1,

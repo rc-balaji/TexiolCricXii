@@ -70,6 +70,22 @@ void main() {
       expect(ScoringEngine.currentBatterId(match), 'p3');
     });
 
+
+    test('bowled dismissal gives wicket points plus bowled bonus', () {
+      final match = _match();
+      _delivery(
+        match,
+        'bowled-bonus',
+        isOut: true,
+        dismissal: DismissalType.bowled,
+        bowlerId: 'p2',
+      );
+
+      final stats = ScoringEngine.calculateStats(match);
+      expect(stats['p2']!.wickets, 1);
+      expect(stats['p2']!.points, 7);
+    });
+
     test('caught wicket credits bowler and catcher separately', () {
       final match = _match();
       _delivery(

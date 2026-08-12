@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../domain/player.dart';
-import '../export/daily_performance_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import 'daily_report_builder_screen.dart';
 import 'match_summary_screen.dart';
 import 'public_player_profile_screen.dart';
 
@@ -19,7 +19,6 @@ class DailyPerformanceScreen extends StatefulWidget {
 
 class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
   late DateTime _date;
-  bool _exporting = false;
 
   @override
   void initState() {
@@ -45,46 +44,17 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
     return <String, Player>{for (final player in store.players) player.id: player};
   }
 
-  Future<void> _share() async {
+  void _openReportBuilder() {
     final store = AppScope.read(context);
     final summary = store.performanceForDate(_date);
-    setState(() => _exporting = true);
-    try {
-      await DailyPerformanceExport.sharePdf(summary, _playerMap());
-    } on Object catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not share performance PDF: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
-  }
-
-  Future<void> _save() async {
-    final store = AppScope.read(context);
-    final summary = store.performanceForDate(_date);
-    setState(() => _exporting = true);
-    try {
-      final file = await DailyPerformanceExport.savePdf(
-        summary,
-        _playerMap(),
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('PDF saved: ${file.path}')));
-      }
-    } on Object catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save performance PDF: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DailyReportBuilderScreen(
+          summary: summary,
+          players: _playerMap(),
+        ),
+      ),
+    );
   }
 
   @override
@@ -108,34 +78,44 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 36),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _isToday(_date) ? 'Today’s performance' : 'Daily performance',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -1,
-                      ),
+          SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _isToday(_date) ? 'Today’s performance' : 'Daily performance',
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1,
                     ),
-                    const SizedBox(height: 4),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_today_rounded,
+                      size: 15,
+                      color: AppColors.muted,
+                    ),
+                    const SizedBox(width: 7),
                     Text(
                       _dateLabel(_date),
-                      style: const TextStyle(color: AppColors.muted),
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: _pickDate,
-                icon: const Icon(Icons.edit_calendar_rounded),
-                label: const Text('Date'),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 18),
           Container(
@@ -217,15 +197,23 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
                   ),
           ),
           const SizedBox(height: 14),
-          Row(
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 9,
+            mainAxisSpacing: 9,
+            childAspectRatio: 2.2,
             children: [
               _Metric(label: 'Matches', value: '${summary.matches.length}'),
-              const SizedBox(width: 8),
               _Metric(label: 'Runs', value: '${summary.totalRuns}'),
-              const SizedBox(width: 8),
               _Metric(label: 'Wickets', value: '${summary.totalWickets}'),
-              const SizedBox(width: 8),
               _Metric(label: 'Catches', value: '${summary.totalCatches}'),
+              _Metric(label: 'Day points', value: '${summary.totalPoints}'),
+              _Metric(
+                label: 'Players',
+                value: '${summary.rankings.length}',
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -348,20 +336,15 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
             }),
           const SizedBox(height: 20),
           FilledButton.icon(
-            onPressed: _exporting ? null : _share,
-            icon: _exporting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.picture_as_pdf_rounded),
-            label: const Text('Share daily performance PDF'),
+            onPressed: summary.matches.isEmpty ? null : _openReportBuilder,
+            icon: const Icon(Icons.tune_rounded),
+            label: const Text('Build / preview / share PDF'),
           ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _exporting ? null : _save,
-            icon: const Icon(Icons.download_rounded),
-            label: const Text('Save daily PDF'),
+          const Text(
+            'Choose report sections and matches first, preview them, then share or download the PDF.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.muted, fontSize: 11),
           ),
         ],
       ),
@@ -390,17 +373,17 @@ class _Metric extends StatelessWidget {
   final String value;
 
   @override
-  Widget build(BuildContext context) => Expanded(
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE1E9E4)),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border.all(color: const Color(0xFFE1E9E4)),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
           Text(
             label,
             style: const TextStyle(color: AppColors.muted, fontSize: 10),
@@ -412,6 +395,5 @@ class _Metric extends StatelessWidget {
           ),
         ],
       ),
-    ),
-  );
+    );
 }

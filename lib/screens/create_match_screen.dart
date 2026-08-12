@@ -169,6 +169,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   Future<void> _editPoints() async {
     final run = TextEditingController(text: '${_pointRules.run}');
     final wicket = TextEditingController(text: '${_pointRules.wicket}');
+    final bowledBonus = TextEditingController(text: '${_pointRules.bowledBonus}');
     final catchPoint = TextEditingController(text: '${_pointRules.catchPoint}');
     final direct = TextEditingController(text: '${_pointRules.directRunOut}');
     final assist = TextEditingController(text: '${_pointRules.assistedRunOut}');
@@ -200,12 +201,13 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Balanced default: wicket 5, catch 2, direct run-out 3. Match rules lock when play starts.',
+                  'Balanced default: wicket 5 + bowled bonus 2, catch 2, direct run-out 3. Match rules lock when play starts.',
                   style: TextStyle(color: AppColors.muted),
                 ),
                 const SizedBox(height: 18),
                 _NumberField(controller: run, label: 'Per run'),
                 _NumberField(controller: wicket, label: 'Wicket'),
+                _NumberField(controller: bowledBonus, label: 'Bowled bonus'),
                 _NumberField(controller: catchPoint, label: 'Catch'),
                 _NumberField(controller: direct, label: 'Direct run out'),
                 _NumberField(
@@ -247,6 +249,10 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
                         rules: PointRules(
                           run: value(run, _pointRules.run),
                           wicket: value(wicket, _pointRules.wicket),
+                          bowledBonus: value(
+                            bowledBonus,
+                            _pointRules.bowledBonus,
+                          ),
                           catchPoint: value(catchPoint, _pointRules.catchPoint),
                           directRunOut: value(direct, _pointRules.directRunOut),
                           assistedRunOut: value(
@@ -272,6 +278,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     for (final controller in [
       run,
       wicket,
+      bowledBonus,
       catchPoint,
       direct,
       assist,
@@ -581,7 +588,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               subtitle: Text(
-                '${_pointRules.run}/run • ${_pointRules.wicket}/wicket • ${_pointRules.catchPoint}/catch • ${_pointRules.directRunOut}/direct RO',
+                '${_pointRules.run}/run • ${_pointRules.wicket}/wicket • +${_pointRules.bowledBonus}/bowled • ${_pointRules.catchPoint}/catch • ${_pointRules.directRunOut}/direct RO',
               ),
               trailing: TextButton(
                 onPressed: _editPoints,

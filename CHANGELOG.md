@@ -1,6 +1,6 @@
 # CricXii changelog
 
-## 1.0.0+13 — Singles Match V1
+## 1.0.1+14 — Singles Match V1
 
 - Promoted the app to the first `1.0.0` Singles release.
 - Added over-based match setup with half-over convention (`1.5 = 9 legal balls`).
@@ -38,3 +38,10 @@
 - Anonymous Firebase session foundation with custom CricXii account layer.
 - Google/Facebook/claim flow removed.
 - Simplified player/social collections and notification lifecycle.
+
+## 1.0.1+14
+- Rebuilt the Performance header and metrics as a responsive full-width layout.
+- Added Daily PDF Report Builder with section checkboxes, per-match selection, in-app content preview, share, and download.
+- Daily PDF can include overview/day-only points, Top 3, overall ranking, player performance, match-wise winners, and full ranking tables per selected match.
+- Added Bowled Bonus scoring: default wicket 5 + bowled bonus 2; configurable and saved in point presets.
+- Added Resume and Cancel/Clear controls for unfinished matches on Home.

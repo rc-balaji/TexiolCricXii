@@ -177,6 +177,9 @@ class ScoringEngine {
         if (bowler != null) {
           bowler.wickets += 1;
           bowler.points += match.pointRules.wicket;
+          if (event.dismissalType == DismissalType.bowled) {
+            bowler.points += match.pointRules.bowledBonus;
+          }
         }
       }
       switch (event.dismissalType) {

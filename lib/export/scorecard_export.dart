@@ -55,7 +55,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v1.0.0',
+      creator: 'CricXii v1.0.1',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -861,6 +861,7 @@ class ScorecardExport {
       ('Format', OversFormat.setupOversLabel(match.ballLimit)),
       ('Preset', match.pointPresetName),
       ('Wicket', '${match.pointRules.wicket} pts'),
+      ('Bowled +', '${match.pointRules.bowledBonus} pts'),
       ('Catch', '${match.pointRules.catchPoint} pts'),
       ('Direct RO', '${match.pointRules.directRunOut} pts'),
       ('Started', _time(match.startedAt ?? match.createdAt)),
@@ -875,21 +876,21 @@ class ScorecardExport {
       ),
       child: pw.Column(
         children: [
-          for (var row = 0; row < 2; row++) ...[
+          for (var row = 0; row < 3; row++) ...[
             pw.Row(
               children: [
-                for (var column = 0; column < 4; column++)
+                for (var column = 0; column < 3; column++)
                   pw.Expanded(
                     child: _detail(
-                      values[(row * 4) + column].$1,
-                      values[(row * 4) + column].$2,
+                      values[(row * 3) + column].$1,
+                      values[(row * 3) + column].$2,
                       ink,
                       muted,
                     ),
                   ),
               ],
             ),
-            if (row == 0) pw.SizedBox(height: 6),
+            if (row < 2) pw.SizedBox(height: 5),
           ],
         ],
       ),
