@@ -7,6 +7,7 @@ import '../domain/scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import 'participant_match_watch_screen.dart';
 import 'public_player_profile_screen.dart';
 import 'register_player_dialog.dart';
 
@@ -294,6 +295,9 @@ class LiveMatchScreen extends StatelessWidget {
     final match = store.matchById(matchId);
     if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
+    }
+    if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
+      return ParticipantMatchWatchScreen(matchId: match.id);
     }
     final states = ScoringEngine.rebuildTurns(match);
     final rankings = ScoringEngine.rankings(match);

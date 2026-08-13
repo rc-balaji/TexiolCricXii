@@ -1,5 +1,20 @@
 # CricXii changelog
 
+## 1.1.0+16 — Shared Active Match Watch
+
+- Shared `matches/{matchId}` now exists from match creation through drawing, live scoring and completion, not only after completion.
+- Every registered participant can discover an unfinished match on app startup/foreground refresh and open a read-only **Watch** screen.
+- Participant Watch uses a single-document Firestore snapshot listener only while the screen is open, showing Playing Now, current bowler, live ranking, remaining order and recent balls.
+- Host ownership is enforced in three layers: Home routing, every AppStore match mutation, and Firestore rules.
+- Non-host participants cannot score, undo, reorder, add players, replace bowlers, reset the draw or cancel the match.
+- Host cancellations use a persisted pending-delete queue so participant devices do not keep ghost Resume/Watch cards after temporary network failures.
+- Home refreshes shared matches when the app returns to the foreground and also exposes pull-to-refresh / Refresh Matches.
+- Rapid local commits now use an serialized latest-state cloud-sync queue, preventing older score snapshots from racing newer snapshots.
+- Shared match writes are fingerprinted so unchanged historical matches are not rewritten on every ball.
+- Match creation/start/live-player-add/final completion can wait for the serialized cloud sync, improving cross-device visibility at important lifecycle boundaries.
+- Existing Build 15 active and completed creator-owned matches migrate with the same Match IDs.
+- Added shared-active-match tests for participant visibility, host ownership and live-score serialization.
+
 ## 1.0.2+15 — Shared Participant History
 
 - Fixed the creator-only history bug: completed Singles matches now have a canonical shared Firestore record under `matches/{matchId}`.

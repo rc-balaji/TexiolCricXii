@@ -1,4 +1,4 @@
-# v1.0.x Fresh Start / migration checklist
+# v1.1.x Fresh Start / migration checklist
 
 This version intentionally starts a new account schema. Local SharedPreferences keys are bumped to `v4`, so old v0.2.x CricXii account state is not automatically treated as a valid v1.0 login.
 
@@ -6,9 +6,9 @@ This version intentionally starts a new account schema. Local SharedPreferences 
 
 1. Authentication -> Sign-in method: keep **Anonymous** enabled. Disable Email/Password, Google and Facebook if you want the requested Anonymous-only setup.
 2. You may delete the old Authentication users. On the next launch CricXii silently creates/refreshes an anonymous Firebase transport user.
-3. For an already-used Build 14 database, **do not delete creator `accountStates` before v1.0.2 migration** if those documents contain completed matches that have not yet been shared.
-4. Deploy this ZIP's `firestore.rules` and `firestore.indexes.json`.
-5. Install v1.0.2 on the original match-creator account/device and open Profile/Sync once so legacy completed matches are copied to canonical `matches/{matchId}` records.
+3. For an already-used Build 14 database, **do not delete creator `accountStates` before v1.1.0 migration** if those documents contain completed or active matches that have not yet been shared.
+4. Deploy this ZIP's `firestore.rules`. No new composite index is required for v1.1.0 Watch.
+5. Install v1.1.0 on the original match-creator account/device and open/Refresh once so legacy creator-owned active and completed matches are copied to canonical `matches/{matchId}` records.
 6. Then sign in to each participant account and verify their own history/stats.
 
 ## New collections created by the app
@@ -19,14 +19,14 @@ This version intentionally starts a new account schema. Local SharedPreferences 
 - `accountStates`
 - `friendRequests`
 - `notifications`
-- `matches` (canonical completed shared match records)
+- `matches` (canonical shared match records from drawing/live through completion)
 
 Subcollections:
 
 - `players/{playerId}/friends`
 - `players/{playerId}/contactFields`
 
-The `matches` collection now has a defined role: creator-write, participant-read canonical completed Singles history. `gangs` remains available for the existing local/gang features.
+The `matches` collection now has a defined role: creator-write, participant-read canonical Singles lifecycle + completed history. `gangs` remains available for the existing local/gang features.
 
 ## Old collections that v1.0 no longer uses
 

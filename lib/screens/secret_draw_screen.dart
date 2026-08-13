@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/ui_bits.dart';
+import 'participant_match_watch_screen.dart';
 import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'tracker_screen.dart';
@@ -140,6 +141,9 @@ class _SecretDrawScreenState extends State<SecretDrawScreen> {
     final match = store.matchById(widget.matchId);
     if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
+    }
+    if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
+      return ParticipantMatchWatchScreen(matchId: match.id);
     }
     final nextId = store.nextDrawPlayerId(match);
     final nextPlayer = store.playerById(nextId);

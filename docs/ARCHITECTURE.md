@@ -1,43 +1,35 @@
-# CricXii v1.0.2 architecture
+# CricXii v1.1.0 architecture
 
-## Stable identity layer
+## Identity
 
-Firebase Anonymous Auth remains an invisible Firebase session. CricXii account identity, player profiles, friends and notifications use the Fresh Start data model from v0.3.x. V1 does not reintroduce Google/Facebook login, claim IDs or Cloud Functions.
+Firebase Anonymous Authentication remains an invisible transport/session layer. The CricXii account is selected by the custom email/password account record and bound to a numeric Player ID through `sessions/{firebaseUid}`.
 
+## Canonical match ownership
 
-## Shared completed-match history
+`matches/{matchId}` is now the canonical shared record for the **entire** Singles lifecycle.
 
-`accountStates/{playerId}` remains a private cache/preferences snapshot, but it is no longer the source of truth for completed Singles history. A completed match is canonically stored at `matches/{matchId}` with `creatorPlayerId`, `participantIds`, timestamps and the serialized full match.
+- `creatorPlayerId` is the host/controller.
+- `participantIds` defines who may read/watch the match.
+- `status` can be draft/drawing/live/completed.
+- `matchJson` contains the complete serialized match state, including draw/order, bowling plan, score events, audit trail and point rules.
+- Only the host can mutate/delete the canonical record.
+- Every participant can read it from their own CricXii session.
 
-- Only the match creator writes/updates the canonical match.
-- Every participant can read a completed match that contains their Player ID.
-- Sign-in/startup queries shared matches by `participantIds array-contains activePlayerId`.
-- The active player career is recalculated from all completed matches in which that Player ID participated.
-- Build 14-and-older completed creator-side matches are migrated once using the existing Match ID.
-- Draft/live matches stay private/local until completion.
+The private `accountStates/{playerId}` document remains a device/account recovery cache; it is not the source of truth for another player's match access.
 
-## Match engine
+## Cross-device behavior
 
-`CricketMatch` stores setup, order, scoring events, point rules, bowling plan, bowler-change audit, created/start/completion timestamps and match audit entries.
+- Host creates a match -> canonical shared match is queued immediately.
+- Participant starts/resumes app -> participant-ID query discovers applicable active/completed matches.
+- Participant opens Watch -> a listener watches only that match document while the screen is open.
+- Host scores/reorders/replaces bowler -> the serialized latest-state sync queue pushes the newest snapshot in sequence.
+- Host completes -> participant Watch changes to Final and career history can rebuild from the same record.
+- Host cancels -> shared record is deleted; participants remove the ghost active card on listener/refresh.
 
-- `match_planning.dart`: over conversion and balanced bowling scheduling.
-- `scoring_engine.dart`: Ball Tracker and Direct Runs scoring/ranking.
-- `live_match_screen.dart`: local live rank, queue and in-progress controls.
-- `daily_performance.dart`: date-scoped aggregate performance.
-- `scorecard_export.dart`: one-page match PDF.
-- `daily_performance_export.dart`: multi-page date performance PDF.
+## Career stats
 
-## Bowling plan rules
+Career Singles stats are rebuilt only from completed matches in which the active Player ID participated. Match creator identity does not affect career credit.
 
-- Never assign the current batter as bowler.
-- Keep each full six-ball over assigned to one bowler.
-- Treat a final three-ball half-over as its own block.
-- Use the only available bowler when there are only two players.
-- Prefer a different bowler for adjacent blocks when alternatives exist.
-- Prefer a different bowler across batting-turn boundaries when alternatives exist.
-- Balance scheduled legal-ball load across eligible players.
-- Mid-over replacement affects future balls only; recorded ScoreEvents preserve the actual bowler.
+## Spark-read discipline
 
-## Remote live layer
-
-No remote share link, public live viewer, comments or Ask-to-Join exists in v1.0.0. That layer is deferred.
+The Home screen does not keep a permanent live query open. App foreground/manual refresh discovers matches. Realtime listening is limited to the one match a participant is actively watching.

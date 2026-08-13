@@ -1,4 +1,4 @@
-# Firebase setup — CricXii v1.0.2
+# Firebase setup — CricXii v1.1.0
 
 ## Authentication
 
@@ -14,22 +14,22 @@ The GitHub workflow decodes it only during the build and copies it into the gene
 
 ## Firestore
 
-Deploy rules and indexes from the project root using your preferred Firebase CLI setup:
+Deploy the included rules from the project root:
 
 ```bash
-npx --yes firebase-tools@latest deploy \
-  --project YOUR_FIREBASE_PROJECT_ID \
-  --only "firestore:rules,firestore:indexes"
+npx --yes firebase-tools@latest deploy --project crixx-59eca --only "firestore:rules"
 ```
 
-The app's social queries use single fields. Shared match history uses the built-in array index on `participantIds` (`array-contains activePlayerId`), so no custom composite index is required in `firestore.indexes.json`.
+No new composite index is required by v1.1.0 active-match Watch.
+
+The app's social queries use single fields. Shared active/history lookup uses the built-in array index on `participantIds` (`array-contains activePlayerId`), so no custom composite index is required in `firestore.indexes.json`.
 
 
 ## Shared-history migration test
 
 - Keep the original creator account/device data from Build 14 or older.
 - Deploy the new Firestore rules first.
-- Open v1.0.2 as the creator and press Profile → Singles career stats → Sync if needed.
+- Open v1.1.0 as the creator and press Profile → Singles career stats → Sync if needed.
 - Confirm `matches/{matchId}` documents are created once with `creatorPlayerId` and all `participantIds`.
 - Sign in as a registered participant on another device/account.
 - Confirm their own Profile shows the applicable completed matches and rebuilt Runs/Points/Wickets/Catches/Matches/Wins even though they did not create those matches.
@@ -48,3 +48,11 @@ The app's social queries use single fields. Shared match history uses the built-
 - Mark read, Mark unread, Delete notification and Delete All notifications.
 - Remove friend and verify both sides after refresh.
 - Existing Singles scoring and PDF export still work.
+
+## Active participant Watch test
+
+- Creator starts a match with another registered Player ID.
+- On the participant account/device, reopen the app or use Home -> Refresh matches.
+- The match must appear as **Watch / Read only**.
+- Keep Watch open and score on the creator device; the participant view should update from the one canonical match document.
+- Participant-side mutation attempts are blocked by both AppStore host checks and Firestore rules.

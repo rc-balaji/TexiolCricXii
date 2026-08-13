@@ -1,6 +1,6 @@
-# CricXii v1.0.2 — Singles Match V1
+# CricXii v1.1.0 — Singles Shared Match Foundation
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.0.2+15` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.1.0+16` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
 
 ## V1 Singles features
 
@@ -25,9 +25,9 @@ CricXii is Texiol's Android-first local cricket scorer. Version `1.0.2+15` promo
 
 ## Shared participant match history
 
-Completed Singles matches are no longer owned only by the device/account that created them. Each completed match is written once to `matches/{matchId}` with its `creatorPlayerId` and `participantIds`. On app start/sign-in, CricXii queries the active numeric Player ID, merges all completed matches where that Player ID participated, and rebuilds that player's career stats from those canonical match records.
+Singles matches are no longer private to the creator device while they are in progress. Each match is shared canonically under `matches/{matchId}` from drawing through live scoring and completion, with `creatorPlayerId` as the host and `participantIds` as the read audience. Participants discover applicable matches on startup/foreground/manual refresh and open non-host matches in read-only Watch mode.
 
-Build 14-and-older completed matches are migrated by the original match creator the first time that creator opens/syncs this version. Existing Match IDs are preserved, so the migration is idempotent and does not create duplicate history. After migration, every registered participant can sign in on their own account/device and see the same applicable match history. Profile includes a manual Sync action for newly completed matches from another device.
+The host remains the only controller for scoring, undo, order changes, player additions, bowler replacement and cancellation. Watch mode uses a single match-document listener only while that screen is open. Completed matches remain the permanent source for each participant's applicable History and career-stat rebuild. Existing Build 15 creator-owned matches migrate using the same Match IDs.
 
 ## Account / Firebase foundation
 

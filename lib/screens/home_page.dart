@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../domain/cricket_match.dart';
@@ -11,24 +13,53 @@ import 'create_match_screen.dart';
 import 'daily_performance_screen.dart';
 import 'match_summary_screen.dart';
 import 'notifications_screen.dart';
+import 'participant_match_watch_screen.dart';
 import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'secret_draw_screen.dart';
 import 'tracker_screen.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(AppScope.read(context).refreshMatches());
+    }
+  }
+
   void _openMatch(BuildContext context, CricketMatch match) {
-    final page = switch (match.status) {
-      MatchStatus.draft ||
-      MatchStatus.drawing => SecretDrawScreen(matchId: match.id),
-      MatchStatus.live =>
-        match.scoringMode == ScoringMode.ballByBall
-            ? TrackerScreen(matchId: match.id)
-            : QuickScoreScreen(matchId: match.id),
-      MatchStatus.completed => MatchSummaryScreen(matchId: match.id),
-    };
+    final store = AppScope.read(context);
+    final canControl = store.canControlMatch(match);
+    final page = !canControl && match.status != MatchStatus.completed
+        ? ParticipantMatchWatchScreen(matchId: match.id)
+        : switch (match.status) {
+            MatchStatus.draft ||
+            MatchStatus.drawing => SecretDrawScreen(matchId: match.id),
+            MatchStatus.live =>
+              match.scoringMode == ScoringMode.ballByBall
+                  ? TrackerScreen(matchId: match.id)
+                  : QuickScoreScreen(matchId: match.id),
+            MatchStatus.completed => MatchSummaryScreen(matchId: match.id),
+          };
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
@@ -67,9 +98,12 @@ class HomePage extends StatelessWidget {
     final player = store.activePlayer!;
     final activeMatches = store.activeMatches;
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        children: [
+      child: RefreshIndicator(
+        onRefresh: store.refreshMatches,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          children: [
           Row(
             children: [
               GestureDetector(
@@ -168,7 +202,7 @@ class HomePage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
-                    'SINGLES MATCH • V1.0.1',
+                    'SINGLES MATCH • V1.1.0',
                     style: TextStyle(
                       color: AppColors.green,
                       fontSize: 10,
@@ -273,7 +307,14 @@ class HomePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 26),
-          const SectionLabel('Continue playing'),
+          SectionLabel(
+            'Continue playing',
+            trailing: IconButton(
+              tooltip: 'Refresh participant matches',
+              onPressed: () => store.refreshMatches(),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ),
           const SizedBox(height: 12),
           if (activeMatches.isEmpty)
             Container(
@@ -325,7 +366,9 @@ class HomePage extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w900),
                         ),
                         subtitle: Text(
-                          '${match.id}  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}',
+                          store.canControlMatch(match)
+                              ? '${match.id}  •  Host controls  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}'
+                              : '${match.id}  •  Hosted by ${store.playerById(match.creatorPlayerId)?.name ?? match.creatorPlayerId}  •  Read only',
                         ),
                         trailing: const Icon(
                           Icons.arrow_forward_ios_rounded,
@@ -340,21 +383,29 @@ class HomePage extends StatelessWidget {
                             Expanded(
                               child: TextButton.icon(
                                 onPressed: () => _openMatch(context, match),
-                                icon: const Icon(Icons.play_arrow_rounded),
-                                label: const Text('Resume'),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextButton.icon(
-                                onPressed: () => _cancelMatch(context, match),
-                                icon: const Icon(Icons.close_rounded),
-                                label: const Text('Cancel / clear'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.redAccent,
+                                icon: Icon(
+                                  store.canControlMatch(match)
+                                      ? Icons.play_arrow_rounded
+                                      : Icons.visibility_rounded,
+                                ),
+                                label: Text(
+                                  store.canControlMatch(match) ? 'Resume' : 'Watch',
                                 ),
                               ),
                             ),
+                            if (store.canControlMatch(match)) ...[
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TextButton.icon(
+                                  onPressed: () => _cancelMatch(context, match),
+                                  icon: const Icon(Icons.close_rounded),
+                                  label: const Text('Cancel / clear'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.redAccent,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -392,7 +443,8 @@ class HomePage extends StatelessWidget {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -127,6 +127,7 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
     if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
     }
+    final canControl = store.canControlMatch(match);
     final rankings = ScoringEngine.rankings(match);
     if (rankings.isEmpty) {
       return const Scaffold(body: Center(child: Text('No scores recorded')));
@@ -137,17 +138,18 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
       appBar: AppBar(
         title: const Text('Match summary'),
         actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'edit') _editLast();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'edit',
-                child: Text('Undo final entry & edit'),
-              ),
-            ],
-          ),
+          if (canControl)
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'edit') _editLast();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Undo final entry & edit'),
+                ),
+              ],
+            ),
         ],
       ),
       body: SafeArea(

@@ -9,6 +9,7 @@ import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import 'live_match_screen.dart';
 import 'match_summary_screen.dart';
+import 'participant_match_watch_screen.dart';
 import 'public_player_profile_screen.dart';
 
 class QuickScoreScreen extends StatefulWidget {
@@ -149,6 +150,9 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
     final match = store.matchById(widget.matchId);
     if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
+    }
+    if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
+      return ParticipantMatchWatchScreen(matchId: match.id);
     }
     final batterId = ScoringEngine.currentBatterId(match);
     final batter = store.playerById(batterId);

@@ -132,9 +132,9 @@ service cloud.firestore {
       allow read, write: if hasSession();
     }
 
-    // Completed Singles matches are shared permanent records. A participant
-    // can read their own history from any device/account session. Only the
-    // match creator can create/update/delete the canonical shared record.
+    // A match is shared from creation through completion. Every participant
+    // can read/watch it from their own signed-in CricXii session. Only the
+    // creator/host can mutate or cancel the canonical match record.
     match /matches/{matchId} {
       allow read: if hasSession() &&
         resource.data.participantIds is list &&
@@ -144,12 +144,14 @@ service cloud.firestore {
         request.resource.data.creatorPlayerId == currentPlayerId() &&
         request.resource.data.participantIds is list &&
         currentPlayerId() in request.resource.data.participantIds &&
-        request.resource.data.status == 'completed';
+        request.resource.data.status in ['draft', 'drawing', 'live', 'completed'];
       allow update: if hasSession() &&
         resource.data.creatorPlayerId == currentPlayerId() &&
+        request.resource.data.matchId == matchId &&
         request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
         request.resource.data.participantIds is list &&
-        currentPlayerId() in request.resource.data.participantIds;
+        currentPlayerId() in request.resource.data.participantIds &&
+        request.resource.data.status in ['draft', 'drawing', 'live', 'completed'];
       allow delete: if hasSession() &&
         resource.data.creatorPlayerId == currentPlayerId();
 
