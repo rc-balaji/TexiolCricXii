@@ -1,4 +1,4 @@
-# Firebase setup — CricXii v1.1.0
+# Firebase setup — CricXii v1.1.1
 
 ## Authentication
 
@@ -20,7 +20,7 @@ Deploy the included rules from the project root:
 npx --yes firebase-tools@latest deploy --project crixx-59eca --only "firestore:rules"
 ```
 
-No new composite index is required by v1.1.0 active-match Watch.
+No new composite index is required by v1.1.1 active-match Watch.
 
 The app's social queries use single fields. Shared active/history lookup uses the built-in array index on `participantIds` (`array-contains activePlayerId`), so no custom composite index is required in `firestore.indexes.json`.
 
@@ -29,7 +29,7 @@ The app's social queries use single fields. Shared active/history lookup uses th
 
 - Keep the original creator account/device data from Build 14 or older.
 - Deploy the new Firestore rules first.
-- Open v1.1.0 as the creator and press Profile → Singles career stats → Sync if needed.
+- Open v1.1.1 as the creator and press Profile → Singles career stats → Sync if needed.
 - Confirm `matches/{matchId}` documents are created once with `creatorPlayerId` and all `participantIds`.
 - Sign in as a registered participant on another device/account.
 - Confirm their own Profile shows the applicable completed matches and rebuilt Runs/Points/Wickets/Catches/Matches/Wins even though they did not create those matches.

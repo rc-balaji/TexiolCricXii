@@ -1,3 +1,11 @@
+# CricXii v1.1.1+17
+
+- Fixed shared-active-match unit test isolation by lazily initializing SharedPreferences.
+- Centralized active-match visibility policy: every participant can see draft/drawing/live matches; completed matches are history only.
+- Kept match control host-only and requires the host to remain a participant.
+- Added Flutter test binding initialization for the shared active-match integration tests.
+- No scoring, account, history, PDF, friend, or Firestore schema behavior changed.
+
 # CricXii changelog
 
 ## 1.1.0+16 — Shared Active Match Watch

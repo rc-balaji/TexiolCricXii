@@ -5,6 +5,8 @@ import 'package:crixx/domain/scoring_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('participant sees a foreign unfinished match as active but cannot control it', () {
     final store = AppStore();
     store.activePlayerId = '22222222';

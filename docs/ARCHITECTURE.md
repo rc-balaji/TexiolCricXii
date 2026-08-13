@@ -1,4 +1,4 @@
-# CricXii v1.1.0 architecture
+# CricXii v1.1.1 architecture
 
 ## Identity
 

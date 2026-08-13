@@ -1,4 +1,4 @@
-# CricXii v1.1.0 verification
+# CricXii v1.1.1 verification
 
 Required scenarios:
 

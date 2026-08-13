@@ -45,7 +45,9 @@ class AppStore extends ChangeNotifier {
   ];
 
   final IdGenerator _ids;
-  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
+  SharedPreferencesAsync? _preferencesInstance;
+  SharedPreferencesAsync get _preferences =>
+      _preferencesInstance ??= SharedPreferencesAsync();
   final bool firebaseEnabled;
   FirebaseAuth? _auth;
   FirebaseFirestore? _firestore;
@@ -158,21 +160,27 @@ class AppStore extends ChangeNotifier {
   int get unreadNotificationCount =>
       activeNotifications.where((value) => !value.read).length;
 
+  bool isActiveMatchForPlayer(CricketMatch match, String playerId) {
+    if (!match.participantIds.contains(playerId)) return false;
+    return switch (match.status) {
+      MatchStatus.draft || MatchStatus.drawing || MatchStatus.live => true,
+      MatchStatus.completed => false,
+    };
+  }
+
   List<CricketMatch> get activeMatches {
     final id = activePlayerId;
     if (id == null) return const [];
-    return matches
-        .where(
-          (match) =>
-              match.participantIds.contains(id) &&
-              match.status != MatchStatus.completed,
-        )
-        .toList()
+    return matches.where((match) => isActiveMatchForPlayer(match, id)).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  bool canControlMatch(CricketMatch match) =>
-      activePlayerId != null && match.creatorPlayerId == activePlayerId;
+  bool canControlMatch(CricketMatch match) {
+    final id = activePlayerId;
+    return id != null &&
+        match.creatorPlayerId == id &&
+        match.participantIds.contains(id);
+  }
 
   Future<void> cancelMatch(String matchId) async {
     final index = matches.indexWhere((match) => match.id == matchId);
