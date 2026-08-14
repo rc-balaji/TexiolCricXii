@@ -241,13 +241,43 @@ class ScoringEngine {
 
   static List<PlayerMatchStats> rankings(CricketMatch match) {
     final result = calculateStats(match).values.toList();
+    final tieOrder = <String, int>{
+      for (var index = 0; index < match.tieBreakOrder.length; index++)
+        match.tieBreakOrder[index]: index,
+    };
+    final currentOrder = <String, int>{
+      for (var index = 0; index < match.battingOrder.length; index++)
+        match.battingOrder[index]: index,
+    };
+    final participantOrder = <String, int>{
+      for (var index = 0; index < match.participantIds.length; index++)
+        match.participantIds[index]: index,
+    };
+
     result.sort((a, b) {
       final primary = match.winnerMetric == MatchWinnerMetric.runs
           ? b.runs.compareTo(a.runs)
           : b.points.compareTo(a.points);
       if (primary != 0) return primary;
-      final runs = b.runs.compareTo(a.runs);
-      if (runs != 0) return runs;
+
+      // CricXii tie-break: previous completed match rank/order wins the tie.
+      // If a player was not in that previous match, keep today's current
+      // batting order, then the stable participant creation order.
+      final previous = (tieOrder[a.playerId] ?? 1 << 20).compareTo(
+        tieOrder[b.playerId] ?? 1 << 20,
+      );
+      if (previous != 0) return previous;
+
+      final current = (currentOrder[a.playerId] ?? 1 << 20).compareTo(
+        currentOrder[b.playerId] ?? 1 << 20,
+      );
+      if (current != 0) return current;
+
+      final participant = (participantOrder[a.playerId] ?? 1 << 20).compareTo(
+        participantOrder[b.playerId] ?? 1 << 20,
+      );
+      if (participant != 0) return participant;
+
       return a.playerId.compareTo(b.playerId);
     });
     return result;

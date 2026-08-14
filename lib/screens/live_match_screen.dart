@@ -6,6 +6,7 @@ import '../domain/match_planning.dart';
 import '../domain/scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
+import '../widgets/match_sync_indicator.dart';
 import '../widgets/player_avatar.dart';
 import 'participant_match_watch_screen.dart';
 import 'public_player_profile_screen.dart';
@@ -299,6 +300,7 @@ class LiveMatchScreen extends StatelessWidget {
     if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
       return ParticipantMatchWatchScreen(matchId: match.id);
     }
+    final hostControls = store.canHostMatch(match);
     final states = ScoringEngine.rebuildTurns(match);
     final rankings = ScoringEngine.rankings(match);
     final currentId = ScoringEngine.currentBatterId(match);
@@ -323,24 +325,28 @@ class LiveMatchScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Live match'),
         actions: [
+          MatchSyncIndicator(matchId: match.id),
           IconButton(
             tooltip: 'Add player',
-            onPressed: match.status == MatchStatus.live
+            onPressed: match.status == MatchStatus.live && hostControls
                 ? () => _addPlayer(context)
                 : null,
             icon: const Icon(Icons.person_add_alt_1_rounded),
           ),
           PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'order') _editRemainingOrder(context);
+              if (value == 'order' && hostControls) {
+                _editRemainingOrder(context);
+              }
               if (value == 'bowling') _showBowlingPlan(context);
             },
-            itemBuilder: (context) => const [
+            itemBuilder: (context) => [
               PopupMenuItem(
                 value: 'order',
-                child: Text('Reorder remaining players'),
+                enabled: hostControls,
+                child: const Text('Reorder remaining players'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'bowling',
                 child: Text('View bowling plan'),
               ),
@@ -429,7 +435,7 @@ class LiveMatchScreen extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: match.status == MatchStatus.live
+                  onPressed: match.status == MatchStatus.live && hostControls
                       ? () => _editRemainingOrder(context)
                       : null,
                   icon: const Icon(Icons.swap_vert_rounded),
@@ -439,7 +445,7 @@ class LiveMatchScreen extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: match.status == MatchStatus.live
+                  onPressed: match.status == MatchStatus.live && hostControls
                       ? () => _addPlayer(context)
                       : null,
                   icon: const Icon(Icons.person_add_alt_1_rounded),

@@ -285,9 +285,15 @@ class CricketMatch {
     required this.ballLimit,
     required this.participantIds,
     required this.createdAt,
+    this.originToken,
     this.status = MatchStatus.draft,
     this.winnerMetric = MatchWinnerMetric.overallPoints,
     this.trackerPlayerId,
+    this.controllerUid,
+    this.controllerPlayerId,
+    this.controllerLeaseUntil,
+    this.revision = 0,
+    List<String>? tieBreakOrder,
     this.pointRules = const PointRules(),
     this.pointPresetName = 'Balanced',
     this.autoBowlingPlan = true,
@@ -310,7 +316,8 @@ class CricketMatch {
        bowlingPlan = bowlingPlan ?? <BowlingBlock>[],
        bowlerChanges = bowlerChanges ?? <BowlerChange>[],
        auditTrail = auditTrail ?? <MatchAuditEntry>[],
-       events = events ?? <ScoreEvent>[];
+       events = events ?? <ScoreEvent>[],
+       tieBreakOrder = tieBreakOrder ?? <String>[];
 
   final String id;
   String title;
@@ -318,11 +325,17 @@ class CricketMatch {
   ScoringMode scoringMode;
   int ballLimit;
   final DateTime createdAt;
+  final String? originToken;
   DateTime? startedAt;
   DateTime? completedAt;
   MatchStatus status;
   MatchWinnerMetric winnerMetric;
   String? trackerPlayerId;
+  String? controllerUid;
+  String? controllerPlayerId;
+  DateTime? controllerLeaseUntil;
+  int revision;
+  final List<String> tieBreakOrder;
   PointRules pointRules;
   String pointPresetName;
   bool autoBowlingPlan;
@@ -345,11 +358,17 @@ class CricketMatch {
     'scoringMode': scoringMode.name,
     'ballLimit': ballLimit,
     'createdAt': createdAt.toIso8601String(),
+    'originToken': originToken,
     'startedAt': startedAt?.toIso8601String(),
     'completedAt': completedAt?.toIso8601String(),
     'status': status.name,
     'winnerMetric': winnerMetric.name,
     'trackerPlayerId': trackerPlayerId,
+    'controllerUid': controllerUid,
+    'controllerPlayerId': controllerPlayerId,
+    'controllerLeaseUntil': controllerLeaseUntil?.toIso8601String(),
+    'revision': revision,
+    'tieBreakOrder': tieBreakOrder,
     'pointRules': pointRules.toJson(),
     'pointPresetName': pointPresetName,
     'autoBowlingPlan': autoBowlingPlan,
@@ -376,6 +395,7 @@ class CricketMatch {
     ballLimit: json['ballLimit'] as int,
     participantIds: List<String>.from(json['participantIds'] as List),
     createdAt: DateTime.parse(json['createdAt'] as String),
+    originToken: json['originToken'] as String?,
     startedAt: json['startedAt'] == null
         ? null
         : DateTime.tryParse(json['startedAt'].toString()),
@@ -387,6 +407,15 @@ class CricketMatch {
       json['winnerMetric'] as String? ?? MatchWinnerMetric.overallPoints.name,
     ),
     trackerPlayerId: json['trackerPlayerId'] as String?,
+    controllerUid: json['controllerUid'] as String?,
+    controllerPlayerId: json['controllerPlayerId'] as String?,
+    controllerLeaseUntil: json['controllerLeaseUntil'] == null
+        ? null
+        : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
+    revision: json['revision'] as int? ?? 0,
+    tieBreakOrder: List<String>.from(
+      json['tieBreakOrder'] as List? ?? const [],
+    ),
     pointRules: PointRules.fromJson(
       Map<String, dynamic>.from(json['pointRules'] as Map? ?? const {}),
     ),

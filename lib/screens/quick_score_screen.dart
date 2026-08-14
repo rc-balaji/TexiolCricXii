@@ -6,6 +6,7 @@ import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
+import '../widgets/match_sync_indicator.dart';
 import '../widgets/player_avatar.dart';
 import 'live_match_screen.dart';
 import 'match_summary_screen.dart';
@@ -154,6 +155,7 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
     if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
       return ParticipantMatchWatchScreen(matchId: match.id);
     }
+    final hostControls = store.canHostMatch(match);
     final batterId = ScoringEngine.currentBatterId(match);
     final batter = store.playerById(batterId);
     if (batter == null) return MatchSummaryScreen(matchId: match.id);
@@ -179,6 +181,7 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
           ],
         ),
         actions: [
+          MatchSyncIndicator(matchId: match.id),
           IconButton(
             tooltip: 'Live ranking & match controls',
             onPressed: () => Navigator.of(context).push(
@@ -195,12 +198,13 @@ class _QuickScoreScreenState extends State<QuickScoreScreen> {
           ),
           PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'next') _sendNextPlayer();
+              if (value == 'next' && hostControls) _sendNextPlayer();
             },
-            itemBuilder: (context) => const [
+            itemBuilder: (context) => [
               PopupMenuItem(
                 value: 'next',
-                child: Text('Send next player first'),
+                enabled: hostControls,
+                child: const Text('Send next player first'),
               ),
             ],
           ),

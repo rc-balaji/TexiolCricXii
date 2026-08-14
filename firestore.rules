@@ -132,38 +132,104 @@ service cloud.firestore {
       allow read, write: if hasSession();
     }
 
-    // A match is shared from creation through completion. Every participant
-    // can read/watch it from their own signed-in CricXii session. Only the
-    // creator/host can mutate or cancel the canonical match record.
-    match /matches/{matchId} {
-      allow read: if hasSession() &&
-        resource.data.participantIds is list &&
-        currentPlayerId() in resource.data.participantIds;
+    // Short-lived ID reservations prevent two online devices from ever
+    // creating the same random Match ID. They are deleted after canonical
+    // match creation; an abandoned reservation is harmless.
+    match /matchReservations/{matchId} {
+      allow get: if hasSession();
+      allow list: if false;
       allow create: if hasSession() &&
         request.resource.data.matchId == matchId &&
         request.resource.data.creatorPlayerId == currentPlayerId() &&
-        request.resource.data.participantIds is list &&
-        currentPlayerId() in request.resource.data.participantIds &&
-        request.resource.data.status in ['draft', 'drawing', 'live', 'completed'];
-      allow update: if hasSession() &&
-        resource.data.creatorPlayerId == currentPlayerId() &&
-        request.resource.data.matchId == matchId &&
-        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
-        request.resource.data.participantIds is list &&
-        currentPlayerId() in request.resource.data.participantIds &&
-        request.resource.data.status in ['draft', 'drawing', 'live', 'completed'];
+        request.resource.data.originToken is string;
       allow delete: if hasSession() &&
         resource.data.creatorPlayerId == currentPlayerId();
+      allow update: if false;
+    }
+
+    // Shared match source of truth. Participants can watch. The creator
+    // controls setup; the selected tracker may enter score while holding the
+    // same single-device control lease.
+    match /matches/{matchId} {
+      function isParticipant(data) {
+        return data.participantIds is list &&
+          currentPlayerId() in data.participantIds;
+      }
+
+      function isHost(data) {
+        return data.creatorPlayerId == currentPlayerId();
+      }
+
+      function isTracker(data) {
+        return data.trackerPlayerId is string &&
+          data.trackerPlayerId == currentPlayerId();
+      }
+
+      function ownsControllerLease(data) {
+        return data.controllerUid == request.auth.uid &&
+          data.controllerPlayerId == currentPlayerId();
+      }
+
+      allow read: if hasSession() && isParticipant(resource.data);
+
+      allow create: if hasSession() &&
+        request.resource.data.matchId == matchId &&
+        isHost(request.resource.data) &&
+        isParticipant(request.resource.data) &&
+        request.resource.data.status in ['draft', 'drawing', 'live', 'completed'] &&
+        request.resource.data.controllerUid == request.auth.uid &&
+        request.resource.data.controllerPlayerId == currentPlayerId();
+
+      // Host can update the full canonical match while retaining identity and
+      // the device lease. A second device must first take over the lease.
+      allow update: if hasSession() &&
+        isHost(resource.data) &&
+        request.resource.data.matchId == matchId &&
+        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
+        isParticipant(request.resource.data) &&
+        ownsControllerLease(request.resource.data);
+
+      // The selected tracker/scorer can write live scoring snapshots, but not
+      // reassign creator/title/participants/tracker/setup metadata.
+      allow update: if hasSession() &&
+        isTracker(resource.data) &&
+        ownsControllerLease(request.resource.data) &&
+        request.resource.data.status in ['live', 'completed'] &&
+        request.resource.data.matchId == resource.data.matchId &&
+        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
+        request.resource.data.participantIds == resource.data.participantIds &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.trackerPlayerId == resource.data.trackerPlayerId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'completedAt',
+          'activityAt',
+          'eventCount',
+          'auditCount',
+          'revision',
+          'controllerUid',
+          'controllerPlayerId',
+          'controllerLeaseUntil',
+          'participantProfiles',
+          'matchJson',
+          'updatedAt'
+        ]);
+
+      allow delete: if hasSession() && isHost(resource.data);
 
       match /events/{eventId} {
         allow read: if hasSession() &&
           currentPlayerId() in get(
             /databases/$(database)/documents/matches/$(matchId)
           ).data.participantIds;
-        allow write: if hasSession() &&
+        allow write: if hasSession() && (
           get(
             /databases/$(database)/documents/matches/$(matchId)
-          ).data.creatorPlayerId == currentPlayerId();
+          ).data.creatorPlayerId == currentPlayerId() ||
+          get(
+            /databases/$(database)/documents/matches/$(matchId)
+          ).data.trackerPlayerId == currentPlayerId()
+        );
       }
     }
 

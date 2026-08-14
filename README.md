@@ -1,6 +1,6 @@
-# CricXii v1.1.1 — Shared Active Match Regression Fix
+# CricXii v1.2.0 — Match Hardening & Deterministic Ties
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.1.1+17` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.2.0+18` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
 
 ## V1 Singles features
 
@@ -28,6 +28,16 @@ CricXii is Texiol's Android-first local cricket scorer. Version `1.1.1+17` promo
 Singles matches are no longer private to the creator device while they are in progress. Each match is shared canonically under `matches/{matchId}` from drawing through live scoring and completion, with `creatorPlayerId` as the host and `participantIds` as the read audience. Participants discover applicable matches on startup/foreground/manual refresh and open non-host matches in read-only Watch mode.
 
 The host remains the only controller for scoring, undo, order changes, player additions, bowler replacement and cancellation. Watch mode uses a single match-document listener only while that screen is open. Completed matches remain the permanent source for each participant's applicable History and career-stat rebuild. Existing Build 15 creator-owned matches migrate using the same Match IDs.
+
+## v1.2 hardening
+
+- Single scoring-controller device lease prevents two phones on the same account from silently overwriting each other. A confirmed **Take control** action is available for handover.
+- The selected tracker/scorer can enter live score while host-only setup/order/player controls remain separate.
+- Offline scoring persists locally and shows synced / waiting / retry state; revision checks prevent stale reconnects from overwriting newer canonical score.
+- Equal primary scores use the **previous completed match rank/order** as the tie-break, then current batting order for players without prior rank.
+- Daily performance uses match completion date, automatic Match N numbering counts only matches created by the current host, and online Match IDs are transactionally reserved.
+- Mid-match participant additions publish to the shared audience; cancel/complete/undo/account-delete lifecycle transitions clean up participant Watch state correctly.
+- Shared participant history is recent-first and paginated with **Load older matches** instead of unbounded loading.
 
 ## Account / Firebase foundation
 

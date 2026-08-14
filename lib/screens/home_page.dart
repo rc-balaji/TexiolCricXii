@@ -367,7 +367,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                         subtitle: Text(
                           store.canControlMatch(match)
-                              ? '${match.id}  •  Host controls  •  ${match.scoringMode.label}  •  ${OversFormat.setupOversLabel(match.ballLimit)}'
+                              ? '${match.id}  •  ${store.isMatchTracker(match) && !store.isMatchHost(match) ? 'Tracker controls' : 'Host controls'}  •  ${store.isMatchSynced(match.id) ? 'Synced' : 'Waiting to sync'}  •  ${match.scoringMode.label}'
                               : '${match.id}  •  Hosted by ${store.playerById(match.creatorPlayerId)?.name ?? match.creatorPlayerId}  •  Read only',
                         ),
                         trailing: const Icon(
@@ -393,7 +393,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                 ),
                               ),
                             ),
-                            if (store.canControlMatch(match)) ...[
+                            if (store.canHostMatch(match)) ...[
                               const SizedBox(width: 8),
                               Expanded(
                                 child: TextButton.icon(

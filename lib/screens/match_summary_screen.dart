@@ -129,6 +129,14 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
     }
     final canControl = store.canControlMatch(match);
     final rankings = ScoringEngine.rankings(match);
+    final primaryScores = rankings
+        .map(
+          (value) => match.winnerMetric == MatchWinnerMetric.runs
+              ? value.runs
+              : value.points,
+        )
+        .toList(growable: false);
+    final hasTie = primaryScores.toSet().length < primaryScores.length;
     if (rankings.isEmpty) {
       return const Scaffold(body: Center(child: Text('No scores recorded')));
     }
@@ -236,6 +244,17 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                    if (hasTie) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Tie-break: previous match rank/order. Players with no prior rank fall back to this match order.',
+                        style: TextStyle(
+                          color: AppColors.greenDark,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     Text(
                       'Started ${_time(match.startedAt)} • Completed ${_time(match.completedAt)} • Points preset: ${match.pointPresetName}',

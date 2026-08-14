@@ -36,6 +36,47 @@ class _ParticipantMatchWatchScreenState
     if (mounted) setState(() {});
   }
 
+  Future<void> _takeControl() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Take control on this device?'),
+        content: const Text(
+          'Use this only when the other scoring device is no longer entering '
+          'balls. Any score that exists only on that offline device cannot be '
+          'merged automatically.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep watching'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Take control'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final store = AppScope.read(context);
+    try {
+      await store.takeMatchControl(widget.matchId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Control moved to this device. Resume from Home.'),
+        ),
+      );
+      Navigator.of(context).pop();
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -59,7 +100,7 @@ class _ParticipantMatchWatchScreenState
           if (match == null) {
             return _MissingMatch(onRefresh: _refresh);
           }
-          return _MatchWatchBody(match: match);
+          return _MatchWatchBody(match: match, onTakeControl: _takeControl);
         },
       ),
     );
@@ -104,9 +145,13 @@ class _MissingMatch extends StatelessWidget {
 }
 
 class _MatchWatchBody extends StatelessWidget {
-  const _MatchWatchBody({required this.match});
+  const _MatchWatchBody({
+    required this.match,
+    required this.onTakeControl,
+  });
 
   final CricketMatch match;
+  final Future<void> Function() onTakeControl;
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +204,7 @@ class _MatchWatchBody extends StatelessWidget {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Hosted by ${host?.name ?? match.creatorPlayerId}. Score and setup controls stay with the host.',
+                        'Hosted by ${host?.name ?? match.creatorPlayerId}. The host controls setup; the selected tracker may enter live score.',
                         style: const TextStyle(height: 1.35),
                       ),
                     ],
@@ -168,6 +213,19 @@ class _MatchWatchBody extends StatelessWidget {
               ],
             ),
           ),
+          if (store.canTakeMatchControl(match) &&
+              !store.canControlMatch(match)) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onTakeControl,
+              icon: const Icon(Icons.phonelink_lock_rounded),
+              label: Text(
+                store.isMatchHost(match)
+                    ? 'Take control on this device'
+                    : 'Take tracker control on this device',
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           _MatchHeader(match: match),
           const SizedBox(height: 16),

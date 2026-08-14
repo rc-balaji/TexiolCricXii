@@ -67,6 +67,12 @@ class AppStore extends ChangeNotifier {
   Future<void> _cloudSyncTail = Future<void>.value();
   Map<String, Object?>? _pendingCloudState;
   bool _cloudSyncRunning = false;
+  final Set<String> _pendingMatchSyncIds = <String>{};
+  final Map<String, String> _matchSyncErrors = <String, String>{};
+  DateTime? _oldestSharedActivityAt;
+  bool _hasOlderSharedHistory = true;
+  static const int _sharedMatchPageSize = 60;
+  static const Duration _controlLeaseDuration = Duration(minutes: 2);
   String defaultPointPresetId = 'balanced';
 
   bool initialized = false;
@@ -95,8 +101,11 @@ class AppStore extends ChangeNotifier {
     final now = at ?? DateTime.now();
     final start = DateTime(now.year, now.month, now.day);
     final end = start.add(const Duration(days: 1));
+    final creatorId = activePlayerId;
     final number = matches.where((match) {
-      return !match.createdAt.isBefore(start) && match.createdAt.isBefore(end);
+      return match.creatorPlayerId == creatorId &&
+          !match.createdAt.isBefore(start) &&
+          match.createdAt.isBefore(end);
     }).length + 1;
     final period = switch (now.hour) {
       < 12 => 'Morning',
@@ -175,18 +184,65 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  bool canControlMatch(CricketMatch match) {
+  bool _leaseAvailableOnThisDevice(CricketMatch match) {
+    final uid = firebaseUser?.uid;
+    final leaseUntil = match.controllerLeaseUntil;
+    if (match.controllerUid == null || leaseUntil == null) return true;
+    if (uid != null && match.controllerUid == uid) return true;
+    return leaseUntil.isBefore(DateTime.now());
+  }
+
+  bool isMatchHost(CricketMatch match) {
     final id = activePlayerId;
     return id != null &&
         match.creatorPlayerId == id &&
         match.participantIds.contains(id);
   }
 
+  bool isMatchTracker(CricketMatch match) {
+    final id = activePlayerId;
+    return id != null &&
+        match.trackerPlayerId == id &&
+        match.participantIds.contains(id);
+  }
+
+  bool canTakeMatchControl(CricketMatch match) =>
+      isMatchHost(match) ||
+      (match.status != MatchStatus.completed && isMatchTracker(match));
+
+  bool canHostMatch(CricketMatch match) =>
+      isMatchHost(match) && _leaseAvailableOnThisDevice(match);
+
+  bool canScoreMatch(CricketMatch match) =>
+      match.status == MatchStatus.live &&
+      (isMatchHost(match) || isMatchTracker(match)) &&
+      _leaseAvailableOnThisDevice(match);
+
+  bool canControlMatch(CricketMatch match) {
+    if (match.status == MatchStatus.completed) return isMatchHost(match);
+    return match.status == MatchStatus.live
+        ? canScoreMatch(match)
+        : canHostMatch(match);
+  }
+
+  bool isMatchSynced(String matchId) {
+    final match = matchById(matchId);
+    if (match != null && canTakeMatchControl(match) && !cloudConnected) {
+      return false;
+    }
+    return !_pendingMatchSyncIds.contains(matchId) &&
+        !_matchSyncErrors.containsKey(matchId);
+  }
+
+  String? matchSyncError(String matchId) => _matchSyncErrors[matchId];
+
+  bool get hasOlderMatchHistory => _hasOlderSharedHistory;
+
   Future<void> cancelMatch(String matchId) async {
     final index = matches.indexWhere((match) => match.id == matchId);
     if (index < 0) return;
     final match = matches[index];
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (match.status == MatchStatus.completed) {
       throw StateError('Completed matches stay in history.');
     }
@@ -520,19 +576,23 @@ class AppStore extends ChangeNotifier {
       await signOutCloud();
       return;
     }
-    final batch = firestore.batch();
+    // Cancel shared active matches first so participant Watch screens close
+    // immediately. Do not put an unbounded number of matches in one batch.
     for (final match in matches.where(
       (value) =>
           value.creatorPlayerId == player.id &&
           value.status != MatchStatus.completed,
-    )) {
-      batch.delete(firestore.collection('matches').doc(match.id));
+    ).toList(growable: false)) {
+      await firestore.collection('matches').doc(match.id).delete();
     }
+
+    final batch = firestore.batch();
     batch.delete(firestore.collection('loginCredentials').doc(_emailKey(email)));
     batch.delete(firestore.collection('accountStates').doc(player.id));
     batch.delete(firestore.collection('players').doc(player.id));
-    final uid = firebaseUser?.uid;
-    if (uid != null) batch.delete(firestore.collection('sessions').doc(uid));
+    // Keep the session document alive while the batch deletes host-owned
+    // matches; Firestore rules use that session to prove currentPlayerId().
+    // signOutCloud removes the session immediately after this batch succeeds.
     await batch.commit();
     await signOutCloud();
   }
@@ -568,12 +628,167 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  void _requireMatchHost(CricketMatch match) {
-    if (!canControlMatch(match)) {
+  Future<void> _requireMatchHost(CricketMatch match) async {
+    if (!isMatchHost(match)) {
       throw StateError(
-        'This match is controlled by ${match.creatorPlayerId}. You can watch it, but only the host can change the score or match setup.',
+        'This match is controlled by ${match.creatorPlayerId}. You can watch it, but only the host can change the setup.',
       );
     }
+    await _ensureMatchControlLease(
+      match,
+      scorerAllowed: false,
+      force: match.status == MatchStatus.completed,
+    );
+  }
+
+  Future<void> _requireMatchScorer(CricketMatch match) async {
+    if (!(isMatchHost(match) || isMatchTracker(match))) {
+      throw StateError(
+        'Only the host or the selected tracker can enter this match score.',
+      );
+    }
+    await _ensureMatchControlLease(
+      match,
+      scorerAllowed: true,
+      force: match.status == MatchStatus.completed && isMatchHost(match),
+    );
+  }
+
+  Future<void> _ensureMatchControlLease(
+    CricketMatch match, {
+    required bool scorerAllowed,
+    bool force = false,
+  }) async {
+    final playerId = activePlayerId;
+    final uid = firebaseUser?.uid;
+    if (playerId == null) throw StateError('Sign in first.');
+    final roleAllowed =
+        isMatchHost(match) || (scorerAllowed && isMatchTracker(match));
+    if (!roleAllowed) throw StateError('You do not have control permission.');
+
+    final firestore = _firestore;
+
+    // If Firebase itself is unavailable, keep scoring on the last controller
+    // device and mark the match for a later retry.
+    if (!cloudConnected || firestore == null || uid == null) {
+      if (match.controllerUid != null &&
+          match.controllerUid != uid &&
+          match.controllerLeaseUntil?.isAfter(DateTime.now()) == true) {
+        throw StateError('This match is active on another device.');
+      }
+      match
+        ..controllerUid = uid
+        ..controllerPlayerId = playerId
+        ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
+      _pendingMatchSyncIds.add(match.id);
+      return;
+    }
+
+    final now = DateTime.now();
+    final currentLease = match.controllerLeaseUntil;
+    if (!force &&
+        match.controllerUid == uid &&
+        currentLease != null &&
+        currentLease.isAfter(now.add(const Duration(seconds: 30)))) {
+      return;
+    }
+
+    final ref = firestore.collection('matches').doc(match.id);
+    final leaseUntil = now.add(_controlLeaseDuration);
+    try {
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        if (!snapshot.exists) {
+          // Fresh/offline-created local matches are created by normal sync.
+          match
+            ..controllerUid = uid
+            ..controllerPlayerId = playerId
+            ..controllerLeaseUntil = leaseUntil;
+          return;
+        }
+
+        final data = snapshot.data()!;
+        final remoteController = data['controllerUid']?.toString();
+        final remoteControllerPlayer =
+            data['controllerPlayerId']?.toString();
+        final remoteRevision = data['revision'] as int? ?? 0;
+        final rawLease = data['controllerLeaseUntil'];
+        DateTime? remoteLease;
+        if (rawLease is Timestamp) remoteLease = rawLease.toDate();
+        if (rawLease is String) remoteLease = DateTime.tryParse(rawLease);
+
+        final expired = remoteLease == null || !remoteLease.isAfter(now);
+        final ours = remoteController == uid;
+        if (!force && !ours && remoteRevision > match.revision) {
+          throw StateError(
+            'A newer score exists on another device. Refresh, then Take control.',
+          );
+        }
+        if (!force && remoteController != null && !ours && !expired) {
+          throw StateError(
+            'This match is active on another device by '
+            '${remoteControllerPlayer ?? 'the scorer'}. '
+            'Use Take control if that device is no longer scoring.',
+          );
+        }
+
+        transaction.update(ref, {
+          'controllerUid': uid,
+          'controllerPlayerId': playerId,
+          'controllerLeaseUntil': Timestamp.fromDate(leaseUntil),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+
+      match
+        ..controllerUid = uid
+        ..controllerPlayerId = playerId
+        ..controllerLeaseUntil = leaseUntil;
+    } on FirebaseException catch (error) {
+      const offlineCodes = {
+        'unavailable',
+        'deadline-exceeded',
+        'network-request-failed',
+      };
+      final currentControllerIsUs =
+          match.controllerUid == null || match.controllerUid == uid;
+      final locallyExpired =
+          match.controllerLeaseUntil == null ||
+          !match.controllerLeaseUntil!.isAfter(DateTime.now());
+      if (offlineCodes.contains(error.code) &&
+          (currentControllerIsUs || locallyExpired)) {
+        match
+          ..controllerUid = uid
+          ..controllerPlayerId = playerId
+          ..controllerLeaseUntil =
+              DateTime.now().add(_controlLeaseDuration);
+        _pendingMatchSyncIds.add(match.id);
+        _matchSyncErrors[match.id] =
+            'Offline - score is saved on this device and waiting to sync.';
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> takeMatchControl(String matchId) async {
+    final match = matchById(matchId);
+    if (match == null) throw StateError('Match not found.');
+    if (!canTakeMatchControl(match)) {
+      throw StateError('Only the host or selected tracker can take control.');
+    }
+    // Pull the latest canonical score before taking over a stale second device.
+    await _refreshSharedMatches(migrateLegacy: false, resetPage: true);
+    final latest = matchById(matchId);
+    if (latest == null) throw StateError('Match no longer exists.');
+    await _ensureMatchControlLease(
+      latest,
+      scorerAllowed: true,
+      force: true,
+    );
+    _pendingMatchSyncIds.add(matchId);
+    await _persistLocal();
+    notifyListeners();
   }
 
   Future<void> savePlayerProfile(Player player) async {
@@ -1184,6 +1399,88 @@ class AppStore extends ChangeNotifier {
     await _commit();
   }
 
+  List<String> _previousRankOrderFor(
+    List<String> participantIds, {
+    DateTime? before,
+  }) {
+    final participantSet = participantIds.toSet();
+    final candidates = matches.where((match) {
+      if (match.status != MatchStatus.completed) return false;
+      final ended = match.completedAt ?? match.createdAt;
+      if (before != null && !ended.isBefore(before)) return false;
+      return match.participantIds.where(participantSet.contains).length >= 2;
+    }).toList()
+      ..sort((a, b) {
+        final aDate = a.completedAt ?? a.createdAt;
+        final bDate = b.completedAt ?? b.createdAt;
+        return bDate.compareTo(aDate);
+      });
+
+    final order = <String>[];
+    if (candidates.isNotEmpty) {
+      for (final ranked in ScoringEngine.rankings(candidates.first)) {
+        if (participantSet.contains(ranked.playerId)) order.add(ranked.playerId);
+      }
+    }
+    return order;
+  }
+
+  void _backfillTieBreakOrders() {
+    final ordered = matches.toList()
+      ..sort((a, b) {
+        final aDate = a.startedAt ?? a.createdAt;
+        final bDate = b.startedAt ?? b.createdAt;
+        return aDate.compareTo(bDate);
+      });
+    for (final match in ordered) {
+      if (match.tieBreakOrder.isNotEmpty) continue;
+      final before = match.startedAt ?? match.createdAt;
+      final previous = _previousRankOrderFor(
+        match.participantIds,
+        before: before,
+      );
+      if (previous.isNotEmpty) {
+        match.tieBreakOrder.addAll(previous);
+      }
+    }
+  }
+
+  Future<String> _reserveUniqueMatchId({
+    required String creatorPlayerId,
+    required List<String> participantIds,
+    required String originToken,
+  }) async {
+    final firestore = _firestore;
+    final uid = firebaseUser?.uid;
+    for (var attempt = 0; attempt < 20; attempt++) {
+      final id = _uniqueMatchId();
+      if (!cloudConnected || firestore == null || uid == null) return id;
+      final matchRef = firestore.collection('matches').doc(id);
+      final reservationRef = firestore.collection('matchReservations').doc(id);
+      try {
+        final reserved = await firestore.runTransaction<bool>((transaction) async {
+          final existingMatch = await transaction.get(matchRef);
+          final existingReservation = await transaction.get(reservationRef);
+          if (existingMatch.exists || existingReservation.exists) return false;
+          transaction.set(reservationRef, {
+            'matchId': id,
+            'creatorPlayerId': creatorPlayerId,
+            'participantIds': List<String>.from(participantIds),
+            'originToken': originToken,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          return true;
+        });
+        if (reserved) return id;
+      } on FirebaseException {
+        // Offline / transient failure: random IDs are still sufficiently wide;
+        // canonical sync will retry later.
+        return id;
+      }
+    }
+    throw StateError('Could not reserve a unique Match ID. Try again.');
+  }
+
   Future<CricketMatch> createMatch({
     required String title,
     required ScoringMode scoringMode,
@@ -1210,17 +1507,32 @@ class AppStore extends ChangeNotifier {
       throw StateError('The selected tracker must be in this match.');
     }
     final selectedPreset = defaultPointPreset;
+    final createdAt = DateTime.now();
+    final originToken = _ids.eventId();
+    final matchId = await _reserveUniqueMatchId(
+      creatorPlayerId: creator.id,
+      participantIds: uniqueParticipants,
+      originToken: originToken,
+    );
     final match = CricketMatch(
-      id: _uniqueMatchId(),
-      title: title.trim().isEmpty ? suggestMatchTitle() : title.trim(),
+      id: matchId,
+      originToken: originToken,
+      title: title.trim().isEmpty ? suggestMatchTitle(createdAt) : title.trim(),
       creatorPlayerId: creator.id,
       scoringMode: scoringMode,
       ballLimit: ballLimit,
       participantIds: uniqueParticipants,
-      createdAt: DateTime.now(),
+      createdAt: createdAt,
       status: MatchStatus.drawing,
       winnerMetric: winnerMetric,
       trackerPlayerId: trackerPlayerId,
+      controllerUid: firebaseUser?.uid,
+      controllerPlayerId: creator.id,
+      controllerLeaseUntil: DateTime.now().add(_controlLeaseDuration),
+      tieBreakOrder: _previousRankOrderFor(
+        uniqueParticipants,
+        before: createdAt,
+      ),
       pointRules: pointRules ?? selectedPreset.rules,
       pointPresetName: pointPresetName ?? selectedPreset.name,
       autoBowlingPlan: autoBowlingPlan,
@@ -1244,18 +1556,30 @@ class AppStore extends ChangeNotifier {
     if (order.length < 2) throw StateError('Not enough ranked players.');
     final creator = activePlayer;
     if (creator == null) throw StateError('Sign in first.');
+    final createdAt = DateTime.now();
+    final originToken = _ids.eventId();
+    final matchId = await _reserveUniqueMatchId(
+      creatorPlayerId: creator.id,
+      participantIds: order,
+      originToken: originToken,
+    );
     final match = CricketMatch(
-      id: _uniqueMatchId(),
-      title: suggestMatchTitle(),
+      id: matchId,
+      originToken: originToken,
+      title: suggestMatchTitle(createdAt),
       creatorPlayerId: creator.id,
       scoringMode: source.scoringMode,
       ballLimit: source.ballLimit,
       participantIds: List<String>.from(order),
       battingOrder: List<String>.from(order),
-      createdAt: DateTime.now(),
+      createdAt: createdAt,
       status: MatchStatus.drawing,
       winnerMetric: source.winnerMetric,
       trackerPlayerId: source.trackerPlayerId,
+      controllerUid: firebaseUser?.uid,
+      controllerPlayerId: creator.id,
+      controllerLeaseUntil: DateTime.now().add(_controlLeaseDuration),
+      tieBreakOrder: List<String>.from(order),
       pointRules: source.pointRules,
       pointPresetName: source.pointPresetName,
       autoBowlingPlan: source.autoBowlingPlan,
@@ -1311,7 +1635,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.drawing) {
       throw StateError('The draw is not active.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (nextDrawPlayerId(match) != playerId) {
       throw StateError('It is another player’s turn to draw.');
     }
@@ -1344,7 +1668,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.drawing) {
       throw StateError('Only an unfinished draw can be reset.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     match.drawAssignments.clear();
     match.battingOrder.clear();
     match.orderSource = BattingOrderSource.secretDraw;
@@ -1363,7 +1687,7 @@ class AppStore extends ChangeNotifier {
         match.battingOrder.length != match.participantIds.length) {
       throw StateError('Complete or confirm the batting order first.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (match.autoBowlingPlan && match.bowlingPlan.isEmpty) {
       match.bowlingPlan.addAll(
         BowlingScheduler.generate(
@@ -1386,7 +1710,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.drawing) {
       throw StateError('Use remaining-order controls after the match starts.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (order.length != match.participantIds.length ||
         order.toSet().length != match.participantIds.length ||
         !order.toSet().containsAll(match.participantIds)) {
@@ -1417,7 +1741,7 @@ class AppStore extends ChangeNotifier {
   Future<void> setAutoBowlingPlan(String matchId, bool enabled) async {
     final match = matchById(matchId);
     if (match == null || match.status != MatchStatus.drawing) return;
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     match.autoBowlingPlan = enabled;
     match.bowlingPlan.clear();
     if (enabled && match.battingOrder.isNotEmpty) {
@@ -1435,7 +1759,7 @@ class AppStore extends ChangeNotifier {
   Future<void> regenerateBowlingPlan(String matchId) async {
     final match = matchById(matchId);
     if (match == null || match.battingOrder.isEmpty) return;
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (match.status == MatchStatus.live) {
       _regenerateFutureBowlingPlan(match);
     } else {
@@ -1472,7 +1796,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.live) {
       throw StateError('The match is not live.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     final allowed = remainingReorderablePlayerIds(match);
     if (remainingOrder.length != allowed.length ||
         remainingOrder.toSet().length != allowed.length ||
@@ -1498,7 +1822,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.live) {
       throw StateError('The match is not live.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     if (playerById(playerId) == null) throw StateError('Player not found.');
     if (match.participantIds.contains(playerId)) {
       throw StateError('That player is already in this match.');
@@ -1521,7 +1845,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.live) {
       throw StateError('The match is not live.');
     }
-    _requireMatchHost(match);
+    await _requireMatchHost(match);
     final current = ScoringEngine.currentBatterId(match);
     if (current == null) throw StateError('Every turn is already complete.');
     final states = ScoringEngine.rebuildTurns(match);
@@ -1555,7 +1879,7 @@ class AppStore extends ChangeNotifier {
     if (match == null || match.status != MatchStatus.live) {
       throw StateError('The match is not live.');
     }
-    _requireMatchHost(match);
+    await _requireMatchScorer(match);
     final batterId = ScoringEngine.currentBatterId(match);
     if (batterId == null) throw StateError('No active batter.');
     if (newBowlerId == batterId || !match.participantIds.contains(newBowlerId)) {
@@ -1611,7 +1935,7 @@ class AppStore extends ChangeNotifier {
   }) async {
     final match = matchById(matchId);
     if (match == null) throw StateError('Match not found.');
-    _requireMatchHost(match);
+    await _requireMatchScorer(match);
     ScoringEngine.recordDelivery(
       match,
       eventId: _ids.eventId(),
@@ -1644,7 +1968,7 @@ class AppStore extends ChangeNotifier {
   }) async {
     final match = matchById(matchId);
     if (match == null) throw StateError('Match not found.');
-    _requireMatchHost(match);
+    await _requireMatchScorer(match);
     ScoringEngine.recordQuickTotal(
       match,
       eventId: _ids.eventId(),
@@ -1667,7 +1991,7 @@ class AppStore extends ChangeNotifier {
   Future<bool> undoLast(String matchId) async {
     final match = matchById(matchId);
     if (match == null) return false;
-    _requireMatchHost(match);
+    await _requireMatchScorer(match);
     if (match.statsApplied) _revertAppliedStats(match);
     final changed = ScoringEngine.undoLast(match);
     if (changed && match.status != MatchStatus.completed) {
@@ -1680,13 +2004,28 @@ class AppStore extends ChangeNotifier {
   Future<int> resetCurrentTurn(String matchId) async {
     final match = matchById(matchId);
     if (match == null) return 0;
-    _requireMatchHost(match);
+    await _requireMatchScorer(match);
     final changed = ScoringEngine.resetCurrentTurn(match);
     await _commit();
     return changed;
   }
 
   Future<void> _commit({bool waitForCloud = false}) async {
+    final playerId = activePlayerId;
+    if (playerId != null) {
+      for (final match in matches) {
+        final roleCanPublish =
+            match.creatorPlayerId == playerId ||
+            (match.trackerPlayerId == playerId &&
+                match.controllerUid == firebaseUser?.uid);
+        if (!roleCanPublish) continue;
+        final payload = _watchSafeMatchPayload(match);
+        if (_lastSharedMatchPayloads[match.id] != payload) {
+          _pendingMatchSyncIds.add(match.id);
+          _matchSyncErrors.remove(match.id);
+        }
+      }
+    }
     final data = _stateData();
     await _persistLocal(data);
     final cloudSync = _queueCloudSync(data);
@@ -1711,7 +2050,7 @@ class AppStore extends ChangeNotifier {
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
     'defaultPointPresetId': defaultPointPresetId,
     'pendingSharedMatchDeletes': _pendingSharedMatchDeletes.toList(),
-    'schemaVersion': 8,
+    'schemaVersion': 9,
   };
 
   void _replaceState(Map<String, dynamic> json) {
@@ -1776,6 +2115,10 @@ class AppStore extends ChangeNotifier {
     _sharedMatchIds.clear();
     _pendingSharedMatchDeletes.clear();
     _lastSharedMatchPayloads.clear();
+    _pendingMatchSyncIds.clear();
+    _matchSyncErrors.clear();
+    _oldestSharedActivityAt = null;
+    _hasOlderSharedHistory = true;
     _lastPublicProfileFingerprint = null;
     _pendingCloudState = null;
     defaultPointPresetId = 'balanced';
@@ -1818,18 +2161,15 @@ class AppStore extends ChangeNotifier {
     // channel. Completed/foreign match history is canonical in `matches`, so
     // do not duplicate an ever-growing event archive inside accountStates.
     final cloudState = Map<String, Object?>.from(state);
-    cloudState['matches'] = matches
-        .where(
-          (match) =>
-              match.creatorPlayerId == player.id &&
-              match.status != MatchStatus.completed,
-        )
-        .map((match) => match.toJson())
-        .toList();
+    // Shared `matches/{matchId}` is the only cloud source of truth for both
+    // active and completed matches. Never mirror active match JSON into
+    // accountStates, otherwise two phones signed into the same Player ID can
+    // resurrect a stale private snapshot.
+    cloudState['matches'] = const <Object?>[];
     try {
       await firestore.collection('accountStates').doc(player.id).set({
         'state': jsonEncode(cloudState),
-        'schemaVersion': 8,
+        'schemaVersion': 9,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } on FirebaseException {
@@ -1934,14 +2274,24 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  DateTime _matchActivityAt(CricketMatch match) {
+    if (match.completedAt != null) return match.completedAt!;
+    if (match.events.isNotEmpty) return match.events.last.createdAt;
+    if (match.auditTrail.isNotEmpty) return match.auditTrail.last.createdAt;
+    return match.startedAt ?? match.createdAt;
+  }
+
   Map<String, dynamic> _sharedMatchDocument(CricketMatch match) => {
     'matchId': match.id,
+    'originToken': match.originToken,
     'creatorPlayerId': match.creatorPlayerId,
+    'trackerPlayerId': match.trackerPlayerId,
     'participantIds': List<String>.from(match.participantIds),
     'participantProfiles': _participantSnapshots(match),
     'status': match.status.name,
     'title': match.title,
     'createdAt': Timestamp.fromDate(match.createdAt),
+    'activityAt': Timestamp.fromDate(_matchActivityAt(match)),
     'startedAt': match.startedAt == null
         ? null
         : Timestamp.fromDate(match.startedAt!),
@@ -1950,27 +2300,52 @@ class AppStore extends ChangeNotifier {
         : Timestamp.fromDate(match.completedAt!),
     'eventCount': match.events.length,
     'auditCount': match.auditTrail.length,
+    'revision': match.revision,
+    'controllerUid': match.controllerUid,
+    'controllerPlayerId': match.controllerPlayerId,
+    'controllerLeaseUntil': match.controllerLeaseUntil == null
+        ? null
+        : Timestamp.fromDate(match.controllerLeaseUntil!),
     'matchJson': _watchSafeMatchPayload(match),
-    'schemaVersion': 2,
+    'schemaVersion': 3,
     'updatedAt': FieldValue.serverTimestamp(),
   };
 
   CricketMatch? _matchFromSharedDocument(Map<String, dynamic> data) {
     try {
+      CricketMatch? match;
       final raw = data['matchJson'];
       if (raw is String && raw.isNotEmpty) {
-        return CricketMatch.fromJson(
+        match = CricketMatch.fromJson(
           Map<String, dynamic>.from(jsonDecode(raw) as Map),
         );
+      } else {
+        final payload = data['match'];
+        if (payload is Map) {
+          match = CricketMatch.fromJson(Map<String, dynamic>.from(payload));
+        }
       }
-      final payload = data['match'];
-      if (payload is Map) {
-        return CricketMatch.fromJson(Map<String, dynamic>.from(payload));
+      if (match == null) return null;
+
+      // Controller/lease fields are also top-level so a lightweight lease
+      // transaction is immediately visible even before the next score payload.
+      match.controllerUid = data['controllerUid']?.toString() ?? match.controllerUid;
+      match.controllerPlayerId =
+          data['controllerPlayerId']?.toString() ?? match.controllerPlayerId;
+      final rawLease = data['controllerLeaseUntil'];
+      if (rawLease is Timestamp) {
+        match.controllerLeaseUntil = rawLease.toDate();
+      } else if (rawLease is String) {
+        match.controllerLeaseUntil =
+            DateTime.tryParse(rawLease) ?? match.controllerLeaseUntil;
       }
+      match.revision = data['revision'] as int? ?? match.revision;
+      match.trackerPlayerId =
+          data['trackerPlayerId']?.toString() ?? match.trackerPlayerId;
+      return match;
     } on Object {
       return null;
     }
-    return null;
   }
 
   int _matchProgressScore(CricketMatch match) {
@@ -1990,30 +2365,106 @@ class AppStore extends ChangeNotifier {
   Future<void> _syncOwnedMatchesToShared() async {
     final firestore = _firestore;
     final playerId = activePlayerId;
-    if (!cloudConnected || firestore == null || playerId == null) return;
+    final uid = firebaseUser?.uid;
+    if (!cloudConnected ||
+        firestore == null ||
+        playerId == null ||
+        uid == null) {
+      return;
+    }
 
-    final owned = matches.where(
-      (match) =>
-          match.creatorPlayerId == playerId &&
-          !_pendingSharedMatchDeletes.contains(match.id),
-    );
-    for (final match in owned) {
-      final payload = _watchSafeMatchPayload(match);
+    final publishable = matches.where((match) {
+      if (_pendingSharedMatchDeletes.contains(match.id)) return false;
+      return match.creatorPlayerId == playerId ||
+          (match.trackerPlayerId == playerId &&
+              match.controllerUid == uid);
+    });
+
+    for (final match in publishable) {
+      final payloadBefore = _watchSafeMatchPayload(match);
       if (_sharedMatchIds.contains(match.id) &&
-          _lastSharedMatchPayloads[match.id] == payload) {
+          _lastSharedMatchPayloads[match.id] == payloadBefore) {
+        _pendingMatchSyncIds.remove(match.id);
         continue;
       }
+
+      _pendingMatchSyncIds.add(match.id);
+      final ref = firestore.collection('matches').doc(match.id);
       try {
-        await firestore
-            .collection('matches')
-            .doc(match.id)
-            .set(_sharedMatchDocument(match), SetOptions(merge: true));
+        await firestore.runTransaction((transaction) async {
+          final remote = await transaction.get(ref);
+          final remoteData = remote.data();
+          if (remoteData != null) {
+            final remoteCreator = remoteData['creatorPlayerId']?.toString();
+            final remoteOrigin = remoteData['originToken']?.toString();
+            final creatorCollision =
+                remoteCreator != null && remoteCreator != match.creatorPlayerId;
+            final originCollision =
+                remoteOrigin != null &&
+                match.originToken != null &&
+                remoteOrigin != match.originToken;
+            if (creatorCollision || originCollision) {
+              throw StateError(
+                'Match ID collision detected. This local match was not uploaded.',
+              );
+            }
+
+            final remoteRevision = remoteData['revision'] as int? ?? 0;
+            final rawLease = remoteData['controllerLeaseUntil'];
+            DateTime? remoteLease;
+            if (rawLease is Timestamp) remoteLease = rawLease.toDate();
+            if (rawLease is String) remoteLease = DateTime.tryParse(rawLease);
+            final remoteController = remoteData['controllerUid']?.toString();
+            final leaseActive =
+                remoteLease != null && remoteLease.isAfter(DateTime.now());
+            if (remoteController != null &&
+                remoteController != uid &&
+                leaseActive) {
+              throw StateError(
+                'Another device currently owns the scoring lease.',
+              );
+            }
+            if (remoteRevision > match.revision) {
+              // A newer canonical snapshot exists. A new controller must first
+              // refresh/take control rather than overwriting it.
+              throw StateError(
+                'A newer match revision exists. Refresh before scoring.',
+              );
+            }
+            match.revision = remoteRevision + 1;
+          } else {
+            match.revision = max(match.revision, 0) + 1;
+          }
+
+          match
+            ..controllerUid = uid
+            ..controllerPlayerId = playerId
+            ..controllerLeaseUntil =
+                DateTime.now().add(_controlLeaseDuration);
+          transaction.set(
+            ref,
+            _sharedMatchDocument(match),
+            SetOptions(merge: true),
+          );
+        });
+        final payload = _watchSafeMatchPayload(match);
         _sharedMatchIds.add(match.id);
         _lastSharedMatchPayloads[match.id] = payload;
-      } on FirebaseException {
-        // Retry in order on a later commit/refresh.
+        _pendingMatchSyncIds.remove(match.id);
+        _matchSyncErrors.remove(match.id);
+        try {
+          await firestore.collection('matchReservations').doc(match.id).delete();
+        } on FirebaseException {
+          // A stale reservation only blocks this already-used random ID.
+        }
+      } on Object catch (error) {
+        _pendingMatchSyncIds.add(match.id);
+        _matchSyncErrors[match.id] = '$error';
+        // Keep local score intact; next refresh/commit can retry.
       }
     }
+
+    if (hasListeners) notifyListeners();
   }
 
   Future<bool> _deleteSharedMatchRecord(String matchId) async {
@@ -2057,11 +2508,27 @@ class AppStore extends ChangeNotifier {
       matches.add(remote);
     } else {
       final local = matches[localIndex];
-      final ownedHere = local.creatorPlayerId == playerId;
-      final keepLocal = ownedHere &&
+      final controllableHere =
+          local.creatorPlayerId == playerId ||
+          (local.status == MatchStatus.live &&
+              local.trackerPlayerId == playerId);
+      final pendingLocal = _pendingMatchSyncIds.contains(local.id);
+      final keepPendingLocal =
+          controllableHere &&
+          pendingLocal &&
+          remote.revision <= local.revision;
+      final keepAheadLocal =
+          controllableHere &&
           preserveOwnedWhenAhead &&
+          remote.revision <= local.revision &&
           _matchProgressScore(local) > _matchProgressScore(remote);
-      if (!keepLocal) matches[localIndex] = remote;
+      if (!(keepPendingLocal || keepAheadLocal)) {
+        matches[localIndex] = remote;
+        if (remote.revision > local.revision) {
+          _pendingMatchSyncIds.remove(remote.id);
+          _matchSyncErrors.remove(remote.id);
+        }
+      }
     }
     _sharedMatchIds.add(remote.id);
     if (remote.creatorPlayerId == playerId) {
@@ -2078,8 +2545,20 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  DateTime _sharedActivityDate(Map<String, dynamic> data, CricketMatch match) {
+    final raw = data['activityAt'];
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is String) {
+      final parsed = DateTime.tryParse(raw);
+      if (parsed != null) return parsed;
+    }
+    return match.completedAt ?? match.startedAt ?? match.createdAt;
+  }
+
   Future<void> _refreshSharedMatches({
     required bool migrateLegacy,
+    bool resetPage = true,
+    bool loadOlder = false,
   }) async {
     final firestore = _firestore;
     final playerId = activePlayerId;
@@ -2087,42 +2566,87 @@ class AppStore extends ChangeNotifier {
 
     try {
       if (migrateLegacy) {
-        // Build 15 and older only shared completed matches. Push every match
-        // owned by this account so active/drawing matches become participant-
-        // visible without changing any Match ID.
+        _backfillTieBreakOrders();
         await _flushPendingSharedMatchDeletes();
         await _syncOwnedMatchesToShared();
       }
 
-      final snapshot = await firestore
+      if (resetPage && !loadOlder) {
+        _oldestSharedActivityAt = null;
+        _hasOlderSharedHistory = true;
+      }
+      if (loadOlder && !_hasOlderSharedHistory) return;
+
+      Query<Map<String, dynamic>> query = firestore
           .collection('matches')
           .where('participantIds', arrayContains: playerId)
-          .get();
+          .orderBy('activityAt', descending: true)
+          .limit(_sharedMatchPageSize);
+      if (loadOlder && _oldestSharedActivityAt != null) {
+        query = query.startAfter([
+          Timestamp.fromDate(_oldestSharedActivityAt!),
+        ]);
+      }
+
+      QuerySnapshot<Map<String, dynamic>> snapshot;
+      try {
+        snapshot = await query.get();
+      } on FirebaseException catch (error) {
+        // During a rules-only rollout the composite index may not exist yet.
+        // Keep the app functional; deploying firestore.indexes.json enables
+        // deterministic recent-first pagination.
+        if (error.code != 'failed-precondition') rethrow;
+        snapshot = await firestore
+            .collection('matches')
+            .where('participantIds', arrayContains: playerId)
+            .limit(_sharedMatchPageSize)
+            .get();
+      }
 
       final remoteIds = <String>{};
+      DateTime? oldest;
       for (final document in snapshot.docs) {
         final data = document.data();
         _hydrateParticipantSnapshots(data);
         final match = _matchFromSharedDocument(data);
         if (match == null || !match.participantIds.contains(playerId)) continue;
         remoteIds.add(match.id);
+        final activity = _sharedActivityDate(data, match);
+        if (oldest == null || activity.isBefore(oldest)) oldest = activity;
         await _ingestSharedMatch(match);
       }
 
-      // A foreign unfinished match disappearing from the canonical shared
-      // collection means the host cancelled/cleared it. Do not keep a ghost
-      // Resume card on participant devices.
-      matches.removeWhere(
-        (match) =>
-            match.creatorPlayerId != playerId &&
-            match.status != MatchStatus.completed &&
-            match.participantIds.contains(playerId) &&
-            !remoteIds.contains(match.id),
-      );
+      if (oldest != null) _oldestSharedActivityAt = oldest;
+      _hasOlderSharedHistory = snapshot.docs.length >= _sharedMatchPageSize;
 
-      _sharedMatchIds
-        ..clear()
-        ..addAll(remoteIds);
+      if (!loadOlder) {
+        // Verify foreign unfinished local cards individually before removing
+        // them. A page limit must never create a false "host cancelled" ghost
+        // cleanup for an older but still-live match.
+        final candidates = matches
+            .where(
+              (match) =>
+                  match.creatorPlayerId != playerId &&
+                  match.status != MatchStatus.completed &&
+                  match.participantIds.contains(playerId) &&
+                  !remoteIds.contains(match.id),
+            )
+            .toList(growable: false);
+        for (final local in candidates) {
+          final doc = await firestore.collection('matches').doc(local.id).get();
+          final data = doc.data();
+          final stillVisible =
+              data != null &&
+              (data['participantIds'] as List? ?? const [])
+                  .map((value) => value.toString())
+                  .contains(playerId);
+          if (!stillVisible) {
+            matches.removeWhere((match) => match.id == local.id);
+          }
+        }
+      }
+
+      _sharedMatchIds.addAll(remoteIds);
 
       final player = activePlayer;
       if (player != null) {
@@ -2134,6 +2658,16 @@ class AppStore extends ChangeNotifier {
     } on FirebaseException {
       // Cached/offline matches stay visible; Refresh can retry later.
     }
+  }
+
+  Future<void> loadOlderMatchHistory() async {
+    await _refreshSharedMatches(
+      migrateLegacy: false,
+      resetPage: false,
+      loadOlder: true,
+    );
+    await _persistLocal();
+    notifyListeners();
   }
 
   Stream<CricketMatch?> watchSharedMatch(String matchId) {

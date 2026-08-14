@@ -21,6 +21,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   bool _teamHistory = false;
   bool _refreshingHistory = false;
+  bool _loadingOlderHistory = false;
 
   void _open(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -36,6 +37,14 @@ class _ProfilePageState extends State<ProfilePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Match history and career stats refreshed.')),
     );
+  }
+
+  Future<void> _loadOlderHistory(BuildContext context) async {
+    if (_loadingOlderHistory) return;
+    setState(() => _loadingOlderHistory = true);
+    await AppScope.read(context).loadOlderMatchHistory();
+    if (!mounted) return;
+    setState(() => _loadingOlderHistory = false);
   }
 
   Future<void> _openLink(BuildContext context, String value, {bool instagram = false}) async {
@@ -86,7 +95,11 @@ class _ProfilePageState extends State<ProfilePage> {
               match.participantIds.contains(player.id),
         )
         .toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      ..sort((a, b) {
+        final aDate = a.completedAt ?? a.createdAt;
+        final bDate = b.completedAt ?? b.createdAt;
+        return bDate.compareTo(aDate);
+      });
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
@@ -332,7 +345,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 title: Text('No completed Singles matches yet'),
               ),
             )
-          else
+          else ...[
             ...history.map(
               (match) => Padding(
                 padding: const EdgeInsets.only(bottom: 9),
@@ -356,6 +369,24 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             ),
+            if (store.hasOlderMatchHistory)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: OutlinedButton.icon(
+                  onPressed: _loadingOlderHistory
+                      ? null
+                      : () => _loadOlderHistory(context),
+                  icon: _loadingOlderHistory
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.history_rounded),
+                  label: const Text('Load older matches'),
+                ),
+              ),
+          ],
         ],
       ),
     );

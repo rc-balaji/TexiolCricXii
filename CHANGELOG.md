@@ -1,3 +1,17 @@
+# CricXii v1.2.0+18 — Match Hardening
+
+- Added a single-device controller lease for same-account multi-phone scoring, with explicit takeover and stale-revision protection.
+- Split host setup authority from selected tracker/scorer authority.
+- Added live score cloud sync state (synced / waiting / retry) and offline-safe local persistence.
+- Added previous-completed-match rank/order as the deterministic equal-score tie-break.
+- Daily Performance now assigns matches by completion/session date across midnight.
+- Dynamic Match N counts only matches created by the current host.
+- Added transactional online Match-ID reservation/collision protection.
+- Hardened mid-match participant publication and cancel/complete/undo/delete-account lifecycle transitions.
+- Added recent-first shared-history pagination and Load Older support.
+- Removed shared secret-draw assignments and added historical participant snapshots.
+- Added a hardening regression test suite including the exact `20, 15, 10, 10 -> P2, P4, P1, P3` tie example.
+
 # CricXii v1.1.1+17
 
 - Fixed shared-active-match unit test isolation by lazily initializing SharedPreferences.

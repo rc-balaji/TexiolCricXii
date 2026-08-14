@@ -73,14 +73,17 @@ class DailyPerformanceSummary {
     final start = DateTime(date.year, date.month, date.day);
     final end = start.add(const Duration(days: 1));
     final dayMatches = source
-        .where(
-          (match) =>
-              match.status == MatchStatus.completed &&
-              !match.createdAt.isBefore(start) &&
-              match.createdAt.isBefore(end),
-        )
+        .where((match) {
+          if (match.status != MatchStatus.completed) return false;
+          final sessionDate = match.completedAt ?? match.startedAt ?? match.createdAt;
+          return !sessionDate.isBefore(start) && sessionDate.isBefore(end);
+        })
         .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      ..sort((a, b) {
+        final aDate = a.completedAt ?? a.startedAt ?? a.createdAt;
+        final bDate = b.completedAt ?? b.startedAt ?? b.createdAt;
+        return aDate.compareTo(bDate);
+      });
     final summary = DailyPerformanceSummary(date: start, matches: dayMatches);
 
     for (final match in dayMatches) {
@@ -110,7 +113,7 @@ class DailyPerformanceSummary {
           DailyMatchPerformance(
             matchId: match.id,
             title: match.title,
-            createdAt: match.createdAt,
+            createdAt: match.completedAt ?? match.startedAt ?? match.createdAt,
             runs: value.runs,
             points: value.points,
             wickets: value.wickets,
