@@ -6,7 +6,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
-import '../domain/enums.dart';
 import '../domain/player.dart';
 import '../domain/team_match.dart';
 import '../domain/team_scorecard.dart';
@@ -638,56 +637,10 @@ class TeamScorecardExport {
     ),
   );
 
-  static pw.Widget _table(
-    List<String> headers,
-    List<List<String>> rows, {
-    required PdfColor ink,
-    required PdfColor green,
-    required PdfColor pale,
-    required PdfColor line,
-    double firstFlex = 2,
-  }) => pw.Table(
-        border: pw.TableBorder.all(color: line, width: .5),
-        columnWidths: {
-          0: pw.FlexColumnWidth(firstFlex),
-          for (var index = 1; index < headers.length; index++) index: const pw.FlexColumnWidth(1),
-        },
-        children: [
-          pw.TableRow(
-            decoration: pw.BoxDecoration(color: pale),
-            children: headers
-                .map((value) => pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                      child: pw.Text(value, style: pw.TextStyle(color: green, fontSize: 6.6, fontWeight: pw.FontWeight.bold)),
-                    ))
-                .toList(),
-          ),
-          ...rows.map(
-            (row) => pw.TableRow(
-              children: row
-                  .map((value) => pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
-                        child: pw.Text(value, style: pw.TextStyle(color: ink, fontSize: 7.1)),
-                      ))
-                  .toList(),
-            ),
-          ),
-        ],
-      );
-
   static pw.Widget _section(String value, PdfColor ink) => pw.Text(
         value,
         style: pw.TextStyle(color: ink, fontSize: 10, fontWeight: pw.FontWeight.bold, letterSpacing: .5),
       );
-
-  static String _extraShort(ExtraType type) => switch (type) {
-        ExtraType.wide => 'Wd',
-        ExtraType.noBall => 'Nb',
-        ExtraType.bye => 'B',
-        ExtraType.legBye => 'Lb',
-        ExtraType.penalty => 'P',
-        ExtraType.none => '',
-      };
 
   static String _on(bool value) => value ? 'ON' : 'OFF';
 

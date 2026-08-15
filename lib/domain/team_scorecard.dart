@@ -363,11 +363,11 @@ class TeamScorecardBuilder {
     var ballsByPlayer = <String, int>{};
 
     void flush() {
-      if (currentPlayers == null || currentPlayers!.isEmpty) return;
+      if (currentPlayers == null || currentPlayers.isEmpty) return;
       if (runs == 0 && balls == 0 && runsByPlayer.isEmpty) return;
       result.add(
         TeamScorecardPartnership(
-          playerIds: List<String>.from(currentPlayers!),
+          playerIds: List<String>.from(currentPlayers),
           runs: runs,
           balls: balls,
           runsByPlayer: Map<String, int>.from(runsByPlayer),
@@ -386,8 +386,8 @@ class TeamScorecardBuilder {
         if (event.nonStrikerId != null) event.nonStrikerId!,
       ];
       final changed = currentPlayers == null ||
-          currentPlayers!.length != eventPlayers.length ||
-          !currentPlayers!.every(eventPlayers.contains);
+          currentPlayers.length != eventPlayers.length ||
+          !currentPlayers.every(eventPlayers.contains);
       if (changed) {
         flush();
         currentPlayers = eventPlayers;

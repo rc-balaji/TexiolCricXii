@@ -1,3 +1,10 @@
+# CricXii v1.6.0+24 — Analyzer Cleanup
+
+- Removed four redundant non-null assertions in Team scorecard partnership calculation.
+- Removed unused PDF helper methods left behind by the cricket-style scorecard redesign.
+- Removed the now-unused Team scorecard enum import to resolve the reported analyzer warning set.
+- This handoff intentionally leaves the changes unstaged and uncommitted; `.git` is preserved so the maintainer can review, stage and commit manually.
+
 # CricXii v1.6.0+23 — Cricket-Style Scorecards
 
 - Rebuilt Team Match result scorecards to follow the familiar cricket scorecard structure from the supplied reference: green innings strip, batter + dismissal detail, R/B/4s/6s/SR, Extras, Total, Yet to Bat, bowling O/M/R/W/NB/WD/ECO, Fall of Wickets and Partnerships.

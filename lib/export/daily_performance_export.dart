@@ -1180,59 +1180,6 @@ class DailyPerformanceExport {
         ],
       );
 
-  static pw.Widget _simpleTable(
-    List<String> headers,
-    List<List<String>> rows, {
-    required PdfColor ink,
-    required PdfColor green,
-    required PdfColor pale,
-    required PdfColor line,
-    double firstFlex = 2,
-  }) =>
-      pw.Table(
-        border: pw.TableBorder.all(color: line, width: .5),
-        columnWidths: {
-          0: pw.FlexColumnWidth(firstFlex),
-          for (var index = 1; index < headers.length; index++)
-            index: const pw.FlexColumnWidth(1),
-        },
-        children: [
-          pw.TableRow(
-            decoration: pw.BoxDecoration(color: pale),
-            children: headers
-                .map(
-                  (value) => pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                    child: pw.Text(
-                      value,
-                      style: pw.TextStyle(
-                        color: green,
-                        fontSize: 6.6,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          ...rows.map(
-            (row) => pw.TableRow(
-              children: row
-                  .map(
-                    (value) => pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
-                      child: pw.Text(
-                        value,
-                        style: pw.TextStyle(color: ink, fontSize: 7.1),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-        ],
-      );
-
   static pw.TableRow _tableHeader(List<String> values, PdfColor ink) =>
       pw.TableRow(
         decoration: pw.BoxDecoration(color: ink),
