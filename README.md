@@ -1,6 +1,6 @@
 # CricXii v1.5.0 — Live Team Flow & Mixed Daily Reports
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.5.0+21` keeps the complete Singles experience and adds live Team batting choices, repeatable Super Overs, duplicate-prompt hardening and mixed Singles + Team daily reporting while remaining Firebase Spark-friendly.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.5.0+22` keeps the complete Singles experience and adds live Team batting choices, repeatable Super Overs, duplicate-prompt hardening and mixed Singles + Team daily reporting while remaining Firebase Spark-friendly.
 
 ## v1.5 highlights
 

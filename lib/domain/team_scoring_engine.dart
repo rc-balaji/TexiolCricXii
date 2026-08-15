@@ -577,12 +577,10 @@ class TeamScoringEngine {
     if (innings.strikerId.isEmpty) {
       innings.strikerId = remaining.first;
     }
-    if (innings.nonStrikerId == null) {
-      innings.nonStrikerId = remaining.firstWhere(
-        (id) => id != innings.strikerId,
-        orElse: () => remaining.first,
-      );
-    }
+    innings.nonStrikerId ??= remaining.firstWhere(
+      (id) => id != innings.strikerId,
+      orElse: () => remaining.first,
+    );
 
     if (overCompleted && !innings.soloMode) _swapBatters(innings);
   }

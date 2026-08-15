@@ -1,5 +1,6 @@
-# CricXii v1.5.0+21 — Live Batting Choices, Repeat Super Overs & Mixed Daily Reports
+# CricXii v1.5.0+22 — Live Batting Choices, Repeat Super Overs & Mixed Daily Reports
 
+- Analyzer hotfix: removed two invalid `const pw.TextStyle` usages in mixed daily PDF export and applied the null-aware assignment lint in Team scoring fallback logic.
 - Removed mandatory pre-match Team batting-order setup; roster order is now only the default opening pair.
 - Added a blocking live **Choose next batter** prompt after every wicket that leaves a batting vacancy, with the choice persisted for deterministic undo/rebuild.
 - Hardened Team live prompts so next-batter, Last Player Standing and next-bowler modals cannot race and appear twice.

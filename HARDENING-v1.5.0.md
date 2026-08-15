@@ -1,4 +1,4 @@
-# CricXii v1.5.0+21 hardening
+# CricXii v1.5.0+22 hardening
 
 ## Duplicate live prompt race
 

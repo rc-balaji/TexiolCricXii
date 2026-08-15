@@ -501,7 +501,7 @@ class DailyPerformanceExport {
                   ),
                   pw.Text(
                     '${entry.isTeam ? 'TEAM MATCH' : 'SINGLES'} | ${_time(entry.startedAt)} - ${_time(entry.completedAt)} | ${entry.id}',
-                    style: const pw.TextStyle(color: muted, fontSize: 6.5),
+                    style: pw.TextStyle(color: muted, fontSize: 6.5),
                   ),
                 ],
               ),
@@ -599,7 +599,7 @@ class DailyPerformanceExport {
         if (innings.target != null)
           pw.Text(
             'Target ${innings.target} | ${innings.completionReason ?? ''}',
-            style: const pw.TextStyle(color: muted, fontSize: 6.5),
+            style: pw.TextStyle(color: muted, fontSize: 6.5),
           ),
         pw.SizedBox(height: 5),
         _teamBattingTable(match, innings, players, ink, green, pale, line),
