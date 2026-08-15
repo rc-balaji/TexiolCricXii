@@ -1,4 +1,13 @@
-# CricXii v1.6.1 verification
+# CricXii v1.6.2 verification
+
+## v1.6.2 avatar privacy checks
+
+- `Player.toPublicJson()` never exposes `avatarUrl`, `privateAvatars`, or `avatarImageSourceHash`.
+- Shared Singles/Team participant snapshots publish `avatarUrl: null`; other devices refresh the public player record for the rendered thumbnail.
+- A saved custom URL generates a compact rendered avatar before profile save completes; failure produces a visible validation error instead of silently creating an owner-only photo.
+- Saved custom avatars show a thumbnail, name, explicit selected state and delete control.
+- Mobile avatars and all PDF exporters prefer the rendered thumbnail and retain preset fallbacks for legacy/offline data.
+
 
 ## v1.6 scorecard regression checks
 

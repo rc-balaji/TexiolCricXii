@@ -11,3 +11,7 @@ Use this architecture for prototype/testing and controlled users. Before a publi
 
 The controller lease and revision checks reduce accidental multi-device score races and stale overwrites. They are application/data-integrity hardening, not a replacement for trusted authentication. The current Anonymous Firebase transport identity plus client-side CricXii credential layer remains appropriate for prototype/controlled testing, not a claim of production-grade account security.
 
+
+## v1.6.2 custom-avatar privacy note
+
+A custom avatar's owner-supplied HTTPS source URL is private account data. It is stored only in the owner's local/account state and is not written to the public `players/{playerId}` document or shared match participant snapshots. When the URL is saved, the app downloads the image on the owner's device, renders a compact 128px thumbnail, and publishes only that rendered image data for other signed-in CricXii users to display. The avatar image itself is therefore shareable/profile-visible; the original source URL remains private.

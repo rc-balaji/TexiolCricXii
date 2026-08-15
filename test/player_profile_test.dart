@@ -76,6 +76,8 @@ void main() {
       phoneNumber: '9876543210',
       avatarSource: AvatarSource.customUrl,
       avatarUrl: 'https://example.com/private-avatar.png',
+      avatarImageBase64: base64Encode(<int>[137, 80, 78, 71]),
+      avatarImageSourceHash: 'private-source-hash',
       privateAvatars: [
         PrivateAvatar(
           id: 'avatar-abc123',
@@ -90,6 +92,8 @@ void main() {
     expect(public.containsKey('phoneNumber'), isFalse);
     expect(public.containsKey('privateAvatars'), isFalse);
     expect(public['avatarUrl'], isNull);
+    expect(public['avatarImageBase64'], isNotNull);
+    expect(public.containsKey('avatarImageSourceHash'), isFalse);
   });
 
   test('private avatars preserve generated ID, name and URL', () {
@@ -98,6 +102,8 @@ void main() {
       name: 'Dinesh',
       avatarColor: 0xFF19C37D,
       createdAt: DateTime.utc(2026, 8, 9),
+      avatarImageBase64: base64Encode(<int>[1, 2, 3, 4]),
+      avatarImageSourceHash: 'hash-123',
       privateAvatars: [
         PrivateAvatar(
           id: 'avatar-abc123',
@@ -115,5 +121,7 @@ void main() {
     expect(restored.privateAvatars.single.id, 'avatar-abc123');
     expect(restored.privateAvatars.single.name, 'Night match');
     expect(restored.privateAvatars.single.url, 'https://example.com/night.png');
+    expect(restored.avatarImageBase64, base64Encode(<int>[1, 2, 3, 4]));
+    expect(restored.avatarImageSourceHash, 'hash-123');
   });
 }

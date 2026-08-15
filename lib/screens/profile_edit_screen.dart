@@ -334,52 +334,164 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 },
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDDF7EB),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_outline_rounded, size: 19),
+                  SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Your original custom URL stays in your private account data. CricXii publishes only a small rendered avatar image so other players can see your photo without receiving the source URL.',
+                      style: TextStyle(fontSize: 12.5, height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             TextField(
               controller: _avatarName,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
-                labelText: 'Custom avatar name (optional)',
+                labelText: 'Avatar name (optional)',
+                hintText: 'Match photo, Blue jersey, Profile 2...',
               ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _avatarUrl,
               keyboardType: TextInputType.url,
-              decoration: InputDecoration(
-                labelText: 'Private custom avatar URL',
-                helperText: 'HTTPS only. Visible only from your private profile data.',
-                suffixIcon: IconButton(
-                  onPressed: _addPrivateAvatar,
-                  icon: const Icon(Icons.add_link_rounded),
-                ),
+              decoration: const InputDecoration(
+                labelText: 'Private HTTPS image URL',
+                helperText: 'The URL itself is never shown to friends or stored in shared matches.',
+                prefixIcon: Icon(Icons.link_rounded),
               ),
             ),
-            if (_privateAvatars.isNotEmpty)
-              Wrap(
-                spacing: 6,
-                children: _privateAvatars
-                    .map(
-                      (avatar) => InputChip(
-                        label: Text(
-                          '${avatar.name} • ${avatar.id}',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onPressed: () => setState(() {
-                          _avatarUrl.text = avatar.url;
-                          _avatarSource = AvatarSource.customUrl;
-                        }),
-                        onDeleted: () => setState(() {
-                          _privateAvatars.remove(avatar);
-                          if (_avatarUrl.text == avatar.url) {
-                            _avatarUrl.clear();
-                            _avatarSource = AvatarSource.preset;
-                          }
-                        }),
-                      ),
-                    )
-                    .toList(),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _addPrivateAvatar,
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                label: const Text('Save & select avatar'),
               ),
+            ),
+            if (_privateAvatars.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Saved custom avatars',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Tap one to make it your active avatar.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              ..._privateAvatars.map((avatar) {
+                final selected =
+                    _avatarSource == AvatarSource.customUrl &&
+                    _avatarUrl.text.trim() == avatar.url;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: selected ? const Color(0xFFDDF7EB) : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => setState(() {
+                        _avatarUrl.text = avatar.url;
+                        _avatarSource = AvatarSource.customUrl;
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(10, 9, 6, 9),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selected
+                                ? AppColors.greenDark
+                                : Colors.black12,
+                            width: selected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            ClipOval(
+                              child: SizedBox.square(
+                                dimension: 46,
+                                child: Image.network(
+                                  avatar.url,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => const ColoredBox(
+                                    color: Color(0xFFDDF7EB),
+                                    child: Icon(Icons.person_outline_rounded),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 11),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    avatar.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    selected ? 'Selected' : 'Tap to select',
+                                    style: TextStyle(
+                                      color: selected
+                                          ? AppColors.greenDark
+                                          : AppColors.muted,
+                                      fontSize: 12,
+                                      fontWeight: selected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (selected)
+                              const Padding(
+                                padding: EdgeInsets.only(right: 2),
+                                child: Icon(
+                                  Icons.check_circle_rounded,
+                                  color: AppColors.greenDark,
+                                ),
+                              ),
+                            IconButton(
+                              tooltip: 'Delete saved avatar',
+                              onPressed: () => setState(() {
+                                _privateAvatars.remove(avatar);
+                                if (_avatarUrl.text.trim() == avatar.url) {
+                                  _avatarUrl.clear();
+                                  _avatarSource = AvatarSource.preset;
+                                }
+                              }),
+                              icon: const Icon(Icons.delete_outline_rounded),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
             const SizedBox(height: 24),
             const SectionLabel('Social links'),
             const SizedBox(height: 10),

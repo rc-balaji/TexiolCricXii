@@ -134,6 +134,8 @@ class Player {
     this.avatarSource = AvatarSource.preset,
     this.avatarPreset = 1,
     this.avatarUrl,
+    this.avatarImageBase64,
+    this.avatarImageSourceHash,
     List<PrivateAvatar>? privateAvatars,
     Map<String, ProfileVisibility>? contactVisibility,
     Map<String, List<String>>? contactAudienceIds,
@@ -171,6 +173,8 @@ class Player {
   AvatarSource avatarSource;
   int avatarPreset;
   String? avatarUrl;
+  String? avatarImageBase64;
+  String? avatarImageSourceHash;
   final List<PrivateAvatar> privateAvatars;
   final Map<String, ProfileVisibility> contactVisibility;
   final Map<String, List<String>> contactAudienceIds;
@@ -246,6 +250,8 @@ class Player {
     'avatarSource': avatarSource.name,
     'avatarPreset': avatarPreset,
     'avatarUrl': avatarUrl,
+    'avatarImageBase64': avatarImageBase64,
+    'avatarImageSourceHash': avatarImageSourceHash,
     'privateAvatars': privateAvatars.map((value) => value.toJson()).toList(),
     'contactVisibility': contactVisibility.map(
       (key, value) => MapEntry(key, value.name),
@@ -273,7 +279,8 @@ class Player {
     'customBowlingStyle': customBowlingStyle,
     'avatarSource': avatarSource.name,
     'avatarPreset': avatarPreset,
-    'avatarUrl': avatarSource == AvatarSource.customUrl ? null : avatarUrl,
+    'avatarUrl': null,
+    'avatarImageBase64': avatarSource == AvatarSource.customUrl ? avatarImageBase64 : null,
     'archived': archived,
     'gangId': gangId,
     'gangRole': gangRole?.name,
@@ -339,6 +346,8 @@ class Player {
       ),
       avatarPreset: json['avatarPreset'] as int? ?? 1,
       avatarUrl: json['avatarUrl'] as String?,
+      avatarImageBase64: json['avatarImageBase64'] as String?,
+      avatarImageSourceHash: json['avatarImageSourceHash'] as String?,
       privateAvatars: privateAvatars,
       contactVisibility: visibilityRaw.map(
         (key, value) => MapEntry(

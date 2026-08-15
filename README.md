@@ -1,6 +1,13 @@
-# CricXii v1.6.1 — Scorecard Avatars & Match-Day UX
+# CricXii v1.6.2 — Private Avatar Rendering & Match-Day UX
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.6.1+25` keeps the hardened live Team/Super Over and mixed daily-report flow, adds player avatars to cricket-style scorecards across mobile/PDF, and simplifies Home around match creation, unfinished matches and recent results while keeping performance reporting in Profile.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.6.2+26` keeps the hardened live Team/Super Over and mixed daily-report flow, adds player avatars to cricket-style scorecards across mobile/PDF, and simplifies Home around match creation, unfinished matches and recent results while keeping performance reporting in Profile.
+
+## v1.6.2 avatar privacy
+
+- Custom avatar source URLs stay in private account data and are not published to public player documents or shared match participant snapshots.
+- On save, CricXii renders a small avatar thumbnail locally and syncs only the image data needed for other players to display the avatar.
+- Multiple private avatar URLs are saved as named choices with visible previews and an explicit selected state.
+
 
 ## v1.6 highlights
 

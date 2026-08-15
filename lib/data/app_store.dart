@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
@@ -1035,12 +1038,30 @@ class AppStore extends ChangeNotifier {
     player.bio = _clean(player.bio);
     player.customBowlingStyle = _clean(player.customBowlingStyle);
     if (player.avatarSource == AvatarSource.customUrl) {
-      final avatar = Uri.tryParse(player.avatarUrl ?? '');
+      final avatarUrl = player.avatarUrl ?? '';
+      final avatar = Uri.tryParse(avatarUrl);
       if (avatar == null || avatar.scheme != 'https' || avatar.host.isEmpty) {
         throw StateError('A custom avatar must use a complete HTTPS URL.');
       }
+      final sourceHash = sha256.convert(utf8.encode(avatarUrl)).toString();
+      if (player.avatarImageBase64 == null ||
+          player.avatarImageSourceHash != sourceHash) {
+        try {
+          player.avatarImageBase64 = await _downloadAvatarThumbnail(avatar);
+          player.avatarImageSourceHash = sourceHash;
+        } on Object catch (error) {
+          throw StateError(
+            'Could not prepare this avatar for other players. Check that the HTTPS URL points directly to an image and try again. ($error)',
+          );
+        }
+      }
+    } else {
+      player
+        ..avatarUrl = null
+        ..avatarImageBase64 = null
+        ..avatarImageSourceHash = null;
     }
-    await _commit();
+    await _commit(waitForCloud: true);
   }
 
   Future<bool> deleteCachedPlayer(String playerId) async {
@@ -1209,36 +1230,43 @@ class AppStore extends ChangeNotifier {
   Future<Player?> findPublicPlayer(
     String playerId, {
     bool bypassSignedInGate = false,
+    bool forceRefresh = false,
   }) async {
     final normalized = playerId.trim();
     if (!RegExp(r'^\d{8}$').hasMatch(normalized)) return null;
     final cached = playerById(normalized);
-    if (cached != null) return cached;
+    if (cached != null && !forceRefresh) return cached;
     final firestore = _firestore;
-    if ((!cloudConnected && !bypassSignedInGate) || firestore == null) return null;
+    if ((!cloudConnected && !bypassSignedInGate) || firestore == null) return cached;
     try {
       final snapshot = await firestore.collection('players').doc(normalized).get();
       final data = snapshot.data();
-      if (data == null) return null;
+      if (data == null) return cached;
       final player = Player.fromJson(<String, dynamic>{
         ...data,
         'id': normalized,
         'createdAt':
             data['joinedAt']?.toString() ?? DateTime.now().toIso8601String(),
       });
+      if (cached != null && player.friendIds.isEmpty) {
+        player.friendIds.addAll(cached.friendIds);
+      }
       _addOrReplacePlayer(player);
       await _persistLocal();
       notifyListeners();
       return player;
     } on FirebaseException {
-      return null;
+      return cached;
     }
   }
 
   Future<Player?> findPlayer(String playerId) async {
     final normalized = playerId.trim();
     if (!RegExp(r'^\d{8}$').hasMatch(normalized)) return null;
-    final player = await findPublicPlayer(normalized);
+    final player = await findPublicPlayer(
+      normalized,
+      forceRefresh: normalized != activePlayerId,
+    );
     if (player == null) return null;
     final firestore = _firestore;
     if (!cloudConnected || firestore == null) return player;
@@ -1282,7 +1310,7 @@ class AppStore extends ChangeNotifier {
     Player? knownPlayer,
   }) async {
     final player = activePlayer;
-    final friend = knownPlayer ?? await findPublicPlayer(friendId);
+    final friend = knownPlayer ?? await findPublicPlayer(friendId, forceRefresh: true);
     if (player == null || friend == null || player.id == friendId) {
       throw StateError('Choose another valid numeric Player ID.');
     }
@@ -2875,6 +2903,21 @@ class AppStore extends ChangeNotifier {
     final firestore = _firestore;
     final player = activePlayer;
     if (!cloudConnected || firestore == null || player == null) return;
+    if (player.avatarSource == AvatarSource.customUrl &&
+        player.avatarImageBase64 == null) {
+      final avatar = Uri.tryParse(player.avatarUrl ?? '');
+      if (avatar != null && avatar.scheme == 'https' && avatar.host.isNotEmpty) {
+        try {
+          player.avatarImageBase64 = await _downloadAvatarThumbnail(avatar);
+          player.avatarImageSourceHash =
+              sha256.convert(utf8.encode(avatar.toString())).toString();
+          await _persistLocal();
+        } on Object {
+          // Legacy custom URLs keep their local owner-only fallback until the
+          // player explicitly saves a reachable URL from Edit profile.
+        }
+      }
+    }
     final fingerprint = jsonEncode(player.toJson());
     if (_lastPublicProfileFingerprint == fingerprint) return;
     try {
@@ -2927,7 +2970,9 @@ class AppStore extends ChangeNotifier {
     'avatarColor': player.avatarColor,
     'avatarSource': player.avatarSource.name,
     'avatarPreset': player.avatarPreset,
-    'avatarUrl': player.avatarUrl,
+    // Never publish the owner-supplied source URL in shared match documents.
+    // Other devices fetch the safe rendered thumbnail from players/{playerId}.
+    'avatarUrl': null,
     'battingStyle': player.battingStyle.name,
     'bowlingStyles': List<String>.from(player.bowlingStyles),
     'customBowlingStyle': player.customBowlingStyle,
@@ -2964,6 +3009,11 @@ class AppStore extends ChangeNotifier {
       if (playerById(playerId) != null || entry.value is! Map) continue;
       try {
         final snapshot = Map<String, dynamic>.from(entry.value as Map);
+        // Legacy shared documents may contain a custom source URL from older
+        // builds. Never hydrate or persist that private URL on another device.
+        snapshot['avatarUrl'] = null;
+        snapshot.remove('privateAvatars');
+        snapshot.remove('avatarImageSourceHash');
         snapshot['id'] = playerId;
         snapshot['createdAt'] ??= DateTime.now().toIso8601String();
         _addOrReplacePlayer(Player.fromJson(snapshot));
@@ -3367,11 +3417,17 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _cacheTeamParticipantProfiles(TeamMatch match) async {
-    for (final participantId in match.participantIds) {
-      if (playerById(participantId) == null) {
-        await findPublicPlayer(participantId, bypassSignedInGate: true);
-      }
-    }
+    await Future.wait(
+      match.participantIds
+          .where((participantId) => participantId != activePlayerId)
+          .map(
+            (participantId) => findPublicPlayer(
+              participantId,
+              bypassSignedInGate: true,
+              forceRefresh: true,
+            ),
+          ),
+    );
   }
 
   void _rebuildActiveTeamCareer() {
@@ -3540,11 +3596,17 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _cacheParticipantProfiles(CricketMatch match) async {
-    for (final participantId in match.participantIds) {
-      if (playerById(participantId) == null) {
-        await findPublicPlayer(participantId, bypassSignedInGate: true);
-      }
-    }
+    await Future.wait(
+      match.participantIds
+          .where((participantId) => participantId != activePlayerId)
+          .map(
+            (participantId) => findPublicPlayer(
+              participantId,
+              bypassSignedInGate: true,
+              forceRefresh: true,
+            ),
+          ),
+    );
   }
 
   Future<void> _ingestSharedMatch(
@@ -3823,7 +3885,7 @@ class AppStore extends ChangeNotifier {
         final toId = data['toPlayerId']?.toString();
         if (fromId == null || toId == null) continue;
         final otherId = fromId == self.id ? toId : fromId;
-        await findPublicPlayer(otherId);
+        await findPublicPlayer(otherId, forceRefresh: true);
         friendRequests.add(
           FriendRequest(
             id: document.id,
@@ -3840,7 +3902,7 @@ class AppStore extends ChangeNotifier {
         final data = document.data();
         final typeName = data['type']?.toString() ?? 'system';
         final fromId = data['fromPlayerId']?.toString();
-        final sender = fromId == null ? null : await findPublicPlayer(fromId);
+        final sender = fromId == null ? null : await findPublicPlayer(fromId, forceRefresh: true);
         final type = NotificationType.values.any((value) => value.name == typeName)
             ? NotificationType.values.byName(typeName)
             : NotificationType.system;
@@ -3875,7 +3937,7 @@ class AppStore extends ChangeNotifier {
         final friendId = document.data()['playerId']?.toString() ?? document.id;
         if (friendId == self.id) continue;
         cloudFriendIds.add(friendId);
-        await findPublicPlayer(friendId);
+        await findPublicPlayer(friendId, forceRefresh: true);
       }
       self.friendIds
         ..clear()
@@ -3916,6 +3978,58 @@ class AppStore extends ChangeNotifier {
     _playerIndex
       ..clear()
       ..addEntries(players.map((player) => MapEntry(player.id, player)));
+  }
+
+  Future<String> _downloadAvatarThumbnail(Uri uri) async {
+    const maxSourceBytes = 6 * 1024 * 1024;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await client.getUrl(uri).timeout(const Duration(seconds: 10));
+      request.headers.set(HttpHeaders.userAgentHeader, 'CricXii/1.6.2');
+      final response = await request.close().timeout(const Duration(seconds: 10));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Image server returned HTTP ${response.statusCode}.');
+      }
+      if (response.contentLength > maxSourceBytes) {
+        throw StateError('Avatar image is larger than 6 MB.');
+      }
+      final builder = BytesBuilder(copy: false);
+      var total = 0;
+      await for (final chunk in response.timeout(const Duration(seconds: 12))) {
+        total += chunk.length;
+        if (total > maxSourceBytes) {
+          throw StateError('Avatar image is larger than 6 MB.');
+        }
+        builder.add(chunk);
+      }
+      final source = builder.takeBytes();
+      if (source.isEmpty) throw StateError('Avatar image is empty.');
+
+      final codec = await ui.instantiateImageCodec(
+        source,
+        targetWidth: 128,
+        targetHeight: 128,
+        allowUpscaling: false,
+      );
+      try {
+        final frame = await codec.getNextFrame();
+        try {
+          final data = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+          if (data == null) throw StateError('Avatar image could not be encoded.');
+          final thumbnail = data.buffer.asUint8List();
+          if (thumbnail.length > 220 * 1024) {
+            throw StateError('Prepared avatar is unexpectedly large.');
+          }
+          return base64Encode(thumbnail);
+        } finally {
+          frame.image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+    } finally {
+      client.close(force: true);
+    }
   }
 
   String? _clean(String? value) {

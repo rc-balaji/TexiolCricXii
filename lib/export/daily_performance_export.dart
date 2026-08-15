@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -1230,6 +1231,16 @@ class DailyPerformanceExport {
   );
 
   static Future<pw.MemoryImage?> _avatarFor(Player player) async {
+    final encoded = player.avatarImageBase64;
+    if (player.avatarSource == AvatarSource.customUrl &&
+        encoded != null &&
+        encoded.isNotEmpty) {
+      try {
+        return pw.MemoryImage(base64Decode(encoded));
+      } on FormatException {
+        // Fall through to the private URL (owner device) or preset avatar.
+      }
+    }
     final url = player.resolvedAvatarUrl;
     if (url != null && Uri.tryParse(url)?.isScheme('https') == true) {
       final remote = await _downloadImage(url);

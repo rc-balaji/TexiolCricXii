@@ -1,3 +1,12 @@
+# CricXii v1.6.2+26 — Private Avatar Rendering & Saved Avatar Picker
+
+- Keeps owner-supplied custom avatar URLs private in account state and removes them from shared Singles/Team participant snapshots.
+- Generates a compact 128px rendered avatar thumbnail on the owner device when a custom URL is saved; only that rendered image is synced to the public player profile so other players can see the photo without receiving the original URL.
+- Refreshes public participant/friend profiles so custom-avatar updates propagate to other signed-in devices instead of being trapped in stale local cache.
+- Uses the rendered avatar thumbnail in mobile UI and all scorecard/PDF exports, with owner-only direct-URL and preset fallbacks for legacy data.
+- Replaces ambiguous custom-avatar chips with a clear saved-avatar picker: thumbnail preview, avatar name, Selected/Tap to select state, check mark, and delete action.
+- This review build intentionally remains unstaged and uncommitted; `.git` is preserved for manual review.
+
 # CricXii v1.6.1+25 — Scorecard Avatars & Match-Day UX
 
 - Added player avatars as the first column in Singles and Team batting/bowling scorecards on mobile result screens.

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -65,7 +66,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v1.6.1',
+      creator: 'CricXii v1.6.2',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -1247,6 +1248,16 @@ class ScorecardExport {
   );
 
   static Future<pw.MemoryImage?> _avatarFor(Player player) async {
+    final encoded = player.avatarImageBase64;
+    if (player.avatarSource == AvatarSource.customUrl &&
+        encoded != null &&
+        encoded.isNotEmpty) {
+      try {
+        return pw.MemoryImage(base64Decode(encoded));
+      } on FormatException {
+        // Fall through to the private URL (owner device) or preset avatar.
+      }
+    }
     final url = player.resolvedAvatarUrl;
     if (url != null && Uri.tryParse(url)?.isScheme('https') == true) {
       final remote = await _downloadImage(url);
