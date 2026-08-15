@@ -203,18 +203,51 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Row(
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
                   children: match.innings.map((innings) {
                     final side = match.side(innings.battingTeamId);
-                    return Expanded(
+                    return SizedBox(
+                      width: 140,
                       child: Column(
                         children: [
-                          Text(side.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFB8CCC2), fontWeight: FontWeight.w700)),
+                          Text(
+                            TeamScoringEngine.inningsLabel(innings),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.green,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            side.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFB8CCC2),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                           Text(
                             '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}',
-                            style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                          Text('${TeamScoringEngine.overLabel(match, innings)} ov', style: const TextStyle(color: Color(0xFFB8CCC2), fontSize: 12)),
+                          Text(
+                            '${TeamScoringEngine.overLabel(match, innings)} ov',
+                            style: const TextStyle(
+                              color: Color(0xFFB8CCC2),
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -464,7 +497,7 @@ class _InningsScorecard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.read(context);
-    final stats = TeamScoringEngine.appearanceStats(match);
+    final stats = TeamScoringEngine.inningsAppearanceStats(match, innings);
     final batting = match.side(innings.battingTeamId);
     final bowling = match.side(innings.bowlingTeamId);
     TeamPlayerMatchStats stat(String teamId, String id) =>
@@ -476,7 +509,10 @@ class _InningsScorecard extends StatelessWidget {
     return Card(
       child: ExpansionTile(
         initiallyExpanded: innings.index == 0,
-        title: Text('${batting.name} • ${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}', style: const TextStyle(fontWeight: FontWeight.w900)),
+        title: Text(
+          '${TeamScoringEngine.inningsLabel(innings)} • ${batting.name} • ${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}',
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
         subtitle: Text('${TeamScoringEngine.overLabel(match, innings)} overs • Extras ${TeamScoringEngine.extras(innings)}'),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
         children: [
@@ -499,7 +535,7 @@ class _InningsScorecard extends StatelessWidget {
                 DataColumn(label: Text('6')),
                 DataColumn(label: Text('SR')),
               ],
-              rows: batting.battingOrder.map((id) {
+              rows: TeamScoringEngine.battingDisplayOrder(match, innings).map((id) {
                 final value = stat(batting.id, id);
                 final player = store.playerById(id);
                 return DataRow(cells: [

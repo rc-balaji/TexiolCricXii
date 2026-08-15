@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../domain/daily_performance.dart';
 import '../domain/player.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
@@ -7,6 +8,7 @@ import '../widgets/player_avatar.dart';
 import 'daily_report_builder_screen.dart';
 import 'match_summary_screen.dart';
 import 'public_player_profile_screen.dart';
+import 'team_match_summary_screen.dart';
 
 class DailyPerformanceScreen extends StatefulWidget {
   const DailyPerformanceScreen({super.key, this.initialDate});
@@ -139,7 +141,7 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
                       ),
                       SizedBox(height: 8),
                       Text(
-                        'Complete a Singles match to build the day’s performance report.',
+                        'Complete a Singles or Team Match to build the day’s performance report.',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 21,
@@ -323,12 +325,14 @@ class _DailyPerformanceScreenState extends State<DailyPerformanceScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   subtitle: Text(
-                    '${_time(match.startedAt ?? match.createdAt)} → ${_time(match.completedAt ?? match.createdAt)} • ${match.id}',
+                    '${match.isSingles ? 'Singles' : 'Team Match'} • ${_time(match.startedAt)} → ${_time(match.completedAt)} • ${match.resultLabel}',
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => MatchSummaryScreen(matchId: match.id),
+                      builder: (_) => match.type == DailyMatchType.singles
+                          ? MatchSummaryScreen(matchId: match.id)
+                          : TeamMatchSummaryScreen(matchId: match.id),
                     ),
                   ),
                 ),

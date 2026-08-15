@@ -29,6 +29,68 @@ class TeamScoringEngine {
   static int ballInOver(TeamMatch match, TeamInnings innings) =>
       legalBalls(innings) % match.rules.ballsPerOver;
 
+  static int inningsBallLimit(TeamMatch match, TeamInnings innings) =>
+      innings.ballLimitOverride ?? match.rules.ballLimit;
+
+  static int inningsWicketLimit(TeamMatch match, TeamInnings innings) {
+    final batting = match.side(innings.battingTeamId);
+    return (innings.wicketLimitOverride ?? batting.playerIds.length)
+        .clamp(1, batting.playerIds.length)
+        .toInt();
+  }
+
+  static List<String> availableNextBatters(
+    TeamMatch match,
+    TeamInnings innings,
+  ) {
+    final batting = match.side(innings.battingTeamId);
+    return batting.playerIds
+        .where(
+          (id) =>
+              !innings.dismissedPlayerIds.contains(id) &&
+              id != innings.strikerId &&
+              id != innings.nonStrikerId,
+        )
+        .toList(growable: false);
+  }
+
+  /// Actual live batting order: default openers first, then every batter
+  /// selected after a wicket, followed by players who did not bat.
+  static List<String> battingDisplayOrder(
+    TeamMatch match,
+    TeamInnings innings,
+  ) {
+    final batting = match.side(innings.battingTeamId);
+    final result = <String>[];
+    void add(String? id) {
+      if (id != null && id.isNotEmpty && batting.playerIds.contains(id) && !result.contains(id)) {
+        result.add(id);
+      }
+    }
+    for (final id in batting.battingOrder.take(2)) {
+      add(id);
+    }
+    final sequences = innings.nextBatterByWicketSequence.keys.toList()..sort();
+    for (final sequence in sequences) {
+      add(innings.nextBatterByWicketSequence[sequence]);
+    }
+    for (final id in batting.playerIds) {
+      add(id);
+    }
+    return result;
+  }
+
+  static int superOverCount(TeamMatch match) => match.innings
+      .where((innings) => innings.isSuperOver)
+      .map((innings) => innings.superOverNumber ?? 0)
+      .fold<int>(0, (highest, value) => value > highest ? value : highest);
+
+  static String inningsLabel(TeamInnings innings) => innings.isSuperOver
+      ? 'Super Over ${innings.superOverNumber ?? 1} ${innings.index.isEven ? '1st' : '2nd'} innings'
+      : innings.index == 0
+          ? '1st Innings'
+          : '2nd Innings';
+
   static String overLabel(TeamMatch match, TeamInnings innings) =>
       '${currentOver(match, innings)}.${ballInOver(match, innings)}';
 
@@ -200,24 +262,74 @@ class TeamScoringEngine {
     required String openingBowlerId,
     DateTime? at,
   }) {
-    if (match.status != TeamMatchStatus.inningsBreak || match.innings.length != 1) {
+    if (match.status != TeamMatchStatus.inningsBreak || match.innings.isEmpty) {
       throw StateError('Complete the first innings before starting the chase.');
     }
-    final first = match.innings.first;
+    final first = match.innings.last;
+    if (!first.completed) {
+      throw StateError('Complete the current innings before starting the chase.');
+    }
     final batting = match.side(first.bowlingTeamId);
     final bowling = match.side(first.battingTeamId);
     final innings = _newInnings(
       match,
-      index: 1,
+      index: match.innings.length,
       batting: batting,
       bowling: bowling,
       openingBowlerId: openingBowlerId,
       target: total(first) + 1,
       at: at,
+      isSuperOver: first.isSuperOver,
+      superOverNumber: first.superOverNumber,
+      ballLimitOverride: first.isSuperOver ? match.rules.ballsPerOver : null,
+      wicketLimitOverride: first.isSuperOver ? 2 : null,
     );
     match.innings.add(innings);
     match.status = TeamMatchStatus.live;
     return innings;
+  }
+
+  static TeamInnings startSuperOver(
+    TeamMatch match, {
+    required String battingTeamId,
+    required String openingBowlerId,
+    DateTime? at,
+  }) {
+    if (match.status != TeamMatchStatus.tieBreak) {
+      throw StateError('A Super Over can start only after a tied round.');
+    }
+    if (battingTeamId != match.teamA.id && battingTeamId != match.teamB.id) {
+      throw StateError('Choose which team bats first in the Super Over.');
+    }
+    final batting = match.side(battingTeamId);
+    final bowling = match.otherSide(batting.id);
+    final number = superOverCount(match) + 1;
+    final innings = _newInnings(
+      match,
+      index: match.innings.length,
+      batting: batting,
+      bowling: bowling,
+      openingBowlerId: openingBowlerId,
+      at: at,
+      isSuperOver: true,
+      superOverNumber: number,
+      ballLimitOverride: match.rules.ballsPerOver,
+      wicketLimitOverride: 2,
+    );
+    match
+      ..completedAt = null
+      ..status = TeamMatchStatus.live;
+    match.innings.add(innings);
+    return innings;
+  }
+
+  static void completeAsTie(TeamMatch match, {DateTime? at}) {
+    if (match.status != TeamMatchStatus.tieBreak) {
+      throw StateError('This match is not waiting on a tie-break decision.');
+    }
+    match
+      ..status = TeamMatchStatus.completed
+      ..completedAt = at ?? DateTime.now();
   }
 
   static TeamInnings _newInnings(
@@ -228,6 +340,10 @@ class TeamScoringEngine {
     required String openingBowlerId,
     int? target,
     DateTime? at,
+    bool isSuperOver = false,
+    int? superOverNumber,
+    int? ballLimitOverride,
+    int? wicketLimitOverride,
   }) {
     if (batting.battingOrder.length < 2) {
       throw StateError('A team innings needs at least two batters.');
@@ -240,6 +356,10 @@ class TeamScoringEngine {
       nonStrikerId: batting.battingOrder[1],
       target: target,
       startedAt: at ?? DateTime.now(),
+      isSuperOver: isSuperOver,
+      superOverNumber: superOverNumber,
+      ballLimitOverride: ballLimitOverride,
+      wicketLimitOverride: wicketLimitOverride,
     );
     selectBowler(match, innings, openingBowlerId);
     return innings;
@@ -267,7 +387,7 @@ class TeamScoringEngine {
     }
     final used = bowlerBalls(innings, bowlerId);
     final quota = bowling.bowlingQuotaBalls[bowlerId] ?? 0;
-    final remainingInInnings = match.rules.ballLimit - legalBalls(innings);
+    final remainingInInnings = inningsBallLimit(match, innings) - legalBalls(innings);
     final remainingInOver = match.rules.ballsPerOver - ballInOver(match, innings);
     final ballsRequired = remainingInInnings < remainingInOver
         ? remainingInInnings
@@ -297,6 +417,9 @@ class TeamScoringEngine {
     final innings = match.currentInnings;
     if (innings == null || innings.completed) {
       throw StateError('There is no live innings.');
+    }
+    if (innings.awaitingNextBatter) {
+      throw StateError('Choose the next batter before recording another ball.');
     }
     if (innings.awaitingSoloDecision) {
       throw StateError('Choose whether the final batter will continue first.');
@@ -394,6 +517,9 @@ class TeamScoringEngine {
     TeamDeliveryEvent event,
   ) {
     final batting = match.side(innings.battingTeamId);
+    final overCompleted = event.legalBall &&
+        legalBalls(innings) % match.rules.ballsPerOver == 0;
+
     if (!innings.soloMode && event.runningRuns.isOdd) {
       _swapBatters(innings);
     }
@@ -403,14 +529,27 @@ class TeamScoringEngine {
       if (!innings.dismissedPlayerIds.contains(dismissed)) {
         innings.dismissedPlayerIds.add(dismissed);
       }
-      if (innings.strikerId == dismissed) {
-        innings.strikerId = _nextBatter(batting, innings) ?? '';
-      } else if (innings.nonStrikerId == dismissed) {
-        innings.nonStrikerId = _nextBatter(batting, innings);
+
+      final dismissedStriker = innings.strikerId == dismissed;
+      final dismissedNonStriker = innings.nonStrikerId == dismissed;
+      if (dismissedStriker) innings.strikerId = '';
+      if (dismissedNonStriker) innings.nonStrikerId = null;
+
+      final wicketLimitReached =
+          innings.dismissedPlayerIds.length >= inningsWicketLimit(match, innings);
+      if (!wicketLimitReached) {
+        final available = availableNextBatters(match, innings);
+        if (available.isNotEmpty && (dismissedStriker || dismissedNonStriker)) {
+          innings
+            ..pendingNextBatterEnd = dismissedStriker ? 'striker' : 'nonStriker'
+            ..pendingNextBatterWicketSequence = event.sequence
+            ..swapAfterNextBatter = overCompleted && !innings.soloMode;
+          return;
+        }
       }
     }
 
-    final remaining = batting.battingOrder
+    final remaining = batting.playerIds
         .where((id) => !innings.dismissedPlayerIds.contains(id))
         .toList(growable: false);
     if (remaining.isEmpty) {
@@ -419,41 +558,75 @@ class TeamScoringEngine {
         ..nonStrikerId = null;
       return;
     }
+
     if (remaining.length == 1) {
       innings
         ..strikerId = remaining.single
         ..nonStrikerId = null;
-      if (match.rules.askLastPlayerStanding && !innings.soloMode) {
+      if (match.rules.askLastPlayerStanding &&
+          !innings.soloMode &&
+          innings.dismissedPlayerIds.length < inningsWicketLimit(match, innings)) {
         innings.awaitingSoloDecision = true;
       }
       return;
     }
 
-    if (innings.strikerId.isEmpty ||
-        innings.dismissedPlayerIds.contains(innings.strikerId)) {
-      innings.strikerId = _nextBatter(batting, innings) ?? remaining.first;
+    // A migrated legacy match can have a blank end but no persisted choice.
+    // Keep it playable by using the default roster order only as a fallback;
+    // all new wickets use the explicit next-batter prompt above.
+    if (innings.strikerId.isEmpty) {
+      innings.strikerId = remaining.first;
     }
-    if (innings.nonStrikerId == null ||
-        innings.dismissedPlayerIds.contains(innings.nonStrikerId)) {
-      innings.nonStrikerId = _nextBatter(batting, innings) ??
-          remaining.firstWhere((id) => id != innings.strikerId);
+    if (innings.nonStrikerId == null) {
+      innings.nonStrikerId = remaining.firstWhere(
+        (id) => id != innings.strikerId,
+        orElse: () => remaining.first,
+      );
     }
 
-    final overCompleted = event.legalBall &&
-        legalBalls(innings) % match.rules.ballsPerOver == 0;
     if (overCompleted && !innings.soloMode) _swapBatters(innings);
   }
 
-  static String? _nextBatter(TeamSide batting, TeamInnings innings) {
-    while (innings.nextBatterIndex < batting.battingOrder.length) {
-      final next = batting.battingOrder[innings.nextBatterIndex++];
-      if (!innings.dismissedPlayerIds.contains(next) &&
-          next != innings.strikerId &&
-          next != innings.nonStrikerId) {
-        return next;
-      }
+  static void selectNextBatter(
+    TeamMatch match,
+    TeamInnings innings,
+    String playerId,
+  ) {
+    if (!innings.awaitingNextBatter) {
+      throw StateError('No next-batter choice is pending.');
     }
-    return null;
+    if (!availableNextBatters(match, innings).contains(playerId)) {
+      throw StateError('Choose an available batter who is not already out or at the crease.');
+    }
+    _applySelectedNextBatter(
+      innings,
+      playerId,
+      persistChoice: true,
+    );
+  }
+
+  static void _applySelectedNextBatter(
+    TeamInnings innings,
+    String playerId, {
+    required bool persistChoice,
+  }) {
+    final end = innings.pendingNextBatterEnd;
+    final sequence = innings.pendingNextBatterWicketSequence;
+    if (end == null || sequence == null) return;
+    if (persistChoice) {
+      innings.nextBatterByWicketSequence[sequence] = playerId;
+    }
+    if (end == 'striker') {
+      innings.strikerId = playerId;
+    } else {
+      innings.nonStrikerId = playerId;
+    }
+    final shouldSwap = innings.swapAfterNextBatter;
+    innings
+      ..pendingNextBatterEnd = null
+      ..pendingNextBatterWicketSequence = null
+      ..swapAfterNextBatter = false;
+    if (shouldSwap && !innings.soloMode) _swapBatters(innings);
   }
 
   static void _swapBatters(TeamInnings innings) {
@@ -471,17 +644,18 @@ class TeamScoringEngine {
     required DateTime at,
   }) {
     final targetReached = innings.target != null && total(innings) >= innings.target!;
-    final oversFinished = legalBalls(innings) >= match.rules.ballLimit;
+    final oversFinished = legalBalls(innings) >= inningsBallLimit(match, innings);
     final batting = match.side(innings.battingTeamId);
-    final everyPlayerOut =
-        innings.dismissedPlayerIds.length >= batting.playerIds.length;
+    final wicketLimitReached =
+        innings.dismissedPlayerIds.length >= inningsWicketLimit(match, innings);
     if (targetReached) {
       _finishInnings(match, innings, 'Target reached', at);
     } else if (oversFinished) {
       _finishInnings(match, innings, 'Overs completed', at);
-    } else if (everyPlayerOut) {
+    } else if (wicketLimitReached) {
       _finishInnings(match, innings, 'All out', at);
-    } else if (!match.rules.askLastPlayerStanding &&
+    } else if (innings.wicketLimitOverride == null &&
+        !match.rules.askLastPlayerStanding &&
         innings.dismissedPlayerIds.length >= batting.playerIds.length - 1) {
       _finishInnings(match, innings, 'All out', at);
     }
@@ -528,9 +702,23 @@ class TeamScoringEngine {
       ..completed = true
       ..completionReason = reason
       ..completedAt = at
-      ..awaitingSoloDecision = false;
-    if (innings.index == 0) {
+      ..awaitingSoloDecision = false
+      ..pendingNextBatterEnd = null
+      ..pendingNextBatterWicketSequence = null
+      ..swapAfterNextBatter = false;
+
+    // Every round is a two-innings pair: 0/1 for the main match, 2/3 for
+    // Super Over 1, 4/5 for Super Over 2, and so on.
+    if (innings.index.isEven) {
       match.status = TeamMatchStatus.inningsBreak;
+      return;
+    }
+
+    final first = match.innings[innings.index - 1];
+    if (total(first) == total(innings)) {
+      match
+        ..status = TeamMatchStatus.tieBreak
+        ..completedAt = null;
     } else {
       match
         ..status = TeamMatchStatus.completed
@@ -542,7 +730,11 @@ class TeamScoringEngine {
     final innings = match.currentInnings;
     if (innings == null || innings.events.isEmpty) return false;
     innings.events.removeLast();
-    if (match.status == TeamMatchStatus.completed) {
+    innings.nextBatterByWicketSequence.removeWhere(
+      (sequence, _) => sequence > innings.events.length,
+    );
+    if (match.status == TeamMatchStatus.completed ||
+        match.status == TeamMatchStatus.tieBreak) {
       match
         ..status = TeamMatchStatus.live
         ..completedAt = null
@@ -558,14 +750,17 @@ class TeamScoringEngine {
   static void _rebuildInningsState(TeamMatch match, TeamInnings innings) {
     final batting = match.side(innings.battingTeamId);
     final events = List<TeamDeliveryEvent>.from(innings.events);
+    final choices = Map<int, String>.from(innings.nextBatterByWicketSequence);
     final keepSolo = innings.soloMode;
     innings
       ..strikerId = batting.battingOrder.first
       ..nonStrikerId = batting.battingOrder.length > 1
           ? batting.battingOrder[1]
           : null
-      ..nextBatterIndex = 2
       ..dismissedPlayerIds.clear()
+      ..pendingNextBatterEnd = null
+      ..pendingNextBatterWicketSequence = null
+      ..swapAfterNextBatter = false
       ..awaitingSoloDecision = false
       ..soloMode = keepSolo
       ..soloDeclined = false
@@ -574,6 +769,16 @@ class TeamScoringEngine {
       ..completedAt = null;
     for (final event in events) {
       _applyEventState(match, innings, event);
+      if (innings.awaitingNextBatter) {
+        final selected = choices[event.sequence];
+        if (selected != null && availableNextBatters(match, innings).contains(selected)) {
+          _applySelectedNextBatter(
+            innings,
+            selected,
+            persistChoice: false,
+          );
+        }
+      }
       if (innings.awaitingSoloDecision && keepSolo) {
         innings
           ..awaitingSoloDecision = false
@@ -590,17 +795,30 @@ class TeamScoringEngine {
     if (match.innings.length < 2) {
       return const TeamMatchResult(summary: 'Match in progress');
     }
-    final first = match.innings[0];
-    final second = match.innings[1];
+
+    final last = match.innings.last;
+    if (last.isSuperOver && last.index.isEven) {
+      return TeamMatchResult(
+        summary: 'Super Over ${last.superOverNumber ?? 1} in progress',
+      );
+    }
+
+    final second = last.isSuperOver ? last : match.innings[1];
+    final first = last.isSuperOver ? match.innings[last.index - 1] : match.innings[0];
     final firstTotal = total(first);
     final secondTotal = total(second);
+    final superOverNumber = second.isSuperOver ? second.superOverNumber : null;
+
     if (secondTotal > firstTotal) {
       final batting = match.side(second.battingTeamId);
-      final wicketsRemaining = (batting.playerIds.length - wickets(second))
-          .clamp(0, batting.playerIds.length)
+      final wicketLimit = inningsWicketLimit(match, second);
+      final wicketsRemaining = (wicketLimit - wickets(second))
+          .clamp(0, wicketLimit)
           .toInt();
       return TeamMatchResult(
-        summary: '${batting.name} won by $wicketsRemaining wicket${wicketsRemaining == 1 ? '' : 's'}',
+        summary: superOverNumber == null
+            ? '${batting.name} won by $wicketsRemaining wicket${wicketsRemaining == 1 ? '' : 's'}'
+            : '${batting.name} won Super Over $superOverNumber by $wicketsRemaining wicket${wicketsRemaining == 1 ? '' : 's'}',
         winnerTeamId: batting.id,
         marginWickets: wicketsRemaining,
       );
@@ -609,12 +827,132 @@ class TeamScoringEngine {
       final batting = match.side(first.battingTeamId);
       final margin = firstTotal - secondTotal;
       return TeamMatchResult(
-        summary: '${batting.name} won by $margin run${margin == 1 ? '' : 's'}',
+        summary: superOverNumber == null
+            ? '${batting.name} won by $margin run${margin == 1 ? '' : 's'}'
+            : '${batting.name} won Super Over $superOverNumber by $margin run${margin == 1 ? '' : 's'}',
         winnerTeamId: batting.id,
         marginRuns: margin,
       );
     }
-    return const TeamMatchResult(summary: 'Match tied');
+
+    if (superOverNumber != null) {
+      return TeamMatchResult(
+        summary: match.status == TeamMatchStatus.tieBreak
+            ? 'Super Over $superOverNumber tied • another Super Over available'
+            : 'Super Over $superOverNumber tied • match tied',
+      );
+    }
+    return TeamMatchResult(
+      summary: match.status == TeamMatchStatus.tieBreak
+          ? 'Match tied • Super Over available'
+          : 'Match tied',
+    );
+  }
+
+  static Map<String, TeamPlayerMatchStats> inningsAppearanceStats(
+    TeamMatch match,
+    TeamInnings innings,
+  ) {
+    final result = <String, TeamPlayerMatchStats>{};
+    String key(String teamId, String playerId) => '$teamId:$playerId';
+    for (final side in [match.teamA, match.teamB]) {
+      for (final playerId in side.playerIds) {
+        result[key(side.id, playerId)] = TeamPlayerMatchStats(
+          playerId: playerId,
+          teamId: side.id,
+        );
+      }
+    }
+    final battingTeam = innings.battingTeamId;
+    final bowlingTeam = innings.bowlingTeamId;
+    for (final event in innings.events) {
+      final batter = result[key(battingTeam, event.strikerId)];
+      if (batter != null) {
+        batter
+          ..runs += event.batRuns
+          ..balls += event.legalBall ? 1 : 0
+          ..fours += event.batRuns == 4 ? 1 : 0
+          ..sixes += event.batRuns == 6 ? 1 : 0
+          ..points += event.batRuns * match.rules.pointRules.run;
+      }
+      final bowler = result[key(bowlingTeam, event.bowlerId)];
+      if (bowler != null) {
+        final excludedFromBowler = event.extraType == ExtraType.bye ||
+            event.extraType == ExtraType.legBye ||
+            event.extraType == ExtraType.penalty;
+        bowler
+          ..ballsBowled += event.legalBall ? 1 : 0
+          ..runsConceded += excludedFromBowler ? event.batRuns : event.totalRuns
+          ..wides += event.extraType == ExtraType.wide ? event.extraRuns : 0
+          ..noBalls += event.extraType == ExtraType.noBall ? event.extraRuns : 0;
+      }
+      if (!event.isWicket || event.dismissedPlayerId == null) continue;
+      final dismissed = result[key(battingTeam, event.dismissedPlayerId!)];
+      if (dismissed != null) {
+        dismissed
+          ..dismissed = true
+          ..dismissals += 1;
+      }
+      if (event.dismissalType.creditsBowler && bowler != null) {
+        bowler
+          ..wickets += 1
+          ..points += match.rules.pointRules.wicket;
+        if (event.dismissalType == DismissalType.bowled) {
+          bowler.points += match.rules.pointRules.bowledBonus;
+        }
+      }
+      switch (event.dismissalType) {
+        case DismissalType.caught:
+          _creditCatch(result, bowlingTeam, event.fielderIds.firstOrNull, match);
+          break;
+        case DismissalType.caughtAndBowled:
+          _creditCatch(result, bowlingTeam, event.bowlerId, match);
+          break;
+        case DismissalType.runOutDirect:
+          final fielder = event.fielderIds.firstOrNull == null
+              ? null
+              : result[key(bowlingTeam, event.fielderIds.first)];
+          if (fielder != null) {
+            fielder
+              ..directRunOuts += 1
+              ..points += match.rules.pointRules.directRunOut;
+          }
+          break;
+        case DismissalType.runOutAssisted:
+          for (final id in event.fielderIds.take(2)) {
+            final fielder = result[key(bowlingTeam, id)];
+            if (fielder != null) {
+              fielder
+                ..assistedRunOuts += 1
+                ..points += match.rules.pointRules.assistedRunOut;
+            }
+          }
+          break;
+        case DismissalType.stumped:
+          final keeper = event.fielderIds.firstOrNull == null
+              ? null
+              : result[key(bowlingTeam, event.fielderIds.first)];
+          if (keeper != null) {
+            keeper
+              ..stumpings += 1
+              ..points += match.rules.pointRules.stumping;
+          }
+          break;
+        case DismissalType.none:
+        case DismissalType.bowled:
+        case DismissalType.lbw:
+        case DismissalType.hitWicket:
+        case DismissalType.retiredOut:
+          break;
+      }
+    }
+    for (final playerId in match.side(battingTeam).playerIds) {
+      final stats = result[key(battingTeam, playerId)];
+      if (stats != null && stats.balls > 0 && !stats.dismissed) {
+        stats.points += match.rules.pointRules.notOutBonus;
+      }
+    }
+    return result;
   }
 
   static Map<String, TeamPlayerMatchStats> appearanceStats(TeamMatch match) {
@@ -629,91 +967,34 @@ class TeamScoringEngine {
       }
     }
 
+    // Score each innings independently before merging. This matters once a
+    // player can bat in the main match and again in one or more Super Overs:
+    // dismissals and not-out bonuses must be counted per innings, not collapsed
+    // into one whole-match boolean.
     for (final innings in match.innings) {
-      final battingTeam = innings.battingTeamId;
-      final bowlingTeam = innings.bowlingTeamId;
-      for (final event in innings.events) {
-        final batter = result[key(battingTeam, event.strikerId)];
-        if (batter != null) {
-          batter
-            ..runs += event.batRuns
-            ..balls += event.legalBall ? 1 : 0
-            ..fours += event.batRuns == 4 ? 1 : 0
-            ..sixes += event.batRuns == 6 ? 1 : 0
-            ..points += event.batRuns * match.rules.pointRules.run;
-        }
-        final bowler = result[key(bowlingTeam, event.bowlerId)];
-        if (bowler != null) {
-          final excludedFromBowler = event.extraType == ExtraType.bye ||
-              event.extraType == ExtraType.legBye ||
-              event.extraType == ExtraType.penalty;
-          bowler
-            ..ballsBowled += event.legalBall ? 1 : 0
-            ..runsConceded += excludedFromBowler ? event.batRuns : event.totalRuns
-            ..wides += event.extraType == ExtraType.wide ? event.extraRuns : 0
-            ..noBalls += event.extraType == ExtraType.noBall ? event.extraRuns : 0;
-        }
-        if (!event.isWicket || event.dismissedPlayerId == null) continue;
-        final dismissed = result[key(battingTeam, event.dismissedPlayerId!)];
-        if (dismissed != null) dismissed.dismissed = true;
-        if (event.dismissalType.creditsBowler && bowler != null) {
-          bowler
-            ..wickets += 1
-            ..points += match.rules.pointRules.wicket;
-          if (event.dismissalType == DismissalType.bowled) {
-            bowler.points += match.rules.pointRules.bowledBonus;
-          }
-        }
-        switch (event.dismissalType) {
-          case DismissalType.caught:
-            _creditCatch(result, bowlingTeam, event.fielderIds.firstOrNull, match);
-            break;
-          case DismissalType.caughtAndBowled:
-            _creditCatch(result, bowlingTeam, event.bowlerId, match);
-            break;
-          case DismissalType.runOutDirect:
-            final fielder = event.fielderIds.firstOrNull == null
-                ? null
-                : result[key(bowlingTeam, event.fielderIds.first)];
-            if (fielder != null) {
-              fielder
-                ..directRunOuts += 1
-                ..points += match.rules.pointRules.directRunOut;
-            }
-            break;
-          case DismissalType.runOutAssisted:
-            for (final id in event.fielderIds.take(2)) {
-              final fielder = result[key(bowlingTeam, id)];
-              if (fielder != null) {
-                fielder
-                  ..assistedRunOuts += 1
-                  ..points += match.rules.pointRules.assistedRunOut;
-              }
-            }
-            break;
-          case DismissalType.stumped:
-            final keeper = event.fielderIds.firstOrNull == null
-                ? null
-                : result[key(bowlingTeam, event.fielderIds.first)];
-            if (keeper != null) {
-              keeper
-                ..stumpings += 1
-                ..points += match.rules.pointRules.stumping;
-            }
-            break;
-          case DismissalType.none:
-          case DismissalType.bowled:
-          case DismissalType.lbw:
-          case DismissalType.hitWicket:
-          case DismissalType.retiredOut:
-            break;
-        }
-      }
-      for (final playerId in match.side(battingTeam).playerIds) {
-        final stats = result[key(battingTeam, playerId)];
-        if (stats != null && stats.balls > 0 && !stats.dismissed) {
-          stats.points += match.rules.pointRules.notOutBonus;
-        }
+      final partial = inningsAppearanceStats(match, innings);
+      for (final entry in partial.entries) {
+        final aggregate = result[entry.key];
+        if (aggregate == null) continue;
+        final value = entry.value;
+        aggregate
+          ..runs += value.runs
+          ..balls += value.balls
+          ..fours += value.fours
+          ..sixes += value.sixes
+          ..dismissed = aggregate.dismissed || value.dismissed
+          ..dismissals += value.dismissals
+          ..wickets += value.wickets
+          ..ballsBowled += value.ballsBowled
+          ..runsConceded += value.runsConceded
+          ..maidens += value.maidens
+          ..wides += value.wides
+          ..noBalls += value.noBalls
+          ..catches += value.catches
+          ..directRunOuts += value.directRunOuts
+          ..assistedRunOuts += value.assistedRunOuts
+          ..stumpings += value.stumpings
+          ..points += value.points;
       }
     }
     return result;

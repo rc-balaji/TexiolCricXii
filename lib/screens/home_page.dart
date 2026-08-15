@@ -76,7 +76,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ? TeamMatchWatchScreen(matchId: match.id)
         : switch (match.status) {
             TeamMatchStatus.toss => TeamTossScreen(matchId: match.id),
-            TeamMatchStatus.live || TeamMatchStatus.inningsBreak =>
+            TeamMatchStatus.live ||
+            TeamMatchStatus.inningsBreak ||
+            TeamMatchStatus.tieBreak =>
               TeamLiveMatchScreen(matchId: match.id),
             TeamMatchStatus.completed =>
               TeamMatchSummaryScreen(matchId: match.id),

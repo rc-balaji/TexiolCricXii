@@ -1,4 +1,41 @@
-# CricXii v1.4.0 verification
+# CricXii v1.5.0 verification
+
+## v1.5 focused regression checks
+
+- Team wicket creates a blocking next-batter choice and prevents another delivery until resolved.
+- The chosen batter survives undo/rebuild through `nextBatterByWicketSequence`.
+- Team live automatic prompts use one priority path and modal guards to prevent duplicate next-bowler / next-batter / Last Player Standing prompts.
+- A tied main match enters `tieBreak`; Super Over innings use one over and a two-wicket cap.
+- A tied Super Over returns to `tieBreak` and Super Over 2, 3, etc. can be appended.
+- Repeated innings keep dismissal counts and not-out bonuses correct when Team career stats are applied or reverted.
+- Today Performance filters strictly by `completedAt`, includes completed Singles + Team Matches, and excludes unfinished/missing-completion records.
+- Report Builder defaults to all completed matches and permits All / Singles / Team filtering, individual selection, Select shown / Clear shown, and section selection.
+- Export requires at least one selected match and one selected section; title/filename switch between Singles, Team and Overall automatically.
+- Team/daily scorecards use adaptive multi-page layouts for repeated Super Overs and large rosters.
+
+## Commands for a Flutter-enabled workstation / CI
+
+```bash
+flutter pub get
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+```
+
+The repository package itself does not vendor a Flutter/Dart SDK. If verification is performed in an environment without those executables, run the repository/static checks below and let GitHub Actions or a Flutter workstation execute the analyzer/test commands above before release publication.
+
+## Repository/static checks
+
+```bash
+git diff --check
+grep -Rni "nextBatterIndex\|matchIds:" lib test || true
+grep -Rni "TeamMatchStatus.tieBreak" lib test
+grep -Rni "startSuperOver\|selectNextBatter" lib test
+```
+
+---
+
+## Historical v1.4 verification
 
 Required scenarios:
 

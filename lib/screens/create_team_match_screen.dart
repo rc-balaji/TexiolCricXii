@@ -84,8 +84,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       ...template.teamA.playerIds,
       ...template.teamB.playerIds,
     });
-    _teamA.addAll(template.teamA.battingOrder);
-    _teamB.addAll(template.teamB.battingOrder);
+    _teamA.addAll(template.teamA.playerIds);
+    _teamB.addAll(template.teamB.playerIds);
     _quotaA.addAll(template.teamA.bowlingQuotaBalls);
     _quotaB.addAll(template.teamB.bowlingQuotaBalls);
     _wide = rules.wideEnabled;
@@ -229,14 +229,6 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
 
     seed(_teamA, _quotaA);
     seed(_teamB, _quotaB);
-  }
-
-  void _move(List<String> order, int oldIndex, int newIndex) {
-    setState(() {
-      if (newIndex > oldIndex) newIndex--;
-      final value = order.removeAt(oldIndex);
-      order.insert(newIndex, value);
-    });
   }
 
   String? _validateStep(int step) {
@@ -622,12 +614,23 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
             ),
           ),
           Step(
-            title: const Text('Orders and roles'),
-            subtitle: const Text('Batting, captain, keeper and scorer'),
+            title: const Text('Roles & scorer'),
+            subtitle: const Text('Captain, keeper and live batting choices'),
             isActive: _step >= 3,
             content: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const Card(
+                  color: Color(0xFFE7F8F0),
+                  child: ListTile(
+                    leading: Icon(Icons.swap_vert_rounded, color: AppColors.greenDark),
+                    title: Text('Batting order stays flexible'),
+                    subtitle: Text(
+                      'No full batting order is required before the match. The roster order supplies the default opening pair, then every wicket asks the scorer to choose the next batter live.',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 _RoleSelectors(
                   title: _teamAName.text,
                   ids: _teamA,
@@ -636,13 +639,6 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   players: selectedPlayers,
                   onCaptain: (value) => setState(() => _captainA = value),
                   onKeeper: (value) => setState(() => _keeperA = value),
-                ),
-                _OrderEditor(
-                  title: '${_teamAName.text} batting order',
-                  order: _teamA,
-                  players: selectedPlayers,
-                  jokerId: _jokerId,
-                  onReorder: (oldIndex, newIndex) => _move(_teamA, oldIndex, newIndex),
                 ),
                 const SizedBox(height: 18),
                 _RoleSelectors(
@@ -653,13 +649,6 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   players: selectedPlayers,
                   onCaptain: (value) => setState(() => _captainB = value),
                   onKeeper: (value) => setState(() => _keeperB = value),
-                ),
-                _OrderEditor(
-                  title: '${_teamBName.text} batting order',
-                  order: _teamB,
-                  players: selectedPlayers,
-                  jokerId: _jokerId,
-                  onReorder: (oldIndex, newIndex) => _move(_teamB, oldIndex, newIndex),
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
@@ -794,49 +783,6 @@ class _RoleSelectors extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    ],
-  );
-}
-
-class _OrderEditor extends StatelessWidget {
-  const _OrderEditor({
-    required this.title,
-    required this.order,
-    required this.players,
-    required this.jokerId,
-    required this.onReorder,
-  });
-
-  final String title;
-  final List<String> order;
-  final List<Player> players;
-  final String? jokerId;
-  final ReorderCallback onReorder;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const SizedBox(height: 12),
-      Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-      ReorderableListView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: order.length,
-        onReorder: onReorder,
-        itemBuilder: (context, index) {
-          final id = order[index];
-          final player = players.firstWhere((value) => value.id == id);
-          return ListTile(
-            key: ValueKey('$title-$id'),
-            contentPadding: EdgeInsets.zero,
-            leading: CircleAvatar(child: Text('${index + 1}')),
-            title: Text(player.name),
-            subtitle: jokerId == id ? const Text('🃏 Joker') : null,
-            trailing: const Icon(Icons.drag_handle_rounded),
-          );
-        },
       ),
     ],
   );

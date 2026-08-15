@@ -26,7 +26,8 @@ class TeamScorecardExport {
     for (final innings in match.innings) {
       final side = match.side(innings.battingTeamId);
       buffer.writeln(
-        '${side.name}: ${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)} '
+        '${TeamScoringEngine.inningsLabel(innings)} • ${side.name}: '
+        '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)} '
         '(${TeamScoringEngine.overLabel(match, innings)} ov)',
       );
     }
@@ -45,7 +46,6 @@ class TeamScorecardExport {
     final logoData = await rootBundle.load('assets/branding/cricxii_app_icon.png');
     final logo = pw.MemoryImage(logoData.buffer.asUint8List());
     final result = TeamScoringEngine.result(match);
-    final stats = TeamScoringEngine.appearanceStats(match);
     final pomId = TeamScoringEngine.playerOfMatchId(match);
     final pomPoints = pomId == null
         ? 0
@@ -119,16 +119,20 @@ class TeamScorecardExport {
             ),
           ),
           pw.SizedBox(height: 12),
-          pw.Row(
+          pw.Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              for (var index = 0; index < match.innings.length; index++) ...[
-                if (index > 0) pw.SizedBox(width: 8),
-                pw.Expanded(child: _inningsTile(match, match.innings[index], pale, ink, muted)),
-              ],
-              if (match.innings.length == 1) ...[
-                pw.SizedBox(width: 8),
-                pw.Expanded(child: _metricTile('INNINGS', 'In progress', pale, ink, muted)),
-              ],
+              for (final innings in match.innings)
+                pw.SizedBox(
+                  width: 165,
+                  child: _inningsTile(match, innings, pale, ink, muted),
+                ),
+              if (match.innings.length == 1)
+                pw.SizedBox(
+                  width: 165,
+                  child: _metricTile('INNINGS', 'In progress', pale, ink, muted),
+                ),
             ],
           ),
           pw.SizedBox(height: 12),
@@ -141,7 +145,6 @@ class TeamScorecardExport {
               match,
               innings,
               players,
-              stats,
               ink: ink,
               green: greenDark,
               muted: muted,
@@ -221,7 +224,7 @@ class TeamScorecardExport {
   static pw.Widget _inningsTile(TeamMatch match, TeamInnings innings, PdfColor pale, PdfColor ink, PdfColor muted) {
     final side = match.side(innings.battingTeamId);
     return _metricTile(
-      side.name.toUpperCase(),
+      '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} • ${side.name.toUpperCase()}',
       '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}  (${TeamScoringEngine.overLabel(match, innings)} ov)',
       pale,
       ink,
@@ -252,16 +255,20 @@ class TeamScorecardExport {
                 ? match.otherSide(toss.winnerTeamId!).id
                 : toss.winnerTeamId);
     final battingName = battingId == null ? 'Unknown team' : match.side(battingId).name;
+    String decisionLabel() => toss.decision == TeamTossDecision.bowl
+        ? 'elected to bowl'
+        : 'elected to bat';
     return switch (toss.mode) {
       TeamTossMode.inApp => toss.winnerTeamId == null
-          ? 'In-app toss • $battingName batting'
-          : '${match.side(toss.winnerTeamId!).name} won • $battingName batting',
+          ? 'In-app toss • $battingName batting first'
+          : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
       TeamTossMode.manual => toss.winnerTeamId == null
-          ? 'Manual toss • $battingName batting'
-          : 'Manual • ${match.side(toss.winnerTeamId!).name} won • $battingName batting',
-      TeamTossMode.skipped => 'No toss • $battingName batting',
-      TeamTossMode.previousWinnerChoice =>
-        'Previous winner chose • $battingName batting',
+          ? 'Manual toss • $battingName batting first'
+          : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
+      TeamTossMode.skipped => 'No toss • $battingName batting first',
+      TeamTossMode.previousWinnerChoice => toss.winnerTeamId == null
+          ? 'Previous winner choice • $battingName batting first'
+          : '${match.side(toss.winnerTeamId!).name} had the choice and ${decisionLabel()}',
     };
   }
 
@@ -305,8 +312,7 @@ class TeamScorecardExport {
   static pw.Widget _inningsSection(
     TeamMatch match,
     TeamInnings innings,
-    Map<String, Player> players,
-    Map<String, TeamPlayerMatchStats> allStats, {
+    Map<String, Player> players, {
     required PdfColor ink,
     required PdfColor green,
     required PdfColor muted,
@@ -315,9 +321,11 @@ class TeamScorecardExport {
   }) {
     final batting = match.side(innings.battingTeamId);
     final bowling = match.side(innings.bowlingTeamId);
+    final inningsStats = TeamScoringEngine.inningsAppearanceStats(match, innings);
     TeamPlayerMatchStats stat(String teamId, String playerId) =>
-        allStats['$teamId:$playerId'] ?? TeamPlayerMatchStats(playerId: playerId, teamId: teamId);
-    final battingRows = batting.battingOrder.map((id) {
+        inningsStats['$teamId:$playerId'] ??
+        TeamPlayerMatchStats(playerId: playerId, teamId: teamId);
+    final battingRows = TeamScoringEngine.battingDisplayOrder(match, innings).map((id) {
       final value = stat(batting.id, id);
       final status = value.dismissed
           ? 'out'
@@ -367,7 +375,7 @@ class TeamScorecardExport {
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         _section(
-          '${innings.index + 1}${innings.index == 0 ? 'ST' : 'ND'} INNINGS | ${batting.name.toUpperCase()} '
+          '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} | ${batting.name.toUpperCase()} '
           '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}',
           ink,
         ),

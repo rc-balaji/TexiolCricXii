@@ -102,7 +102,7 @@ class AppStore extends ChangeNotifier {
   }
 
   DailyPerformanceSummary performanceForDate(DateTime date) =>
-      DailyPerformanceSummary.build(date, matches);
+      DailyPerformanceSummary.build(date, matches, teamMatches);
 
   String suggestMatchTitle([DateTime? at]) {
     final now = at ?? DateTime.now();
@@ -1816,6 +1816,58 @@ class AppStore extends ChangeNotifier {
     await _commit(waitForCloud: true);
   }
 
+  Future<void> startTeamSuperOver(
+    String matchId, {
+    required String battingTeamId,
+    required String openingBowlerId,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchHost(match);
+    TeamScoringEngine.startSuperOver(
+      match,
+      battingTeamId: battingTeamId,
+      openingBowlerId: openingBowlerId,
+    );
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'super_over_started',
+        createdAt: DateTime.now(),
+        note: '${TeamScoringEngine.superOverCount(match)}:$battingTeamId:$openingBowlerId',
+      ),
+    );
+    await _commit(waitForCloud: true);
+  }
+
+  Future<void> completeTeamMatchAsTie(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchHost(match);
+    TeamScoringEngine.completeAsTie(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'team_match_tie_accepted', createdAt: DateTime.now()),
+    );
+    _applyTeamStatsIfComplete(match);
+    await _commit(waitForCloud: true);
+  }
+
+  Future<void> selectTeamNextBatter(String matchId, String playerId) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.currentInnings == null) {
+      throw StateError('Live Team Match not found.');
+    }
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.selectNextBatter(match, match.currentInnings!, playerId);
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_next_batter_selected',
+        playerId: playerId,
+        createdAt: DateTime.now(),
+      ),
+    );
+    await _commit();
+  }
+
   Future<void> selectTeamBowler(String matchId, String bowlerId) async {
     final match = teamMatchById(matchId);
     if (match == null || match.currentInnings == null) {
@@ -3339,7 +3391,7 @@ class AppStore extends ChangeNotifier {
         ..matches += 1
         ..runs += appearances.fold<int>(0, (total, value) => total + value.runs)
         ..balls += appearances.fold<int>(0, (total, value) => total + value.balls)
-        ..outs += appearances.where((value) => value.dismissed).length
+        ..outs += appearances.fold<int>(0, (total, value) => total + value.dismissals)
         ..wickets += appearances.fold<int>(0, (total, value) => total + value.wickets)
         ..catches += appearances.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts += appearances.fold<int>(
@@ -4076,7 +4128,7 @@ class AppStore extends ChangeNotifier {
         ..matches += 1
         ..runs += values.fold<int>(0, (total, value) => total + value.runs)
         ..balls += values.fold<int>(0, (total, value) => total + value.balls)
-        ..outs += values.where((value) => value.dismissed).length
+        ..outs += values.fold<int>(0, (total, value) => total + value.dismissals)
         ..wickets += values.fold<int>(0, (total, value) => total + value.wickets)
         ..catches += values.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts += values.fold<int>(
@@ -4116,7 +4168,7 @@ class AppStore extends ChangeNotifier {
         ..matches -= 1
         ..runs -= values.fold<int>(0, (total, value) => total + value.runs)
         ..balls -= values.fold<int>(0, (total, value) => total + value.balls)
-        ..outs -= values.where((value) => value.dismissed).length
+        ..outs -= values.fold<int>(0, (total, value) => total + value.dismissals)
         ..wickets -= values.fold<int>(0, (total, value) => total + value.wickets)
         ..catches -= values.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts -= values.fold<int>(

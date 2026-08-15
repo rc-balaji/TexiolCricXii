@@ -32,7 +32,9 @@ class _TeamMatchWatchScreenState extends State<TeamMatchWatchScreen> {
 
   Widget _controllerPage(TeamMatch match) => switch (match.status) {
         TeamMatchStatus.toss => TeamTossScreen(matchId: match.id),
-        TeamMatchStatus.live || TeamMatchStatus.inningsBreak =>
+        TeamMatchStatus.live ||
+        TeamMatchStatus.inningsBreak ||
+        TeamMatchStatus.tieBreak =>
           TeamLiveMatchScreen(matchId: match.id),
         TeamMatchStatus.completed => TeamMatchSummaryScreen(matchId: match.id),
       };
@@ -130,13 +132,26 @@ class _TeamMatchWatchScreenState extends State<TeamMatchWatchScreen> {
                       if (match.innings.isEmpty)
                         const Text('Waiting for match start', style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900))
                       else
-                        Row(
+                        Wrap(
+                          spacing: 20,
+                          runSpacing: 12,
                           children: match.innings.map((value) {
                             final side = match.side(value.battingTeamId);
-                            return Expanded(
+                            return SizedBox(
+                              width: 132,
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  Text(
+                                    TeamScoringEngine.inningsLabel(value),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: AppColors.gold,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                   Text(side.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFB8CCC2), fontSize: 12)),
                                   Text('${TeamScoringEngine.total(value)}/${TeamScoringEngine.wickets(value)}', style: const TextStyle(color: Colors.white, fontSize: 27, fontWeight: FontWeight.w900)),
                                   Text('${TeamScoringEngine.overLabel(match, value)} ov', style: const TextStyle(color: Color(0xFFB8CCC2), fontSize: 11)),
@@ -145,7 +160,8 @@ class _TeamMatchWatchScreenState extends State<TeamMatchWatchScreen> {
                             );
                           }).toList(),
                         ),
-                      if (match.status == TeamMatchStatus.completed) ...[
+                      if (match.status == TeamMatchStatus.completed ||
+                          match.status == TeamMatchStatus.tieBreak) ...[
                         const SizedBox(height: 14),
                         Text(result.summary, style: const TextStyle(color: AppColors.gold, fontSize: 16, fontWeight: FontWeight.w900)),
                       ] else if (innings?.target != null) ...[
@@ -209,8 +225,12 @@ class _StageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = switch (match.status) {
       TeamMatchStatus.toss => 'Start method not chosen',
-      TeamMatchStatus.live => 'Innings ${(match.currentInnings?.index ?? 0) + 1} in progress',
-      TeamMatchStatus.inningsBreak => 'Innings break • chase setup pending',
+      TeamMatchStatus.live =>
+        '${match.currentInnings == null ? 'Innings' : TeamScoringEngine.inningsLabel(match.currentInnings!)} in progress',
+      TeamMatchStatus.inningsBreak => match.currentInnings?.isSuperOver == true
+          ? 'Super Over ${match.currentInnings?.superOverNumber ?? 1} break • chase setup pending'
+          : 'Innings break • chase setup pending',
+      TeamMatchStatus.tieBreak => TeamScoringEngine.result(match).summary,
       TeamMatchStatus.completed => 'Match completed',
     };
     return Card(

@@ -1,7 +1,7 @@
 import 'cricket_match.dart';
 import 'enums.dart';
 
-enum TeamMatchStatus { toss, live, inningsBreak, completed }
+enum TeamMatchStatus { toss, live, inningsBreak, tieBreak, completed }
 
 enum TeamTossCall { heads, tails }
 
@@ -282,10 +282,17 @@ class TeamInnings {
     required this.startedAt,
     this.nonStrikerId,
     this.target,
-    this.nextBatterIndex = 2,
+    this.ballLimitOverride,
+    this.wicketLimitOverride,
+    this.isSuperOver = false,
+    this.superOverNumber,
     List<TeamDeliveryEvent>? events,
     List<String>? dismissedPlayerIds,
     Map<int, String>? bowlerByOver,
+    Map<int, String>? nextBatterByWicketSequence,
+    this.pendingNextBatterEnd,
+    this.pendingNextBatterWicketSequence,
+    this.swapAfterNextBatter = false,
     this.awaitingSoloDecision = false,
     this.soloMode = false,
     this.soloDeclined = false,
@@ -294,25 +301,42 @@ class TeamInnings {
     this.completedAt,
   }) : events = events ?? <TeamDeliveryEvent>[],
        dismissedPlayerIds = dismissedPlayerIds ?? <String>[],
-       bowlerByOver = bowlerByOver ?? <int, String>{};
+       bowlerByOver = bowlerByOver ?? <int, String>{},
+       nextBatterByWicketSequence =
+           nextBatterByWicketSequence ?? <int, String>{};
 
   final int index;
   final String battingTeamId;
   final String bowlingTeamId;
   final DateTime startedAt;
   final int? target;
+  final int? ballLimitOverride;
+  final int? wicketLimitOverride;
+  final bool isSuperOver;
+  final int? superOverNumber;
   final List<TeamDeliveryEvent> events;
   final List<String> dismissedPlayerIds;
   final Map<int, String> bowlerByOver;
+
+  /// The selected incoming batter for each wicket delivery. Persisting the
+  /// choice makes undo/rebuild deterministic without forcing a pre-match
+  /// batting order.
+  final Map<int, String> nextBatterByWicketSequence;
+
   String strikerId;
   String? nonStrikerId;
-  int nextBatterIndex;
+  String? pendingNextBatterEnd;
+  int? pendingNextBatterWicketSequence;
+  bool swapAfterNextBatter;
   bool awaitingSoloDecision;
   bool soloMode;
   bool soloDeclined;
   bool completed;
   String? completionReason;
   DateTime? completedAt;
+
+  bool get awaitingNextBatter =>
+      pendingNextBatterEnd != null && pendingNextBatterWicketSequence != null;
 
   Map<String, Object?> toJson() => {
     'index': index,
@@ -322,12 +346,21 @@ class TeamInnings {
     'nonStrikerId': nonStrikerId,
     'startedAt': startedAt.toIso8601String(),
     'target': target,
-    'nextBatterIndex': nextBatterIndex,
+    'ballLimitOverride': ballLimitOverride,
+    'wicketLimitOverride': wicketLimitOverride,
+    'isSuperOver': isSuperOver,
+    'superOverNumber': superOverNumber,
     'events': events.map((value) => value.toJson()).toList(),
     'dismissedPlayerIds': dismissedPlayerIds,
     'bowlerByOver': bowlerByOver.map(
       (key, value) => MapEntry(key.toString(), value),
     ),
+    'nextBatterByWicketSequence': nextBatterByWicketSequence.map(
+      (key, value) => MapEntry(key.toString(), value),
+    ),
+    'pendingNextBatterEnd': pendingNextBatterEnd,
+    'pendingNextBatterWicketSequence': pendingNextBatterWicketSequence,
+    'swapAfterNextBatter': swapAfterNextBatter,
     'awaitingSoloDecision': awaitingSoloDecision,
     'soloMode': soloMode,
     'soloDeclined': soloDeclined,
@@ -344,7 +377,10 @@ class TeamInnings {
     nonStrikerId: json['nonStrikerId'] as String?,
     startedAt: DateTime.parse(json['startedAt'] as String),
     target: json['target'] as int?,
-    nextBatterIndex: json['nextBatterIndex'] as int? ?? 2,
+    ballLimitOverride: json['ballLimitOverride'] as int?,
+    wicketLimitOverride: json['wicketLimitOverride'] as int?,
+    isSuperOver: json['isSuperOver'] as bool? ?? false,
+    superOverNumber: json['superOverNumber'] as int?,
     events: (json['events'] as List? ?? const [])
         .map(
           (value) => TeamDeliveryEvent.fromJson(
@@ -358,6 +394,13 @@ class TeamInnings {
     bowlerByOver: Map<String, dynamic>.from(
       json['bowlerByOver'] as Map? ?? const {},
     ).map((key, value) => MapEntry(int.parse(key), value.toString())),
+    nextBatterByWicketSequence: Map<String, dynamic>.from(
+      json['nextBatterByWicketSequence'] as Map? ?? const {},
+    ).map((key, value) => MapEntry(int.parse(key), value.toString())),
+    pendingNextBatterEnd: json['pendingNextBatterEnd'] as String?,
+    pendingNextBatterWicketSequence:
+        json['pendingNextBatterWicketSequence'] as int?,
+    swapAfterNextBatter: json['swapAfterNextBatter'] as bool? ?? false,
     awaitingSoloDecision:
         json['awaitingSoloDecision'] as bool? ?? false,
     soloMode: json['soloMode'] as bool? ?? false,
@@ -536,6 +579,7 @@ class TeamPlayerMatchStats {
   int fours = 0;
   int sixes = 0;
   bool dismissed = false;
+  int dismissals = 0;
   int wickets = 0;
   int ballsBowled = 0;
   int runsConceded = 0;

@@ -1,3 +1,16 @@
+# CricXii v1.5.0+21 — Live Batting Choices, Repeat Super Overs & Mixed Daily Reports
+
+- Removed mandatory pre-match Team batting-order setup; roster order is now only the default opening pair.
+- Added a blocking live **Choose next batter** prompt after every wicket that leaves a batting vacancy, with the choice persisted for deterministic undo/rebuild.
+- Hardened Team live prompts so next-batter, Last Player Standing and next-bowler modals cannot race and appear twice.
+- Added tied Team Match handling with a one-over, two-wicket Super Over and repeatable Super Overs until a round has a winner, plus an explicit Finish as tie option.
+- Extended Team scorecards, Watch/result views and player statistics across any number of Super Over innings.
+- Fixed repeated-innings dismissal and not-out accounting so Team career totals stay correct through multiple Super Overs.
+- Rebuilt Today Performance around `completedAt` and included completed Singles + Team Matches in one selectable report builder.
+- Added All / Singles / Team Match filters, per-match selection, dynamic report titles and mandatory at-least-one-match / at-least-one-section validation.
+- Added mixed multi-page CricXii PDF sections for combined rankings, player performance, match results, Singles rankings and detailed Team innings/batting/bowling/points.
+- Added regression coverage for live next-batter selection, undo persistence, repeat Super Overs and mixed Daily Performance selection/date rules.
+
 # CricXii v1.4.0+20 — Team Match Flow
 
 - Added players-first Team Match setup with search, selected-roster-only assignment and an optional Joker switch.

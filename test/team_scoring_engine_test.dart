@@ -38,6 +38,12 @@ void main() {
         isWicket: true,
         dismissalType: DismissalType.bowled,
       );
+      expect(match.currentInnings!.awaitingNextBatter, isTrue);
+      TeamScoringEngine.selectNextBatter(
+        match,
+        match.currentInnings!,
+        'a3',
+      );
       TeamScoringEngine.recordDelivery(
         match,
         eventId: 'w2',
@@ -60,6 +66,219 @@ void main() {
       expect(innings.soloMode, isTrue);
       expect(innings.strikerId, finalBatter);
       expect(innings.nonStrikerId, isNull);
+    });
+
+    test('wicket pauses scoring until the next batter is selected', () {
+      final match = _match(
+        teamAIds: const ['a1', 'a2', 'a3', 'a4'],
+        teamBIds: const ['b1', 'b2', 'b3', 'b4'],
+      );
+      _start(match, openingBowler: 'b1');
+
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'wicket-choice',
+        batRuns: 0,
+        isWicket: true,
+        dismissalType: DismissalType.bowled,
+      );
+      final innings = match.currentInnings!;
+      expect(innings.awaitingNextBatter, isTrue);
+      expect(TeamScoringEngine.availableNextBatters(match, innings), containsAll(['a3', 'a4']));
+      expect(
+        () => TeamScoringEngine.recordDelivery(
+          match,
+          eventId: 'blocked-before-choice',
+          batRuns: 1,
+        ),
+        throwsStateError,
+      );
+
+      TeamScoringEngine.selectNextBatter(match, innings, 'a4');
+      expect(innings.awaitingNextBatter, isFalse);
+      expect(innings.strikerId, 'a4');
+      expect(innings.nextBatterByWicketSequence[1], 'a4');
+      final restoredAfterChoice = TeamMatch.fromJson(
+        Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(match.toJson())) as Map,
+        ),
+      );
+      expect(
+        restoredAfterChoice.currentInnings!.nextBatterByWicketSequence[1],
+        'a4',
+      );
+
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'after-choice',
+        batRuns: 0,
+      );
+      expect(TeamScoringEngine.undoLast(match), isTrue);
+      expect(innings.awaitingNextBatter, isFalse);
+      expect(innings.strikerId, 'a4');
+      expect(innings.nextBatterByWicketSequence[1], 'a4');
+    });
+
+    test('repeated Super Overs stay available until a round has a winner', () {
+      final match = _match(ballLimit: 1, ballsPerOver: 1);
+      _start(match, openingBowler: 'b1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-a',
+        batRuns: 1,
+      );
+      TeamScoringEngine.startSecondInnings(
+        match,
+        openingBowlerId: 'a1',
+      );
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-b',
+        batRuns: 1,
+      );
+
+      expect(match.status, TeamMatchStatus.tieBreak);
+      expect(TeamScoringEngine.result(match).summary, contains('Super Over available'));
+
+      final firstSuperOver = TeamScoringEngine.startSuperOver(
+        match,
+        battingTeamId: match.teamA.id,
+        openingBowlerId: 'b1',
+      );
+      expect(firstSuperOver.isSuperOver, isTrue);
+      expect(firstSuperOver.superOverNumber, 1);
+      expect(firstSuperOver.ballLimitOverride, 1);
+      expect(firstSuperOver.wicketLimitOverride, 2);
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so1-a',
+        batRuns: 1,
+      );
+      expect(match.status, TeamMatchStatus.inningsBreak);
+
+      final firstSuperOverChase = TeamScoringEngine.startSecondInnings(
+        match,
+        openingBowlerId: 'a1',
+      );
+      expect(firstSuperOverChase.isSuperOver, isTrue);
+      expect(firstSuperOverChase.superOverNumber, 1);
+      expect(firstSuperOverChase.wicketLimitOverride, 2);
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so1-b',
+        batRuns: 1,
+      );
+
+      expect(match.status, TeamMatchStatus.tieBreak);
+      expect(TeamScoringEngine.result(match).summary, contains('another Super Over available'));
+
+      final secondSuperOver = TeamScoringEngine.startSuperOver(
+        match,
+        battingTeamId: match.teamB.id,
+        openingBowlerId: 'a1',
+      );
+      expect(secondSuperOver.superOverNumber, 2);
+      expect(TeamScoringEngine.superOverCount(match), 2);
+
+      final restored = TeamMatch.fromJson(
+        Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(match.toJson())) as Map,
+        ),
+      );
+      expect(restored.status, TeamMatchStatus.live);
+      expect(restored.innings.last.isSuperOver, isTrue);
+      expect(restored.innings.last.superOverNumber, 2);
+      expect(restored.innings.last.wicketLimitOverride, 2);
+    });
+
+    test('Super Over innings ends on the second wicket', () {
+      final match = _match(
+        ballLimit: 1,
+        ballsPerOver: 6,
+        quotaA: const {'a1': 6},
+        quotaB: const {'b1': 6},
+      );
+      _start(match, openingBowler: 'b1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-a-dot',
+        batRuns: 0,
+      );
+      expect(match.status, TeamMatchStatus.inningsBreak);
+      TeamScoringEngine.startSecondInnings(match, openingBowlerId: 'a1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-b-dot',
+        batRuns: 0,
+      );
+      expect(match.status, TeamMatchStatus.tieBreak);
+
+      final innings = TeamScoringEngine.startSuperOver(
+        match,
+        battingTeamId: match.teamA.id,
+        openingBowlerId: 'b1',
+      );
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so-w1',
+        batRuns: 0,
+        isWicket: true,
+        dismissalType: DismissalType.bowled,
+      );
+      expect(innings.awaitingNextBatter, isTrue);
+      TeamScoringEngine.selectNextBatter(match, innings, 'a3');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so-w2',
+        batRuns: 0,
+        isWicket: true,
+        dismissalType: DismissalType.bowled,
+      );
+
+      expect(TeamScoringEngine.wickets(innings), 2);
+      expect(innings.completed, isTrue);
+      expect(match.status, TeamMatchStatus.inningsBreak);
+    });
+
+    test('appearance stats keep Super Over not-out bonus after a main-innings dismissal', () {
+      final match = _match(ballLimit: 1, ballsPerOver: 1);
+      _start(match, openingBowler: 'b1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-a-out',
+        batRuns: 0,
+        isWicket: true,
+        dismissalType: DismissalType.bowled,
+      );
+      TeamScoringEngine.startSecondInnings(match, openingBowlerId: 'a1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'main-b-dot-stats',
+        batRuns: 0,
+      );
+      expect(match.status, TeamMatchStatus.tieBreak);
+
+      TeamScoringEngine.startSuperOver(
+        match,
+        battingTeamId: match.teamA.id,
+        openingBowlerId: 'b1',
+      );
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so-a-not-out',
+        batRuns: 0,
+      );
+      TeamScoringEngine.startSecondInnings(match, openingBowlerId: 'a1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'so-b-dot-stats',
+        batRuns: 0,
+      );
+
+      final stats = TeamScoringEngine.appearanceStats(match)['A:a1']!;
+      expect(stats.dismissals, 1);
+      expect(stats.dismissed, isTrue);
+      expect(stats.points, match.rules.pointRules.notOutBonus);
     });
 
     test('disabled extras are rejected per type', () {

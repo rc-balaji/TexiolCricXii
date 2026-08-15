@@ -26,7 +26,10 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
   bool _working = false;
   bool _soloDialogOpen = false;
   bool _bowlerSheetOpen = false;
+  bool _nextBatterSheetOpen = false;
   String? _breakBowlerId;
+  String? _superOverBattingTeamId;
+  String? _superOverBowlerId;
 
   String _message(Object error) =>
       '$error'.replaceFirst('Bad state: ', '').replaceFirst('Invalid argument(s): ', '');
@@ -81,7 +84,12 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
       );
       return;
     }
+    if (match.status == TeamMatchStatus.tieBreak) return;
     final innings = match.currentInnings;
+    if (innings?.awaitingNextBatter == true) {
+      await _chooseNextBatter(match);
+      return;
+    }
     if (innings?.awaitingSoloDecision == true) {
       await _askLastPlayer(match);
       return;
@@ -123,9 +131,8 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
         ),
       ),
     );
-    _soloDialogOpen = false;
-    if (continueSolo == null || !mounted) return;
     try {
+      if (continueSolo == null || !mounted) return;
       await AppScope.read(context).decideTeamLastPlayer(
         match.id,
         continueSolo: continueSolo,
@@ -133,6 +140,8 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
       if (mounted) await _afterMutation();
     } on Object catch (error) {
       _showError(error);
+    } finally {
+      _soloDialogOpen = false;
     }
   }
 
@@ -153,7 +162,8 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     final side = match.side(innings.bowlingTeamId);
     final used = TeamScoringEngine.bowlerBalls(innings, playerId);
     final quota = side.bowlingQuotaBalls[playerId] ?? 0;
-    final remaining = match.rules.ballLimit - TeamScoringEngine.legalBalls(innings);
+    final remaining = TeamScoringEngine.inningsBallLimit(match, innings) -
+        TeamScoringEngine.legalBalls(innings);
     final remainingInOver =
         match.rules.ballsPerOver - TeamScoringEngine.ballInOver(match, innings);
     final needed = min(remainingInOver, remaining);
@@ -226,12 +236,89 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
         );
       },
     );
-    _bowlerSheetOpen = false;
-    if (selected == null || !mounted) return;
     try {
+      if (selected == null || !mounted) return;
       await AppScope.read(context).selectTeamBowler(match.id, selected);
+      if (mounted) await _afterMutation();
     } on Object catch (error) {
       _showError(error);
+    } finally {
+      _bowlerSheetOpen = false;
+    }
+  }
+
+  Future<void> _chooseNextBatter(TeamMatch match) async {
+    if (_nextBatterSheetOpen || !mounted || match.currentInnings == null) return;
+    final innings = match.currentInnings!;
+    if (!innings.awaitingNextBatter) return;
+    final available = TeamScoringEngine.availableNextBatters(match, innings);
+    if (available.isEmpty) return;
+    _nextBatterSheetOpen = true;
+    final batting = match.side(innings.battingTeamId);
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (context) {
+        final store = AppScope.read(context);
+        return SafeArea(
+          child: SizedBox(
+            height: min(620.0, MediaQuery.sizeOf(context).height * .78),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.person_add_alt_1_rounded)),
+                  title: const Text(
+                    'Choose next batter',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  subtitle: Text(
+                    '${batting.name} • wicket ${innings.pendingNextBatterWicketSequence ?? ''}',
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: available.length,
+                    itemBuilder: (context, index) {
+                      final id = available[index];
+                      final player = store.playerById(id);
+                      return Card(
+                        child: ListTile(
+                          leading: player == null
+                              ? const CircleAvatar(child: Icon(Icons.person))
+                              : PlayerAvatar(player: player, radius: 20),
+                          title: Text(
+                            player?.name ?? id,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          subtitle: id == match.commonJokerPlayerId
+                              ? const Text('Joker • available to bat')
+                              : const Text('Available to bat'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () => Navigator.pop(context, id),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    try {
+      if (selected == null || !mounted) return;
+      await AppScope.read(context).selectTeamNextBatter(match.id, selected);
+      if (mounted) await _afterMutation();
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      _nextBatterSheetOpen = false;
     }
   }
 
@@ -322,11 +409,14 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
   }
 
   List<String> _openingBowlersForSecond(TeamMatch match) {
-    final first = match.innings.first;
+    final first = match.innings.last;
     final batting = match.side(first.bowlingTeamId);
     final bowling = match.side(first.battingTeamId);
     final batters = batting.battingOrder.take(2).toSet();
-    final needed = min(match.rules.ballsPerOver, match.rules.ballLimit);
+    final needed = min(
+      match.rules.ballsPerOver,
+      TeamScoringEngine.inningsBallLimit(match, first),
+    );
     return bowling.playerIds
         .where(
           (id) =>
@@ -351,6 +441,217 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  List<String> _eligibleOpeningBowlers(
+    TeamMatch match,
+    String battingTeamId, {
+    int? ballLimit,
+  }) {
+    final batting = match.side(battingTeamId);
+    final bowling = match.otherSide(battingTeamId);
+    final openingBatters = batting.battingOrder.take(2).toSet();
+    final needed = min(ballLimit ?? match.rules.ballsPerOver, match.rules.ballsPerOver);
+    return bowling.playerIds
+        .where(
+          (id) =>
+              !openingBatters.contains(id) &&
+              (bowling.bowlingQuotaBalls[id] ?? 0) >= needed,
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> _startSuperOver(TeamMatch match) async {
+    final battingTeamId = _superOverBattingTeamId ?? match.teamA.id;
+    final bowlerId = _superOverBowlerId;
+    if (bowlerId == null || _working) return;
+    setState(() => _working = true);
+    try {
+      await AppScope.read(context).startTeamSuperOver(
+        match.id,
+        battingTeamId: battingTeamId,
+        openingBowlerId: bowlerId,
+      );
+      if (mounted) {
+        setState(() {
+          _superOverBattingTeamId = null;
+          _superOverBowlerId = null;
+        });
+      }
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _acceptTie(TeamMatch match) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Finish as a tie?'),
+        content: const Text(
+          'The match will be completed as tied. You can start another Super Over instead.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep tie-break open'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Finish as tie'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _working) return;
+    setState(() => _working = true);
+    try {
+      await AppScope.read(context).completeTeamMatchAsTie(match.id);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TeamMatchSummaryScreen(matchId: match.id),
+        ),
+      );
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Widget _buildTieBreak(BuildContext context, TeamMatch match) {
+    final store = AppScope.of(context);
+    final host = store.isTeamMatchHost(match);
+    if (!host) return TeamMatchWatchScreen(matchId: match.id);
+
+    final battingTeamId = _superOverBattingTeamId ?? match.teamA.id;
+    final bowling = match.otherSide(battingTeamId);
+    final bowlers = _eligibleOpeningBowlers(
+      match,
+      battingTeamId,
+      ballLimit: match.rules.ballsPerOver,
+    );
+    final selectedBowlerId = bowlers.contains(_superOverBowlerId)
+        ? _superOverBowlerId
+        : null;
+    final nextNumber = TeamScoringEngine.superOverCount(match) + 1;
+    final result = TeamScoringEngine.result(match);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Tie-break • Super Over $nextNumber'),
+        actions: [TeamMatchSyncIndicator(matchId: match.id)],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: AppColors.ink,
+              borderRadius: BorderRadius.circular(26),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.bolt_rounded, color: AppColors.gold, size: 38),
+                const SizedBox(height: 10),
+                Text(
+                  result.summary,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  'Super Over $nextNumber uses ${match.rules.ballsPerOver} legal balls and ends at 2 wickets. If it ties, another Super Over becomes available.',
+                  style: const TextStyle(color: Color(0xFFB8CCC2)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Super Over $nextNumber setup',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: ValueKey('super-over-$nextNumber-batting-$battingTeamId'),
+            initialValue: battingTeamId,
+            decoration: const InputDecoration(labelText: 'Team batting first'),
+            items: [match.teamA, match.teamB]
+                .map(
+                  (side) => DropdownMenuItem(
+                    value: side.id,
+                    child: Text(side.name),
+                  ),
+                )
+                .toList(),
+            onChanged: _working
+                ? null
+                : (value) => setState(() {
+                      _superOverBattingTeamId = value;
+                      _superOverBowlerId = null;
+                    }),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: ValueKey(
+              'super-over-$nextNumber-bowler-$battingTeamId-$selectedBowlerId',
+            ),
+            initialValue: selectedBowlerId,
+            decoration: InputDecoration(
+              labelText: '${bowling.name} opening bowler',
+            ),
+            items: bowlers
+                .map(
+                  (id) => DropdownMenuItem(
+                    value: id,
+                    child: Text(store.playerById(id)?.name ?? id),
+                  ),
+                )
+                .toList(),
+            onChanged: _working
+                ? null
+                : (value) => setState(() => _superOverBowlerId = value),
+          ),
+          if (bowlers.isEmpty) ...[
+            const SizedBox(height: 10),
+            const Text(
+              'No eligible opening bowler. Adjust bowling limits or make sure the Joker is not one of the default opening batters.',
+              style: TextStyle(color: AppColors.danger),
+            ),
+          ],
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            onPressed: _working || selectedBowlerId == null
+                ? null
+                : () => _startSuperOver(match),
+            icon: _working
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow_rounded),
+            label: Text('Start Super Over $nextNumber'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _working ? null : () => _acceptTie(match),
+            icon: const Icon(Icons.handshake_rounded),
+            label: const Text('Finish match as tie'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _editQuotas(TeamMatch match) async {
@@ -472,6 +773,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     if (match.status == TeamMatchStatus.completed) {
       return TeamMatchSummaryScreen(matchId: match.id);
     }
+    if (match.status == TeamMatchStatus.tieBreak) {
+      return _buildTieBreak(context, match);
+    }
     if (!store.canControlTeamMatch(match)) {
       return TeamMatchWatchScreen(matchId: match.id);
     }
@@ -493,17 +797,23 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     final total = TeamScoringEngine.total(innings);
     final wickets = TeamScoringEngine.wickets(innings);
     final freeHit = TeamScoringEngine.isFreeHitDelivery(match, innings);
+    final battingPromptPending =
+        innings.awaitingNextBatter || innings.awaitingSoloDecision;
     final recent = innings.events.reversed.take(12).toList().reversed.toList();
 
-    if (innings.awaitingSoloDecision && !_soloDialogOpen) {
+    final anyPromptOpen =
+        _nextBatterSheetOpen || _soloDialogOpen || _bowlerSheetOpen || _working;
+    if (!anyPromptOpen && innings.awaitingNextBatter) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _chooseNextBatter(match));
+    } else if (!anyPromptOpen && innings.awaitingSoloDecision) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askLastPlayer(match));
-    } else if (bowlerId == null && !_bowlerSheetOpen) {
+    } else if (!anyPromptOpen && bowlerId == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _chooseBowler(match));
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(innings.index == 0 ? '1st Innings' : '2nd Innings'),
+        title: Text(TeamScoringEngine.inningsLabel(innings)),
         actions: [
           TeamMatchSyncIndicator(matchId: match.id),
           PopupMenuButton<String>(
@@ -543,7 +853,7 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
                       ),
                     ),
                     Text(
-                      '${TeamScoringEngine.overLabel(match, innings)} / ${match.rules.ballLimit ~/ match.rules.ballsPerOver} ov',
+                      '${TeamScoringEngine.overLabel(match, innings)} / ${TeamScoringEngine.inningsBallLimit(match, innings) ~/ match.rules.ballsPerOver} ov',
                       style: const TextStyle(color: Color(0xFFB8CCC2), fontWeight: FontWeight.w700),
                     ),
                   ],
@@ -557,7 +867,7 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
                 Text(
                   innings.target == null
                       ? 'Extras ${TeamScoringEngine.extras(innings)} • ${bowling.name} bowling'
-                      : 'Target ${innings.target} • Need ${max(0, innings.target! - total)} from ${max(0, match.rules.ballLimit - TeamScoringEngine.legalBalls(innings))} balls',
+                      : 'Target ${innings.target} • Need ${max(0, innings.target! - total)} from ${max(0, TeamScoringEngine.inningsBallLimit(match, innings) - TeamScoringEngine.legalBalls(innings))} balls',
                   style: const TextStyle(color: Color(0xFFB8CCC2)),
                 ),
                 if (innings.soloMode || freeHit) ...[
@@ -622,7 +932,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
                       minimumSize: const Size(0, 48),
                       backgroundColor: run == 4 || run == 6 ? AppColors.greenDark : AppColors.ink,
                     ),
-                    onPressed: _working || bowlerId == null ? null : () => _record(batRuns: run),
+                    onPressed: _working || bowlerId == null || battingPromptPending
+                        ? null
+                        : () => _record(batRuns: run),
                     child: Text('$run', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
                   ),
                 )
@@ -633,7 +945,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _working || bowlerId == null ? null : () => _showExtras(match),
+                  onPressed: _working || bowlerId == null || battingPromptPending
+                      ? null
+                      : () => _showExtras(match),
                   icon: const Icon(Icons.add_circle_outline_rounded),
                   label: const Text('Extras'),
                 ),
@@ -642,7 +956,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-                  onPressed: _working || bowlerId == null ? null : () => _showWicket(match),
+                  onPressed: _working || bowlerId == null || battingPromptPending
+                      ? null
+                      : () => _showWicket(match),
                   icon: const Icon(Icons.close_rounded),
                   label: const Text('Wicket'),
                 ),
@@ -655,7 +971,14 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
             icon: const Icon(Icons.undo_rounded),
             label: const Text('Undo last ball'),
           ),
-          if (bowlerId == null) ...[
+          if (innings.awaitingNextBatter) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => _chooseNextBatter(match),
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: const Text('Choose next batter to continue'),
+            ),
+          ] else if (bowlerId == null) ...[
             const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: () => _chooseBowler(match),
@@ -688,7 +1011,7 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
 
   Widget _buildInningsBreak(BuildContext context, TeamMatch match) {
     final store = AppScope.of(context);
-    final first = match.innings.first;
+    final first = match.innings.last;
     final firstBatting = match.side(first.battingTeamId);
     final chase = match.side(first.bowlingTeamId);
     final bowling = match.side(first.battingTeamId);
@@ -698,7 +1021,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Innings Break'),
+        title: Text(first.isSuperOver
+            ? 'Super Over ${first.superOverNumber ?? 1} Break'
+            : 'Innings Break'),
         actions: [TeamMatchSyncIndicator(matchId: match.id)],
       ),
       body: ListView(
@@ -724,13 +1049,17 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
             ),
           ),
           const SizedBox(height: 22),
-          Text('Start the chase', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          Text(first.isSuperOver ? 'Start Super Over chase' : 'Start the chase', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           Text('${chase.name} batting • ${bowling.name} bowling', style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
             initialValue: _breakBowlerId,
-            decoration: const InputDecoration(labelText: 'Second innings opening bowler'),
+            decoration: InputDecoration(
+              labelText: first.isSuperOver
+                  ? 'Super Over chase opening bowler'
+                  : 'Second innings opening bowler',
+            ),
             items: bowlers.map((id) {
               final player = store.playerById(id);
               return DropdownMenuItem(
