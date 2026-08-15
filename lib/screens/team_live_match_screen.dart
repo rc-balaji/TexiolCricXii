@@ -480,7 +480,9 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     }
     final innings = match.currentInnings;
     if (innings == null) {
-      return const Scaffold(body: Center(child: Text('Complete the toss to start.')));
+      return const Scaffold(
+        body: Center(child: Text('Choose how the Team Match starts first.')),
+      );
     }
     final bowlerId = TeamScoringEngine.currentBowlerId(match, innings);
     final bowler = store.playerById(bowlerId);

@@ -1,18 +1,25 @@
-# CricXii v1.3.0 — Team Match
+# CricXii v1.4.0 — Team Match Flow
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.3.0+19` keeps the complete Singles experience and adds production-ready Team Match scoring while remaining Firebase Spark-friendly.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.4.0+20` keeps the complete Singles experience and upgrades Team Match setup, toss, rematches, awards and profile history while remaining Firebase Spark-friendly.
 
 ## Team Match features
 
 - Flexible team sizes with no eleven-player cap.
+- Players-first setup with search: choose only the people playing now, then assign those players to teams.
 - Optional shared **Joker** who appears for both teams, keeps separate per-side appearances and combined personal performance, and cannot bowl to themselves.
-- Animated 3D toss coin, call/result reveal, bat-or-bowl decision and opening-bowler selection.
+- Automatic editable names such as **Team Match 2**, **Team Match 3** and **Team Match 4**.
+- Four start paths: timed in-app toss, physical/manual toss, skip toss, or let the previous winner choose Bat/Bowl.
+- The in-app toss chooses a flipping team, assigns the other team as caller, spins for three seconds, accepts one Heads/Tails call only during the countdown, and reveals only after time ends.
+- A missed timed call can restart the same toss, reset the full start flow, or skip directly to first-batting selection.
 - Optional Wide, No-ball, Bye, Leg bye, Penalty and Free Hit rules configured per match.
 - Individual bowling limits, over-level bowler selection, exhausted-quota blocking and optional consecutive overs.
 - **Last Player Standing** prompt when one batter remains. In solo mode the same batter stays on strike after odd runs and over changes.
 - Live player photos, score/target state, innings break, participant Watch mode and controller-device lease.
 - Completed Team Match history and career stats for every participant, including cloud status on each history card.
 - Result cloud sync is informative, not blocking: leave for Home at any time, then use **Sync now / Sync again** from result or History.
+- Result offers a linked next match with either the same teams or a fresh player/team review. Linked matches retain series points.
+- Point-based **Player of the Match**, **Player of Today** and **Player of the Series** awards.
+- Profile stats and history use **All / Singles / Team Match** filters; Singles and Team records remain separate in storage.
 - Adaptive multi-page Team Match PDF with result, toss, innings scorecards, batting, bowling, extras, fall of wickets, Joker and local rules.
 
 ## V1 Singles features
@@ -42,7 +49,7 @@ Singles matches are no longer private to the creator device while they are in pr
 
 The host remains the only controller for scoring, undo, order changes, player additions, bowler replacement and cancellation. Watch mode uses a single match-document listener only while that screen is open. Completed matches remain the permanent source for each participant's applicable History and career-stat rebuild. Existing Build 15 creator-owned matches migrate using the same Match IDs.
 
-Team Matches use the equivalent canonical `teamMatches/{matchId}` channel. The host owns setup/toss, while the selected scorer can run live innings under the same single-device lease. Participant discovery, Watch, completed History, manual retry and recent-first pagination apply to both match formats.
+Team Matches use the equivalent canonical `teamMatches/{matchId}` channel. The host owns setup/start choice, while the selected scorer can run live innings under the same single-device lease. Linked rematches carry `seriesId`, `previousMatchId` and `seriesMatchNumber` inside the canonical Team Match JSON. Participant discovery, Watch, completed History, manual retry and recent-first pagination apply to both match formats.
 
 ## v1.2 hardening
 

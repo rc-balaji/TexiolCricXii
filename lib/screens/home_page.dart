@@ -564,13 +564,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     children: [
                       Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
                       SizedBox(width: 9),
-                      Text('TEAM MATCH • V1.3', style: TextStyle(color: Color(0xFFA56600), fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                      Text('TEAM MATCH • V1.4', style: TextStyle(color: Color(0xFFA56600), fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: .8)),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text('Build teams. Flip the toss. Play.', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+                  const Text('Pick players. Choose the start. Play.', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
                   const SizedBox(height: 5),
-                  const Text('Flexible team sizes, Joker player, bowling limits, optional extras and Last Player Standing.', style: TextStyle(color: AppColors.muted, height: 1.35)),
+                  const Text('Players-first teams, optional Joker, timed/manual/no toss, bowling limits and linked rematches.', style: TextStyle(color: AppColors.muted, height: 1.35)),
                   const SizedBox(height: 15),
                   FilledButton.icon(
                     onPressed: () => Navigator.of(context).push(

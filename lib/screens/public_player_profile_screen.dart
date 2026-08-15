@@ -15,10 +15,21 @@ Future<void> openPlayerProfile(BuildContext context, String playerId) async {
   );
 }
 
-class PublicPlayerProfileScreen extends StatelessWidget {
+enum _PublicStatsFilter { all, singles, team }
+
+class PublicPlayerProfileScreen extends StatefulWidget {
   const PublicPlayerProfileScreen({required this.playerId, super.key});
 
   final String playerId;
+
+  @override
+  State<PublicPlayerProfileScreen> createState() =>
+      _PublicPlayerProfileScreenState();
+}
+
+class _PublicPlayerProfileScreenState
+    extends State<PublicPlayerProfileScreen> {
+  _PublicStatsFilter _filter = _PublicStatsFilter.all;
 
   Future<void> _openSocial(BuildContext context, String value, {bool instagram = false}) async {
     final raw = value.trim();
@@ -41,7 +52,7 @@ class PublicPlayerProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final player = store.playerById(playerId);
+    final player = store.playerById(widget.playerId);
     final viewer = store.activePlayer;
     if (player == null) {
       return const Scaffold(body: Center(child: Text('Player not found')));
@@ -89,6 +100,16 @@ class PublicPlayerProfileScreen extends StatelessWidget {
             : null,
       ),
     ];
+    int scopedStat(int singles, int team) => switch (_filter) {
+      _PublicStatsFilter.all => singles + team,
+      _PublicStatsFilter.singles => singles,
+      _PublicStatsFilter.team => team,
+    };
+    final scopeLabel = switch (_filter) {
+      _PublicStatsFilter.all => 'All cricket stats',
+      _PublicStatsFilter.singles => 'Singles stats',
+      _PublicStatsFilter.team => 'Team Match stats',
+    };
     return Scaffold(
       appBar: AppBar(title: const Text('Player profile')),
       body: ListView(
@@ -178,7 +199,28 @@ class PublicPlayerProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const SectionLabel('Singles stats'),
+          SegmentedButton<_PublicStatsFilter>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(
+                value: _PublicStatsFilter.all,
+                label: Text('All'),
+              ),
+              ButtonSegment(
+                value: _PublicStatsFilter.singles,
+                label: Text('Singles'),
+              ),
+              ButtonSegment(
+                value: _PublicStatsFilter.team,
+                label: Text('Team Match'),
+              ),
+            ],
+            selected: {_filter},
+            onSelectionChanged: (value) =>
+                setState(() => _filter = value.single),
+          ),
+          const SizedBox(height: 16),
+          SectionLabel(scopeLabel),
           const SizedBox(height: 10),
           GridView.count(
             crossAxisCount: 2,
@@ -190,23 +232,39 @@ class PublicPlayerProfileScreen extends StatelessWidget {
             children: [
               MetricTile(
                 label: 'Matches',
-                value: '${player.stats.matches}',
+                value:
+                    '${scopedStat(player.stats.matches, player.teamStats.matches)}',
                 icon: Icons.sports_cricket_rounded,
               ),
               MetricTile(
                 label: 'Runs',
-                value: '${player.stats.runs}',
+                value:
+                    '${scopedStat(player.stats.runs, player.teamStats.runs)}',
                 icon: Icons.show_chart_rounded,
               ),
               MetricTile(
                 label: 'Points',
-                value: '${player.stats.points}',
+                value:
+                    '${scopedStat(player.stats.points, player.teamStats.points)}',
                 icon: Icons.bolt_rounded,
               ),
               MetricTile(
                 label: 'Wickets',
-                value: '${player.stats.wickets}',
+                value:
+                    '${scopedStat(player.stats.wickets, player.teamStats.wickets)}',
                 icon: Icons.sports_baseball_rounded,
+              ),
+              MetricTile(
+                label: 'Catches',
+                value:
+                    '${scopedStat(player.stats.catches, player.teamStats.catches)}',
+                icon: Icons.back_hand_outlined,
+              ),
+              MetricTile(
+                label: 'Wins',
+                value:
+                    '${scopedStat(player.stats.wins, player.teamStats.wins)}',
+                icon: Icons.emoji_events_outlined,
               ),
             ],
           ),
@@ -266,18 +324,6 @@ class PublicPlayerProfileScreen extends StatelessWidget {
                     title: Text('No contact details shared with you'),
                   ),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Opacity(
-            opacity: .65,
-            child: Card(
-              child: ListTile(
-                leading: Icon(Icons.groups_2_outlined),
-                title: Text('Team match records'),
-                subtitle: Text('Coming soon'),
-                trailing: Chip(label: Text('SOON')),
-              ),
             ),
           ),
         ],

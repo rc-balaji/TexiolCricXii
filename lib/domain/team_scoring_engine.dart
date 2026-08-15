@@ -6,12 +6,12 @@ class TeamScoringEngine {
 
   static int total(TeamInnings innings) => innings.events.fold<int>(
     0,
-    (sum, event) => sum + event.totalRuns,
+    (totalRuns, event) => totalRuns + event.totalRuns,
   );
 
   static int extras(TeamInnings innings) => innings.events.fold<int>(
     0,
-    (sum, event) => sum + event.extraRuns,
+    (extraTotal, event) => extraTotal + event.extraRuns,
   );
 
   static int legalBalls(TeamInnings innings) =>
@@ -86,7 +86,7 @@ class TeamScoringEngine {
     for (final side in [match.teamA, match.teamB]) {
       final coverage = side.bowlingQuotaBalls.values.fold<int>(
         0,
-        (sum, value) => sum + value,
+        (totalBalls, value) => totalBalls + value,
       );
       if (coverage < match.rules.ballLimit) {
         throw StateError(
@@ -120,11 +120,65 @@ class TeamScoringEngine {
     DateTime? at,
   }) {
     final toss = match.toss;
-    if (toss == null) throw StateError('Complete the toss first.');
-    final tossWinner = match.side(toss.winnerTeamId);
-    final batting = toss.decision == TeamTossDecision.bat
-        ? tossWinner
-        : match.otherSide(tossWinner.id);
+    if (toss == null) throw StateError('Choose how this match starts first.');
+    bool validTeam(String? id) => id == match.teamA.id || id == match.teamB.id;
+    switch (toss.mode) {
+      case TeamTossMode.inApp:
+        if (!validTeam(toss.callerTeamId) ||
+            toss.call == null ||
+            toss.result == null ||
+            !validTeam(toss.winnerTeamId) ||
+            toss.decision == null) {
+          throw StateError('Complete the timed toss before starting.');
+        }
+        if (toss.tosserTeamId != null &&
+            (!validTeam(toss.tosserTeamId) ||
+                toss.tosserTeamId == toss.callerTeamId)) {
+          throw StateError('Choose different flipping and calling teams.');
+        }
+        final expectedTossWinner = toss.call == toss.result
+            ? toss.callerTeamId!
+            : match.otherSide(toss.callerTeamId!).id;
+        if (toss.winnerTeamId != expectedTossWinner) {
+          throw StateError('The timed toss winner does not match the call.');
+        }
+        break;
+      case TeamTossMode.manual:
+        if (!validTeam(toss.winnerTeamId) || toss.decision == null) {
+          throw StateError('Record the real toss winner and decision.');
+        }
+        break;
+      case TeamTossMode.skipped:
+        if (toss.winnerTeamId != null || toss.decision != null) {
+          throw StateError('A skipped toss cannot contain a toss winner.');
+        }
+        break;
+      case TeamTossMode.previousWinnerChoice:
+        if (!validTeam(toss.winnerTeamId) || toss.decision == null) {
+          throw StateError('Record the previous winner’s Bat or Bowl choice.');
+        }
+        break;
+    }
+    final legacyWinnerId = toss.winnerTeamId;
+    final firstBattingTeamId = toss.firstBattingTeamId ??
+        (legacyWinnerId == null
+            ? null
+            : toss.decision == TeamTossDecision.bowl
+                ? match.otherSide(legacyWinnerId).id
+                : legacyWinnerId);
+    if (firstBattingTeamId != match.teamA.id &&
+        firstBattingTeamId != match.teamB.id) {
+      throw StateError('Select which team bats first.');
+    }
+    if (legacyWinnerId != null && toss.decision != null) {
+      final expectedBattingTeamId = toss.decision == TeamTossDecision.bat
+          ? legacyWinnerId
+          : match.otherSide(legacyWinnerId).id;
+      if (firstBattingTeamId != expectedBattingTeamId) {
+        throw StateError('The first batting team does not match the decision.');
+      }
+    }
+    final batting = match.side(firstBattingTeamId!);
     final bowling = match.otherSide(batting.id);
     final innings = _newInnings(
       match,
@@ -681,10 +735,29 @@ class TeamScoringEngine {
   }
 
   static String? playerOfMatchId(TeamMatch match) {
+    return topPlayerId([match]);
+  }
+
+  static Map<String, int> aggregatePlayerPoints(
+    Iterable<TeamMatch> matches,
+  ) {
     final totals = <String, int>{};
-    for (final stats in appearanceStats(match).values) {
-      totals[stats.playerId] = (totals[stats.playerId] ?? 0) + stats.points;
+    for (final match in matches.where(
+      (value) => value.status == TeamMatchStatus.completed,
+    )) {
+      for (final stats in appearanceStats(match).values) {
+        totals[stats.playerId] =
+            (totals[stats.playerId] ?? 0) + stats.points;
+      }
     }
+    return totals;
+  }
+
+  static String? topPlayerId(Iterable<TeamMatch> matches) {
+    return topPlayerFromPoints(aggregatePlayerPoints(matches));
+  }
+
+  static String? topPlayerFromPoints(Map<String, int> totals) {
     if (totals.isEmpty) return null;
     final entries = totals.entries.toList()
       ..sort((a, b) {
@@ -693,6 +766,11 @@ class TeamScoringEngine {
       });
     return entries.first.key;
   }
+
+  static int pointsForPlayer(
+    Iterable<TeamMatch> matches,
+    String playerId,
+  ) => aggregatePlayerPoints(matches)[playerId] ?? 0;
 }
 
 extension _FirstOrNull<T> on List<T> {

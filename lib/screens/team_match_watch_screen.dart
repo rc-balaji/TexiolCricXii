@@ -128,7 +128,7 @@ class _TeamMatchWatchScreenState extends State<TeamMatchWatchScreen> {
                       Text('${match.teamA.name} vs ${match.teamB.name}', style: const TextStyle(color: Color(0xFFB8CCC2))),
                       const SizedBox(height: 18),
                       if (match.innings.isEmpty)
-                        const Text('Waiting for the toss', style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900))
+                        const Text('Waiting for match start', style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900))
                       else
                         Row(
                           children: match.innings.map((value) {
@@ -208,7 +208,7 @@ class _StageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = switch (match.status) {
-      TeamMatchStatus.toss => 'Toss not completed',
+      TeamMatchStatus.toss => 'Start method not chosen',
       TeamMatchStatus.live => 'Innings ${(match.currentInnings?.index ?? 0) + 1} in progress',
       TeamMatchStatus.inningsBreak => 'Innings break • chase setup pending',
       TeamMatchStatus.completed => 'Match completed',

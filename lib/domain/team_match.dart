@@ -7,6 +7,8 @@ enum TeamTossCall { heads, tails }
 
 enum TeamTossDecision { bat, bowl }
 
+enum TeamTossMode { inApp, manual, skipped, previousWinnerChoice }
+
 class TeamMatchRules {
   const TeamMatchRules({
     required this.ballLimit,
@@ -135,37 +137,58 @@ class TeamSide {
 
 class TeamToss {
   const TeamToss({
-    required this.callerTeamId,
-    required this.call,
-    required this.result,
-    required this.winnerTeamId,
-    required this.decision,
     required this.createdAt,
+    this.mode = TeamTossMode.inApp,
+    this.tosserTeamId,
+    this.callerTeamId,
+    this.call,
+    this.result,
+    this.winnerTeamId,
+    this.decision,
+    this.firstBattingTeamId,
   });
 
-  final String callerTeamId;
-  final TeamTossCall call;
-  final TeamTossCall result;
-  final String winnerTeamId;
-  final TeamTossDecision decision;
+  final TeamTossMode mode;
+  final String? tosserTeamId;
+  final String? callerTeamId;
+  final TeamTossCall? call;
+  final TeamTossCall? result;
+  final String? winnerTeamId;
+  final TeamTossDecision? decision;
+  final String? firstBattingTeamId;
   final DateTime createdAt;
 
   Map<String, Object?> toJson() => {
+    'mode': mode.name,
+    'tosserTeamId': tosserTeamId,
     'callerTeamId': callerTeamId,
-    'call': call.name,
-    'result': result.name,
+    'call': call?.name,
+    'result': result?.name,
     'winnerTeamId': winnerTeamId,
-    'decision': decision.name,
+    'decision': decision?.name,
+    'firstBattingTeamId': firstBattingTeamId,
     'createdAt': createdAt.toIso8601String(),
   };
 
   factory TeamToss.fromJson(Map<String, dynamic> json) => TeamToss(
-    callerTeamId: json['callerTeamId'] as String,
-    call: TeamTossCall.values.byName(json['call'] as String),
-    result: TeamTossCall.values.byName(json['result'] as String),
-    winnerTeamId: json['winnerTeamId'] as String,
-    decision: TeamTossDecision.values.byName(json['decision'] as String),
     createdAt: DateTime.parse(json['createdAt'] as String),
+    mode: TeamTossMode.values.firstWhere(
+      (value) => value.name == json['mode'],
+      orElse: () => TeamTossMode.inApp,
+    ),
+    tosserTeamId: json['tosserTeamId'] as String?,
+    callerTeamId: json['callerTeamId'] as String?,
+    call: json['call'] == null
+        ? null
+        : TeamTossCall.values.byName(json['call'] as String),
+    result: json['result'] == null
+        ? null
+        : TeamTossCall.values.byName(json['result'] as String),
+    winnerTeamId: json['winnerTeamId'] as String?,
+    decision: json['decision'] == null
+        ? null
+        : TeamTossDecision.values.byName(json['decision'] as String),
+    firstBattingTeamId: json['firstBattingTeamId'] as String?,
   );
 }
 
@@ -356,7 +379,10 @@ class TeamMatch {
     required this.teamB,
     required this.rules,
     required this.createdAt,
+    String? seriesId,
     this.originToken,
+    this.previousMatchId,
+    this.seriesMatchNumber = 1,
     this.commonJokerPlayerId,
     this.trackerPlayerId,
     this.status = TeamMatchStatus.toss,
@@ -370,11 +396,15 @@ class TeamMatch {
     this.controllerLeaseUntil,
     this.revision = 0,
     this.statsApplied = false,
-  }) : innings = innings ?? <TeamInnings>[],
+  }) : seriesId = seriesId ?? id,
+       innings = innings ?? <TeamInnings>[],
        auditTrail = auditTrail ?? <MatchAuditEntry>[];
 
   final String id;
   final String? originToken;
+  final String seriesId;
+  final String? previousMatchId;
+  final int seriesMatchNumber;
   String title;
   final String creatorPlayerId;
   final TeamSide teamA;
@@ -414,6 +444,9 @@ class TeamMatch {
   Map<String, Object?> toJson() => {
     'id': id,
     'originToken': originToken,
+    'seriesId': seriesId,
+    'previousMatchId': previousMatchId,
+    'seriesMatchNumber': seriesMatchNumber,
     'title': title,
     'creatorPlayerId': creatorPlayerId,
     'teamA': teamA.toJson(),
@@ -438,6 +471,9 @@ class TeamMatch {
   factory TeamMatch.fromJson(Map<String, dynamic> json) => TeamMatch(
     id: json['id'] as String,
     originToken: json['originToken'] as String?,
+    seriesId: json['seriesId'] as String?,
+    previousMatchId: json['previousMatchId'] as String?,
+    seriesMatchNumber: json['seriesMatchNumber'] as int? ?? 1,
     title: json['title'] as String,
     creatorPlayerId: json['creatorPlayerId'] as String,
     teamA: TeamSide.fromJson(

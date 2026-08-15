@@ -1,4 +1,4 @@
-# CricXii v1.3.0 architecture
+# CricXii v1.4.0 architecture
 
 ## Identity
 
@@ -17,7 +17,7 @@ Firebase Anonymous Authentication remains an invisible transport/session layer. 
 
 The private `accountStates/{playerId}` document remains a device/account recovery cache; it is not the source of truth for another player's match access.
 
-`teamMatches/{matchId}` is the equivalent canonical Team Match record. It stores both teams, rules, Joker identity, toss, innings, individual bowling limits, score events, audit state and controller lease. Team Match JSON is excluded from `accountStates`, preventing stale private snapshots from resurrecting an older innings.
+`teamMatches/{matchId}` is the equivalent canonical Team Match record. It stores both teams, rules, Joker identity, start/toss mode, innings, individual bowling limits, score events, audit state and controller lease. Linked rematches store `seriesId`, `previousMatchId` and `seriesMatchNumber`, allowing Series awards to be rebuilt without a second cloud collection. Team Match JSON is excluded from `accountStates`, preventing stale private snapshots from resurrecting an older innings.
 
 ## Cross-device behavior
 
@@ -33,6 +33,8 @@ The private `accountStates/{playerId}` document remains a device/account recover
 Career Singles stats are rebuilt only from completed matches in which the active Player ID participated. Match creator identity does not affect career credit.
 
 Team career stats are rebuilt separately. A Joker's two team appearances are combined for personal runs/points, but the Joker receives no win because they represented both sides.
+
+The profile layer selects either Singles stats, Team stats, or a read-time sum for All. It does not merge the two persisted career ledgers.
 
 ## Spark-read discipline
 

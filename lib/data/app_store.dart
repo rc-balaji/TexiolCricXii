@@ -123,6 +123,15 @@ class AppStore extends ChangeNotifier {
     return '$period Match $number';
   }
 
+  String suggestTeamMatchTitle() {
+    final creatorId = activePlayerId;
+    final number = teamMatches
+            .where((match) => match.creatorPlayerId == creatorId)
+            .length +
+        1;
+    return 'Team Match $number';
+  }
+
   List<Player> get visiblePlayers => players
       .where((player) => !player.archived)
       .toList(growable: false);
@@ -1677,9 +1686,22 @@ class AppStore extends ChangeNotifier {
     required TeamMatchRules rules,
     String? commonJokerPlayerId,
     String? trackerPlayerId,
+    String? previousMatchId,
   }) async {
     final creator = activePlayer;
     if (creator == null) throw StateError('Sign in first.');
+    final previous = previousMatchId == null
+        ? null
+        : teamMatchById(previousMatchId);
+    if (previousMatchId != null && previous == null) {
+      throw StateError('The previous Team Match could not be found.');
+    }
+    if (previous != null && previous.status != TeamMatchStatus.completed) {
+      throw StateError('Complete the previous Team Match before starting the next one.');
+    }
+    if (previous != null && previous.creatorPlayerId != creator.id) {
+      throw StateError('Only the Team Match host can continue its series.');
+    }
     final ids = <String>{...teamA.playerIds, ...teamB.playerIds};
     if (ids.any((id) => playerById(id) == null)) {
       throw StateError('Every selected team member needs a valid Player ID.');
@@ -1697,10 +1719,24 @@ class AppStore extends ChangeNotifier {
       creatorPlayerId: creator.id,
       originToken: originToken,
     );
+    final seriesId = previous?.seriesId ?? id;
+    var highestSeriesMatchNumber = 0;
+    for (final value in teamMatches) {
+      if (value.seriesId == seriesId &&
+          value.seriesMatchNumber > highestSeriesMatchNumber) {
+        highestSeriesMatchNumber = value.seriesMatchNumber;
+      }
+    }
+    final seriesMatchNumber = previous == null
+        ? 1
+        : highestSeriesMatchNumber + 1;
     final match = TeamMatch(
       id: id,
       originToken: originToken,
-      title: title.trim().isEmpty ? suggestMatchTitle() : title.trim(),
+      seriesId: seriesId,
+      previousMatchId: previous?.id,
+      seriesMatchNumber: seriesMatchNumber,
+      title: title.trim().isEmpty ? suggestTeamMatchTitle() : title.trim(),
       creatorPlayerId: creator.id,
       teamA: teamA,
       teamB: teamB,
@@ -1714,7 +1750,11 @@ class AppStore extends ChangeNotifier {
     );
     TeamScoringEngine.validateSetup(match);
     match.auditTrail.add(
-      MatchAuditEntry(type: 'team_match_created', createdAt: match.createdAt),
+      MatchAuditEntry(
+        type: previous == null ? 'team_match_created' : 'team_next_match_created',
+        createdAt: match.createdAt,
+        note: previous?.id,
+      ),
     );
     teamMatches.add(match);
     await _commit(waitForCloud: true);
@@ -1730,18 +1770,30 @@ class AppStore extends ChangeNotifier {
     if (match == null) throw StateError('Team Match not found.');
     await _requireTeamMatchHost(match);
     if (match.status != TeamMatchStatus.toss || match.toss != null) {
-      throw StateError('The toss is already complete.');
+      throw StateError('The match start choice is already complete.');
     }
     match.toss = toss;
-    TeamScoringEngine.startFirstInnings(
-      match,
-      openingBowlerId: openingBowlerId,
-    );
+    try {
+      TeamScoringEngine.startFirstInnings(
+        match,
+        openingBowlerId: openingBowlerId,
+      );
+    } on Object {
+      match.toss = null;
+      rethrow;
+    }
     match.auditTrail.add(
       MatchAuditEntry(
-        type: 'team_toss_completed',
+        type: switch (toss.mode) {
+          TeamTossMode.inApp => 'team_toss_completed',
+          TeamTossMode.manual => 'team_manual_toss_recorded',
+          TeamTossMode.skipped => 'team_toss_skipped',
+          TeamTossMode.previousWinnerChoice =>
+            'team_previous_winner_choice',
+        },
         createdAt: toss.createdAt,
-        note: '${toss.winnerTeamId}:${toss.decision.name}',
+        note:
+            '${toss.winnerTeamId ?? 'none'}:${toss.decision?.name ?? 'firstBat'}:${toss.firstBattingTeamId ?? 'unknown'}',
       ),
     );
     await _commit(waitForCloud: true);
@@ -3058,7 +3110,7 @@ class AppStore extends ChangeNotifier {
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] = switch (error.code) {
           'permission-denied' =>
-            'Firestore rules blocked match sync. Deploy the included v1.3 rules.',
+            'Firestore rules blocked match sync. Deploy the included rules.',
           'unavailable' || 'deadline-exceeded' || 'network-request-failed' =>
             'Network unavailable - the match is saved locally and waiting to sync.',
           _ => 'Match sync failed: ${error.message ?? error.code}',
@@ -3223,7 +3275,7 @@ class AppStore extends ChangeNotifier {
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] = switch (error.code) {
           'permission-denied' =>
-            'Firestore rules blocked Team Match sync. Deploy v1.3 rules.',
+            'Firestore rules blocked Team Match sync. Deploy the included rules.',
           'unavailable' || 'deadline-exceeded' || 'network-request-failed' =>
             'Offline - Team Match is saved locally and waiting to sync.',
           _ => 'Team Match sync failed: ${error.message ?? error.code}',
@@ -3381,7 +3433,7 @@ class AppStore extends ChangeNotifier {
           (value) => value.creatorPlayerId == playerId,
         )) {
           _matchSyncErrors[match.id] =
-              'Firestore rules blocked Team Match refresh. Deploy v1.3 rules.';
+              'Firestore rules blocked Team Match refresh. Deploy the included rules.';
         }
       }
     }

@@ -20,6 +20,7 @@ class TeamScorecardExport {
       ..writeln('CRICXII TEAM MATCH')
       ..writeln(match.title)
       ..writeln('${match.teamA.name} vs ${match.teamB.name}')
+      ..writeln('Series match ${match.seriesMatchNumber}')
       ..writeln('Match ID: ${match.id}')
       ..writeln();
     for (final innings in match.innings) {
@@ -46,6 +47,9 @@ class TeamScorecardExport {
     final result = TeamScoringEngine.result(match);
     final stats = TeamScoringEngine.appearanceStats(match);
     final pomId = TeamScoringEngine.playerOfMatchId(match);
+    final pomPoints = pomId == null
+        ? 0
+        : TeamScoringEngine.pointsForPlayer([match], pomId);
     const ink = PdfColor.fromInt(0xFF071A13);
     const green = PdfColor.fromInt(0xFF19C37D);
     const greenDark = PdfColor.fromInt(0xFF087A4B);
@@ -84,7 +88,7 @@ class TeamScorecardExport {
           ),
           pw.SizedBox(height: 3),
           pw.Text(
-            '${_date(match.createdAt)}  |  Match ID ${match.id}',
+            '${_date(match.createdAt)}  |  Series match ${match.seriesMatchNumber}  |  Match ID ${match.id}',
             style: const pw.TextStyle(color: muted, fontSize: 8.5),
           ),
           pw.SizedBox(height: 12),
@@ -107,7 +111,7 @@ class TeamScorecardExport {
                 if (pomId != null) ...[
                   pw.SizedBox(height: 4),
                   pw.Text(
-                    'Player of the Match: ${players[pomId]?.name ?? pomId}',
+                    'Player of the Match: ${players[pomId]?.name ?? pomId} • $pomPoints pts',
                     style: const pw.TextStyle(color: PdfColors.white, fontSize: 9),
                   ),
                 ],
@@ -238,17 +242,37 @@ class TeamScorecardExport {
         ),
       );
 
-  static pw.Widget _details(TeamMatch match, PdfColor pale, PdfColor ink, PdfColor muted) {
+  static String _tossLabel(TeamMatch match) {
     final toss = match.toss;
+    if (toss == null) return 'Pending';
+    final battingId = toss.firstBattingTeamId ??
+        (toss.winnerTeamId == null
+            ? null
+            : toss.decision == TeamTossDecision.bowl
+                ? match.otherSide(toss.winnerTeamId!).id
+                : toss.winnerTeamId);
+    final battingName = battingId == null ? 'Unknown team' : match.side(battingId).name;
+    return switch (toss.mode) {
+      TeamTossMode.inApp => toss.winnerTeamId == null
+          ? 'In-app toss • $battingName batting'
+          : '${match.side(toss.winnerTeamId!).name} won • $battingName batting',
+      TeamTossMode.manual => toss.winnerTeamId == null
+          ? 'Manual toss • $battingName batting'
+          : 'Manual • ${match.side(toss.winnerTeamId!).name} won • $battingName batting',
+      TeamTossMode.skipped => 'No toss • $battingName batting',
+      TeamTossMode.previousWinnerChoice =>
+        'Previous winner chose • $battingName batting',
+    };
+  }
+
+  static pw.Widget _details(TeamMatch match, PdfColor pale, PdfColor ink, PdfColor muted) {
     final joker = match.commonJokerPlayerId;
     return pw.Row(
       children: [
         pw.Expanded(
           child: _metricTile(
             'TOSS',
-            toss == null
-                ? 'Pending'
-                : '${match.side(toss.winnerTeamId).name} chose to ${toss.decision.name}',
+            _tossLabel(match),
             pale,
             ink,
             muted,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
 import '../domain/team_match.dart';
 import '../theme/app_theme.dart';
@@ -15,6 +16,8 @@ import 'team_match_summary_screen.dart';
 import 'player_management_screen.dart';
 import 'profile_edit_screen.dart';
 
+enum _ProfileMatchFilter { all, singles, team }
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -23,7 +26,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  bool _teamHistory = false;
+  _ProfileMatchFilter _filter = _ProfileMatchFilter.all;
   bool _refreshingHistory = false;
   bool _loadingOlderHistory = false;
 
@@ -47,10 +50,17 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_loadingOlderHistory) return;
     setState(() => _loadingOlderHistory = true);
     final store = AppScope.read(context);
-    if (_teamHistory) {
-      await store.loadOlderTeamMatchHistory();
-    } else {
-      await store.loadOlderMatchHistory();
+    switch (_filter) {
+      case _ProfileMatchFilter.all:
+        await store.loadOlderMatchHistory();
+        await store.loadOlderTeamMatchHistory();
+        break;
+      case _ProfileMatchFilter.singles:
+        await store.loadOlderMatchHistory();
+        break;
+      case _ProfileMatchFilter.team:
+        await store.loadOlderTeamMatchHistory();
+        break;
     }
     if (!mounted) return;
     setState(() => _loadingOlderHistory = false);
@@ -92,6 +102,65 @@ class _ProfilePageState extends State<ProfilePage> {
     return '${months[date.month - 1]} ${date.year}';
   }
 
+  Widget _singleHistoryCard(BuildContext context, CricketMatch match) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 9),
+        child: Card(
+          child: ListTile(
+            leading: const Icon(
+              Icons.emoji_events_outlined,
+              color: AppColors.greenDark,
+            ),
+            title: Text(
+              match.title,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            subtitle: Text('${match.id} • ${match.scoringMode.label}'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MatchSyncIndicator(matchId: match.id),
+                const Icon(Icons.chevron_right_rounded),
+              ],
+            ),
+            onTap: () => _open(
+              context,
+              MatchSummaryScreen(matchId: match.id),
+            ),
+          ),
+        ),
+      );
+
+  Widget _teamHistoryCard(BuildContext context, TeamMatch match) => Padding(
+    padding: const EdgeInsets.only(bottom: 9),
+    child: Card(
+      child: ListTile(
+        leading: const Icon(
+          Icons.groups_2_rounded,
+          color: Color(0xFFA56600),
+        ),
+        title: Text(
+          match.title,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+          '${match.teamA.name} vs ${match.teamB.name} • ${match.id}',
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TeamMatchSyncIndicator(matchId: match.id),
+            const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
+        onTap: () => _open(
+          context,
+          TeamMatchSummaryScreen(matchId: match.id),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -121,6 +190,16 @@ class _ProfilePageState extends State<ProfilePage> {
         final bDate = b.completedAt ?? b.createdAt;
         return bDate.compareTo(aDate);
       });
+    int scopedStat(int singles, int team) => switch (_filter) {
+      _ProfileMatchFilter.all => singles + team,
+      _ProfileMatchFilter.singles => singles,
+      _ProfileMatchFilter.team => team,
+    };
+    final scopeLabel = switch (_filter) {
+      _ProfileMatchFilter.all => 'All cricket',
+      _ProfileMatchFilter.singles => 'Singles',
+      _ProfileMatchFilter.team => 'Team Match',
+    };
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
@@ -281,8 +360,29 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           const SizedBox(height: 24),
+          SegmentedButton<_ProfileMatchFilter>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(
+                value: _ProfileMatchFilter.all,
+                label: Text('All'),
+              ),
+              ButtonSegment(
+                value: _ProfileMatchFilter.singles,
+                label: Text('Singles'),
+              ),
+              ButtonSegment(
+                value: _ProfileMatchFilter.team,
+                label: Text('Team Match'),
+              ),
+            ],
+            selected: {_filter},
+            onSelectionChanged: (value) =>
+                setState(() => _filter = value.single),
+          ),
+          const SizedBox(height: 18),
           SectionLabel(
-            'Singles career stats',
+            '$scopeLabel career stats',
             trailing: IconButton(
               tooltip: 'Refresh shared match history',
               onPressed: _refreshingHistory ? null : () => _refreshHistory(context),
@@ -306,97 +406,123 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               MetricTile(
                 label: 'Runs',
-                value: '${player.stats.runs}',
+                value:
+                    '${scopedStat(player.stats.runs, player.teamStats.runs)}',
                 icon: Icons.show_chart_rounded,
               ),
               MetricTile(
                 label: 'Points',
-                value: '${player.stats.points}',
+                value:
+                    '${scopedStat(player.stats.points, player.teamStats.points)}',
                 icon: Icons.bolt_rounded,
               ),
               MetricTile(
                 label: 'Wickets',
-                value: '${player.stats.wickets}',
+                value:
+                    '${scopedStat(player.stats.wickets, player.teamStats.wickets)}',
                 icon: Icons.sports_baseball_rounded,
               ),
               MetricTile(
                 label: 'Catches',
-                value: '${player.stats.catches}',
+                value:
+                    '${scopedStat(player.stats.catches, player.teamStats.catches)}',
                 icon: Icons.back_hand_outlined,
               ),
               MetricTile(
                 label: 'Matches',
-                value: '${player.stats.matches}',
-                icon: Icons.calendar_month_rounded,
+                value:
+                    '${scopedStat(player.stats.matches, player.teamStats.matches)}',
+                icon: _filter == _ProfileMatchFilter.team
+                    ? Icons.groups_2_rounded
+                    : Icons.calendar_month_rounded,
               ),
               MetricTile(
                 label: 'Wins',
-                value: '${player.stats.wins}',
+                value:
+                    '${scopedStat(player.stats.wins, player.teamStats.wins)}',
                 icon: Icons.emoji_events_outlined,
               ),
             ],
           ),
           const SizedBox(height: 24),
-          const SectionLabel('Team career stats'),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 1.55,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              MetricTile(label: 'Runs', value: '${player.teamStats.runs}', icon: Icons.show_chart_rounded),
-              MetricTile(label: 'Points', value: '${player.teamStats.points}', icon: Icons.bolt_rounded),
-              MetricTile(label: 'Wickets', value: '${player.teamStats.wickets}', icon: Icons.sports_baseball_rounded),
-              MetricTile(label: 'Catches', value: '${player.teamStats.catches}', icon: Icons.back_hand_outlined),
-              MetricTile(label: 'Matches', value: '${player.teamStats.matches}', icon: Icons.groups_2_rounded),
-              MetricTile(label: 'Wins', value: '${player.teamStats.wins}', icon: Icons.emoji_events_outlined),
-            ],
-          ),
-          const SizedBox(height: 24),
           const SectionLabel('Records & history'),
-          const SizedBox(height: 10),
-          SegmentedButton<bool>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: false, label: Text('Singles')),
-              ButtonSegment(value: true, label: Text('Team')),
-            ],
-            selected: {_teamHistory},
-            onSelectionChanged: (value) =>
-                setState(() => _teamHistory = value.single),
-          ),
           const SizedBox(height: 12),
-          if (_teamHistory && teamHistory.isEmpty)
+          if (_filter == _ProfileMatchFilter.all) ...[
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'SINGLES HISTORY',
+                style: TextStyle(
+                  color: AppColors.greenDark,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: .7,
+                ),
+              ),
+            ),
+            const SizedBox(height: 7),
+            if (history.isEmpty)
+              const Card(
+                child: ListTile(
+                  leading: Icon(Icons.history_rounded),
+                  title: Text('No completed Singles matches yet'),
+                ),
+              )
+            else
+              ...history.map((match) => _singleHistoryCard(context, match)),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'TEAM MATCH HISTORY',
+                style: TextStyle(
+                  color: Color(0xFFA56600),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: .7,
+                ),
+              ),
+            ),
+            const SizedBox(height: 7),
+            if (teamHistory.isEmpty)
+              const Card(
+                child: ListTile(
+                  leading: Icon(Icons.groups_2_outlined),
+                  title: Text('No completed Team Matches yet'),
+                ),
+              )
+            else
+              ...teamHistory.map(
+                (match) => _teamHistoryCard(context, match),
+              ),
+            if (store.hasOlderMatchHistory ||
+                store.hasOlderTeamMatchHistory)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: OutlinedButton.icon(
+                  onPressed: _loadingOlderHistory
+                      ? null
+                      : () => _loadOlderHistory(context),
+                  icon: _loadingOlderHistory
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.history_rounded),
+                  label: const Text('Load older history'),
+                ),
+              ),
+          ] else if (_filter == _ProfileMatchFilter.team &&
+              teamHistory.isEmpty)
             const Card(
               child: ListTile(
                 leading: Icon(Icons.groups_2_outlined),
                 title: Text('No completed Team Matches yet'),
               ),
             )
-          else if (_teamHistory) ...[
-            ...teamHistory.map(
-              (match) => Padding(
-                padding: const EdgeInsets.only(bottom: 9),
-                child: Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
-                    title: Text(match.title, style: const TextStyle(fontWeight: FontWeight.w900)),
-                    subtitle: Text('${match.teamA.name} vs ${match.teamB.name} • ${match.id}'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TeamMatchSyncIndicator(matchId: match.id),
-                        const Icon(Icons.chevron_right_rounded),
-                      ],
-                    ),
-                    onTap: () => _open(context, TeamMatchSummaryScreen(matchId: match.id)),
-                  ),
-                ),
-              ),
-            ),
+          else if (_filter == _ProfileMatchFilter.team) ...[
+            ...teamHistory.map((match) => _teamHistoryCard(context, match)),
             if (store.hasOlderTeamMatchHistory)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -408,8 +534,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   label: const Text('Load older Team Matches'),
                 ),
               ),
-          ]
-          else if (history.isEmpty)
+          ] else if (history.isEmpty)
             const Card(
               child: ListTile(
                 leading: Icon(Icons.history_rounded),
@@ -417,35 +542,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             )
           else ...[
-            ...history.map(
-              (match) => Padding(
-                padding: const EdgeInsets.only(bottom: 9),
-                child: Card(
-                  child: ListTile(
-                    leading: const Icon(
-                      Icons.emoji_events_outlined,
-                      color: AppColors.greenDark,
-                    ),
-                    title: Text(
-                      match.title,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    subtitle: Text('${match.id} • ${match.scoringMode.label}'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        MatchSyncIndicator(matchId: match.id),
-                        const Icon(Icons.chevron_right_rounded),
-                      ],
-                    ),
-                    onTap: () => _open(
-                      context,
-                      MatchSummaryScreen(matchId: match.id),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            ...history.map((match) => _singleHistoryCard(context, match)),
             if (store.hasOlderMatchHistory)
               Padding(
                 padding: const EdgeInsets.only(top: 4),

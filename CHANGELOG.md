@@ -1,3 +1,15 @@
+# CricXii v1.4.0+20 — Team Match Flow
+
+- Added players-first Team Match setup with search, selected-roster-only assignment and an optional Joker switch.
+- Added automatic editable Team Match numbering.
+- Added timed three-second in-app toss with explicit flipper/caller roles, during-spin Heads/Tails locking, delayed reveal and missed-call recovery.
+- Added physical/manual toss, no-toss first-batting selection and previous-winner Bat/Bowl start paths.
+- Added linked next-match creation with same-team quick rematch or full player/team changes.
+- Added persistent series identity and match numbering for rematch chains.
+- Added point-based Player of the Match, Player of Today and Player of the Series result awards.
+- Added All, Singles and Team Match filters to own and public profile statistics; own history keeps the two formats visibly separate.
+- Updated Team Match PDF toss text for every start mode and expanded domain regression coverage.
+
 # CricXii v1.3.0+19 — Team Match
 
 - Added flexible Team Match creation with unlimited team size, batting orders, captains, keepers and an optional shared Joker.

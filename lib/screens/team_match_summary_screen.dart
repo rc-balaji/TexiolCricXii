@@ -8,6 +8,9 @@ import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/team_match_sync_indicator.dart';
+import 'create_team_match_screen.dart';
+
+enum _NextTeamMatchChoice { sameTeams, changeTeams }
 
 class TeamMatchSummaryScreen extends StatefulWidget {
   const TeamMatchSummaryScreen({required this.matchId, super.key});
@@ -21,6 +24,7 @@ class TeamMatchSummaryScreen extends StatefulWidget {
 class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
   bool _exporting = false;
   bool _syncing = false;
+  bool _openingNextMatch = false;
 
   Map<String, Player> _players(TeamMatch match) {
     final store = AppScope.read(context);
@@ -102,6 +106,31 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
 
   void _home() => Navigator.of(context).popUntil((route) => route.isFirst);
 
+  bool _sameDay(DateTime left, DateTime right) =>
+      left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+
+  Future<void> _createNextMatch(
+    TeamMatch match, {
+    required _NextTeamMatchChoice choice,
+  }) async {
+    if (!mounted || _openingNextMatch) return;
+    setState(() => _openingNextMatch = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CreateTeamMatchScreen(
+            templateMatchId: match.id,
+            quickRematch: choice == _NextTeamMatchChoice.sameTeams,
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingNextMatch = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -110,8 +139,27 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
       return const Scaffold(body: Center(child: Text('Team Match not found')));
     }
     final result = TeamScoringEngine.result(match);
-    final pomId = TeamScoringEngine.playerOfMatchId(match);
-    final pom = store.playerById(pomId);
+    final completedAt = match.completedAt ?? match.createdAt;
+    final todayMatches = store.teamMatches
+        .where(
+          (value) =>
+              value.status == TeamMatchStatus.completed &&
+              _sameDay(value.completedAt ?? value.createdAt, completedAt),
+        )
+        .toList(growable: false);
+    final seriesMatches = store.teamMatches
+        .where(
+          (value) =>
+              value.status == TeamMatchStatus.completed &&
+              value.seriesId == match.seriesId,
+        )
+        .toList(growable: false);
+    final matchPoints = TeamScoringEngine.aggregatePlayerPoints([match]);
+    final todayPoints = TeamScoringEngine.aggregatePlayerPoints(todayMatches);
+    final seriesPoints = TeamScoringEngine.aggregatePlayerPoints(seriesMatches);
+    final pomId = TeamScoringEngine.topPlayerFromPoints(matchPoints);
+    final todayPlayerId = TeamScoringEngine.topPlayerFromPoints(todayPoints);
+    final seriesPlayerId = TeamScoringEngine.topPlayerFromPoints(seriesPoints);
     final synced = store.isTeamMatchSynced(match.id);
     final error = store.matchSyncError(match.id);
 
@@ -145,6 +193,15 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.green, fontSize: 18, fontWeight: FontWeight.w900),
                 ),
+                const SizedBox(height: 5),
+                Text(
+                  'Series match ${match.seriesMatchNumber}',
+                  style: const TextStyle(
+                    color: Color(0xFFB8CCC2),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 18),
                 Row(
                   children: match.innings.map((innings) {
@@ -166,19 +223,42 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
               ],
             ),
           ),
-          if (pomId != null) ...[
+          if (pomId != null || todayPlayerId != null || seriesPlayerId != null) ...[
             const SizedBox(height: 14),
-            Card(
-              color: const Color(0xFFFFF7E4),
-              child: ListTile(
-                leading: pom == null
-                    ? const CircleAvatar(child: Icon(Icons.star_rounded))
-                    : PlayerAvatar(player: pom, radius: 23),
-                title: const Text('Player of the Match', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-                subtitle: Text(pom?.name ?? pomId, style: const TextStyle(color: AppColors.ink, fontSize: 18, fontWeight: FontWeight.w900)),
-                trailing: const Icon(Icons.star_rounded, color: AppColors.gold),
+            Text(
+              'Point awards',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
               ),
             ),
+            const SizedBox(height: 8),
+            if (pomId != null)
+              _AwardCard(
+                label: 'Player of the Match',
+                player: store.playerById(pomId),
+                playerId: pomId,
+                points: matchPoints[pomId] ?? 0,
+                detail: 'This match',
+                icon: Icons.star_rounded,
+              ),
+            if (todayPlayerId != null)
+              _AwardCard(
+                label: 'Player of Today',
+                player: store.playerById(todayPlayerId),
+                playerId: todayPlayerId,
+                points: todayPoints[todayPlayerId] ?? 0,
+                detail: '${todayMatches.length} Team Match${todayMatches.length == 1 ? '' : 'es'} today',
+                icon: Icons.today_rounded,
+              ),
+            if (seriesPlayerId != null)
+              _AwardCard(
+                label: 'Player of the Series',
+                player: store.playerById(seriesPlayerId),
+                playerId: seriesPlayerId,
+                points: seriesPoints[seriesPlayerId] ?? 0,
+                detail: '${seriesMatches.length} match${seriesMatches.length == 1 ? '' : 'es'} in this series',
+                icon: Icons.workspace_premium_rounded,
+              ),
           ],
           const SizedBox(height: 14),
           Card(
@@ -222,6 +302,62 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
               ),
             ),
           ),
+          if (store.isTeamMatchHost(match)) ...[
+            const SizedBox(height: 12),
+            Card(
+              color: const Color(0xFFEAF4FF),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Play the next Team Match?',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Keep the same teams or review today’s players and build new teams. Both continue this Series.',
+                      style: TextStyle(color: AppColors.muted, height: 1.35),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _openingNextMatch
+                                ? null
+                                : () => _createNextMatch(
+                                    match,
+                                    choice: _NextTeamMatchChoice.changeTeams,
+                                  ),
+                            icon: const Icon(Icons.groups_rounded),
+                            label: const Text('Change teams'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _openingNextMatch
+                                ? null
+                                : () => _createNextMatch(
+                                    match,
+                                    choice: _NextTeamMatchChoice.sameTeams,
+                                  ),
+                            icon: const Icon(Icons.replay_rounded),
+                            label: const Text('Same teams'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           Text('Scorecards', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
@@ -263,6 +399,60 @@ class _TeamMatchSummaryScreenState extends State<TeamMatchSummaryScreen> {
       ),
     );
   }
+}
+
+class _AwardCard extends StatelessWidget {
+  const _AwardCard({
+    required this.label,
+    required this.player,
+    required this.playerId,
+    required this.points,
+    required this.detail,
+    required this.icon,
+  });
+
+  final String label;
+  final Player? player;
+  final String playerId;
+  final int points;
+  final String detail;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    color: const Color(0xFFFFF7E4),
+    child: ListTile(
+      leading: player == null
+          ? CircleAvatar(child: Icon(icon))
+          : PlayerAvatar(player: player!, radius: 23),
+      title: Text(
+        label,
+        style: const TextStyle(color: AppColors.muted, fontSize: 12),
+      ),
+      subtitle: Text(
+        player?.name ?? playerId,
+        style: const TextStyle(
+          color: AppColors.ink,
+          fontSize: 17,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            '$points pts',
+            style: const TextStyle(
+              color: Color(0xFFA56600),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(detail, style: const TextStyle(fontSize: 9)),
+        ],
+      ),
+    ),
+  );
 }
 
 class _InningsScorecard extends StatelessWidget {

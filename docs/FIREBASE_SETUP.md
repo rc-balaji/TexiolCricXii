@@ -1,4 +1,4 @@
-# Firebase setup — CricXii v1.3.0
+# Firebase setup — CricXii v1.4.0
 
 ## Authentication
 
@@ -22,14 +22,14 @@ npx --yes firebase-tools@latest deploy --project crixx-59eca --only "firestore:r
 
 The included indexes cover recent-first `matches` and `teamMatches` participant history (`participantIds` array membership plus descending `activityAt`).
 
-The v1.3 rules intentionally allow an authenticated CricXii session to perform an exact `get` for a random Match ID or deterministic Friend Request pair ID. This is needed because Firestore transactions read a document before deciding whether to create it. Collection queries remain participant-scoped; the rules are not globally open.
+The included rules intentionally allow an authenticated CricXii session to perform an exact `get` for a random Match ID or deterministic Friend Request pair ID. This is needed because Firestore transactions read a document before deciding whether to create it. Collection queries remain participant-scoped; the rules are not globally open.
 
 
 ## Shared-history migration test
 
 - Keep the original creator account/device data from Build 14 or older.
 - Deploy the new Firestore rules first.
-- Open v1.3.0 as the creator and press Profile → Singles career stats → Sync if needed.
+- Open v1.4.0 as the creator and press Profile → All → Sync if needed.
 - Confirm `matches/{matchId}` documents are created once with `creatorPlayerId` and all `participantIds`.
 - Sign in as a registered participant on another device/account.
 - Confirm their own Profile shows the applicable completed matches and rebuilt Runs/Points/Wickets/Catches/Matches/Wins even though they did not create those matches.

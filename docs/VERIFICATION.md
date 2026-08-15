@@ -1,4 +1,4 @@
-# CricXii v1.3.0 verification
+# CricXii v1.4.0 verification
 
 Required scenarios:
 
@@ -25,3 +25,12 @@ Required scenarios:
 8. Reopen the result from History, press Sync now, and verify the icon changes to cloud-done after rules/indexes are deployed.
 9. Sign in as a participant on another phone and confirm Team Match Watch updates without scoring controls.
 10. Send and accept a Friend Request to confirm pre-create exact-document reads no longer return permission-denied.
+11. With a large friend list, search/select only the current players and confirm only that roster reaches team assignment.
+12. Confirm Joker is absent until enabled, then select exactly one shared Joker.
+13. Run an in-app toss: choose the flipping team, start the timer, tap the caller's Heads/Tails choice during the three-second spin and confirm no result is revealed early.
+14. Let the toss timer expire without a call and verify Restart toss, Start over and Skip toss paths.
+15. Verify physical toss and no-toss modes require an explicit winning/first-batting team before opening-bowler selection.
+16. Complete a match, create the next match with the same teams, and verify the previous winner can choose Bat/Bowl without a toss.
+17. Create another linked match with changed players/teams and confirm Series match number and Series award continue.
+18. Confirm Player of Match, Today and Series points agree with the recorded delivery points.
+19. On own and public profiles, switch All/Singles/Team Match and confirm filtered totals; on own profile confirm histories remain in separate sections.

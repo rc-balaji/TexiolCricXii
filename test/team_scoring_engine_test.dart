@@ -132,6 +132,67 @@ void main() {
       );
     });
 
+    test('skipped toss starts the explicitly selected batting team', () {
+      final match = _match();
+      match.toss = TeamToss(
+        mode: TeamTossMode.skipped,
+        firstBattingTeamId: match.teamB.id,
+        createdAt: DateTime.utc(2026, 8, 15, 10),
+      );
+
+      TeamScoringEngine.startFirstInnings(
+        match,
+        openingBowlerId: 'a1',
+      );
+
+      expect(match.currentInnings!.battingTeamId, match.teamB.id);
+      expect(match.currentInnings!.bowlingTeamId, match.teamA.id);
+    });
+
+    test('v1.3 toss JSON remains startable after the v1.4 upgrade', () {
+      final match = _match();
+      match.toss = TeamToss.fromJson({
+        'callerTeamId': match.teamA.id,
+        'call': TeamTossCall.heads.name,
+        'result': TeamTossCall.tails.name,
+        'winnerTeamId': match.teamB.id,
+        'decision': TeamTossDecision.bowl.name,
+        'createdAt': DateTime.utc(2026, 8, 15, 10).toIso8601String(),
+      });
+
+      TeamScoringEngine.startFirstInnings(
+        match,
+        openingBowlerId: 'b1',
+      );
+
+      expect(match.toss!.mode, TeamTossMode.inApp);
+      expect(match.currentInnings!.battingTeamId, match.teamA.id);
+    });
+
+    test('timed toss winner must match the caller and coin result', () {
+      final match = _match();
+      match.toss = TeamToss(
+        mode: TeamTossMode.inApp,
+        tosserTeamId: match.teamB.id,
+        callerTeamId: match.teamA.id,
+        call: TeamTossCall.heads,
+        result: TeamTossCall.heads,
+        winnerTeamId: match.teamB.id,
+        decision: TeamTossDecision.bat,
+        firstBattingTeamId: match.teamB.id,
+        createdAt: DateTime.utc(2026, 8, 15, 10),
+      );
+
+      expect(
+        () => TeamScoringEngine.startFirstInnings(
+          match,
+          openingBowlerId: 'a1',
+        ),
+        throwsStateError,
+      );
+      expect(match.innings, isEmpty);
+    });
+
     test('individual bowling quota is enforced at over selection', () {
       final match = _match(
         ballsPerOver: 2,
@@ -183,11 +244,26 @@ void main() {
       expect(restored.innings, hasLength(2));
       expect(restored.innings.last.events, hasLength(2));
       expect(TeamScoringEngine.result(restored).summary, TeamScoringEngine.result(match).summary);
+      expect(restored.seriesId, match.seriesId);
+      expect(restored.seriesMatchNumber, 1);
+      expect(restored.toss!.firstBattingTeamId, match.teamA.id);
+    });
+
+    test('aggregate points rank Player of Today and Series consistently', () {
+      final first = _completedMatch(id: 'TXT-SERIES1');
+      final second = _completedMatch(id: 'TXT-SERIES2');
+
+      expect(TeamScoringEngine.topPlayerId([first, second]), 'a1');
+      expect(
+        TeamScoringEngine.pointsForPlayer([first, second], 'a1'),
+        TeamScoringEngine.pointsForPlayer([first], 'a1') * 2,
+      );
     });
   });
 }
 
 TeamMatch _match({
+  String id = 'TXT-TEST01',
   int ballLimit = 6,
   int ballsPerOver = 6,
   bool wideEnabled = true,
@@ -200,7 +276,7 @@ TeamMatch _match({
   String? jokerId,
 }) {
   return TeamMatch(
-    id: 'TXT-TEST01',
+    id: id,
     title: 'Team Engine Test',
     creatorPlayerId: teamAIds.first,
     teamA: TeamSide(
@@ -231,11 +307,14 @@ TeamMatch _match({
 
 void _start(TeamMatch match, {required String openingBowler}) {
   match.toss = TeamToss(
+    mode: TeamTossMode.inApp,
+    tosserTeamId: match.teamB.id,
     callerTeamId: match.teamA.id,
     call: TeamTossCall.heads,
     result: TeamTossCall.heads,
     winnerTeamId: match.teamA.id,
     decision: TeamTossDecision.bat,
+    firstBattingTeamId: match.teamA.id,
     createdAt: DateTime.utc(2026, 8, 15, 10),
   );
   TeamScoringEngine.startFirstInnings(
@@ -243,4 +322,21 @@ void _start(TeamMatch match, {required String openingBowler}) {
     openingBowlerId: openingBowler,
     at: DateTime.utc(2026, 8, 15, 10),
   );
+}
+
+TeamMatch _completedMatch({required String id}) {
+  final match = _match(id: id, ballLimit: 1, ballsPerOver: 1);
+  _start(match, openingBowler: 'b1');
+  TeamScoringEngine.recordDelivery(
+    match,
+    eventId: '$id-a',
+    batRuns: 1,
+  );
+  TeamScoringEngine.startSecondInnings(match, openingBowlerId: 'a1');
+  TeamScoringEngine.recordDelivery(
+    match,
+    eventId: '$id-b',
+    batRuns: 0,
+  );
+  return match;
 }

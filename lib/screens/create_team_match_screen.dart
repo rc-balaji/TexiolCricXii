@@ -11,7 +11,14 @@ import '../widgets/player_avatar.dart';
 import 'team_toss_screen.dart';
 
 class CreateTeamMatchScreen extends StatefulWidget {
-  const CreateTeamMatchScreen({super.key});
+  const CreateTeamMatchScreen({
+    this.templateMatchId,
+    this.quickRematch = false,
+    super.key,
+  });
+
+  final String? templateMatchId;
+  final bool quickRematch;
 
   @override
   State<CreateTeamMatchScreen> createState() => _CreateTeamMatchScreenState();
@@ -19,6 +26,7 @@ class CreateTeamMatchScreen extends StatefulWidget {
 
 class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   final _title = TextEditingController();
+  final _playerSearch = TextEditingController();
   final _overs = TextEditingController(text: '5');
   final _teamAName = TextEditingController(text: 'Team A');
   final _teamBName = TextEditingController(text: 'Team B');
@@ -26,7 +34,9 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   final _teamB = <String>[];
   final _quotaA = <String, int>{};
   final _quotaB = <String, int>{};
+  final _selectedPlayerIds = <String>{};
   int _step = 0;
+  bool _seeded = false;
   bool _saving = false;
   bool _wide = true;
   bool _noBall = true;
@@ -35,6 +45,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   bool _penalty = true;
   bool _freeHit = false;
   bool _allowConsecutiveOvers = false;
+  bool _jokerEnabled = false;
+  PointRules _pointRules = const PointRules();
   String? _jokerId;
   String? _captainA;
   String? _captainB;
@@ -45,27 +57,125 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   @override
   void dispose() {
     _title.dispose();
+    _playerSearch.dispose();
     _overs.dispose();
     _teamAName.dispose();
     _teamBName.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_seeded) return;
+    _seeded = true;
+    final store = AppScope.read(context);
+    _title.text = store.suggestTeamMatchTitle();
+    _pointRules = store.defaultPointPreset.rules;
+    final templateId = widget.templateMatchId;
+    final template = templateId == null ? null : store.teamMatchById(templateId);
+    if (template == null) return;
+
+    final rules = template.rules;
+    _overs.text = '${rules.ballLimit ~/ rules.ballsPerOver}';
+    _teamAName.text = template.teamA.name;
+    _teamBName.text = template.teamB.name;
+    _selectedPlayerIds.addAll({
+      ...template.teamA.playerIds,
+      ...template.teamB.playerIds,
+    });
+    _teamA.addAll(template.teamA.battingOrder);
+    _teamB.addAll(template.teamB.battingOrder);
+    _quotaA.addAll(template.teamA.bowlingQuotaBalls);
+    _quotaB.addAll(template.teamB.bowlingQuotaBalls);
+    _wide = rules.wideEnabled;
+    _noBall = rules.noBallEnabled;
+    _bye = rules.byeEnabled;
+    _legBye = rules.legByeEnabled;
+    _penalty = rules.penaltyExtrasEnabled;
+    _freeHit = rules.freeHitEnabled;
+    _allowConsecutiveOvers = rules.allowConsecutiveOvers;
+    _pointRules = rules.pointRules;
+    _jokerId = template.commonJokerPlayerId;
+    _jokerEnabled = _jokerId != null;
+    _captainA = template.teamA.captainPlayerId;
+    _captainB = template.teamB.captainPlayerId;
+    _keeperA = template.teamA.wicketkeeperPlayerId;
+    _keeperB = template.teamB.wicketkeeperPlayerId;
+    _trackerId = template.trackerPlayerId;
+    if (widget.quickRematch) _step = 4;
+  }
+
   int? get _oversValue => int.tryParse(_overs.text.trim());
 
   int get _ballLimit => (_oversValue ?? 0) * 6;
 
+  void _togglePlayer(Player player, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedPlayerIds.add(player.id);
+      } else {
+        _selectedPlayerIds.remove(player.id);
+        _teamA.remove(player.id);
+        _teamB.remove(player.id);
+        _quotaA.remove(player.id);
+        _quotaB.remove(player.id);
+        if (_jokerId == player.id) {
+          _jokerId = null;
+          _jokerEnabled = false;
+        }
+        if (_trackerId == player.id) _trackerId = null;
+      }
+      _captainA = _validOrFirst(_captainA, _teamA);
+      _captainB = _validOrFirst(_captainB, _teamB);
+      _keeperA = _validOrFirst(_keeperA, _teamA);
+      _keeperB = _validOrFirst(_keeperB, _teamB);
+      _seedQuotas(overwrite: true);
+    });
+  }
+
+  void _autoAssignUnassigned() {
+    for (final id in _selectedPlayerIds) {
+      if (_teamA.contains(id) || _teamB.contains(id)) continue;
+      (_teamA.length <= _teamB.length ? _teamA : _teamB).add(id);
+    }
+    _captainA = _validOrFirst(_captainA, _teamA);
+    _captainB = _validOrFirst(_captainB, _teamB);
+    _keeperA = _validOrFirst(_keeperA, _teamA);
+    _keeperB = _validOrFirst(_keeperB, _teamB);
+    _seedQuotas(overwrite: true);
+  }
+
+  void _setJokerEnabled(bool enabled) {
+    setState(() {
+      _jokerEnabled = enabled;
+      if (!enabled && _jokerId != null) {
+        final previousJoker = _jokerId!;
+        _jokerId = null;
+        _placeFormerJoker(previousJoker);
+      }
+      _seedQuotas(overwrite: true);
+    });
+  }
+
+  void _placeFormerJoker(String playerId) {
+    _teamA.remove(playerId);
+    _teamB.remove(playerId);
+    (_teamA.length <= _teamB.length ? _teamA : _teamB).add(playerId);
+  }
+
   void _assign(Player player, String assignment) {
     setState(() {
+      if (!_selectedPlayerIds.contains(player.id)) return;
       final previousJoker = _jokerId;
       _teamA.remove(player.id);
       _teamB.remove(player.id);
       if (_jokerId == player.id) _jokerId = null;
       if (assignment == 'J' &&
+          _jokerEnabled &&
           previousJoker != null &&
           previousJoker != player.id) {
-        // Keep the previous Joker in Team A when a new shared player is picked.
-        _teamB.remove(previousJoker);
+        _placeFormerJoker(previousJoker);
       }
       switch (assignment) {
         case 'A':
@@ -74,7 +184,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         case 'B':
           _teamB.add(player.id);
           break;
-        case 'J':
+        case 'J' when _jokerEnabled:
           _teamA.add(player.id);
           _teamB.add(player.id);
           _jokerId = player.id;
@@ -84,7 +194,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       _captainB = _validOrFirst(_captainB, _teamB);
       _keeperA = _validOrFirst(_keeperA, _teamA);
       _keeperB = _validOrFirst(_keeperB, _teamB);
-      _seedQuotas();
+      _seedQuotas(overwrite: true);
     });
   }
 
@@ -100,7 +210,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     return 'N';
   }
 
-  void _seedQuotas() {
+  void _seedQuotas({bool overwrite = false}) {
     void seed(List<String> ids, Map<String, int> quota) {
       quota.removeWhere((key, _) => !ids.contains(key));
       if (_ballLimit <= 0 || ids.isEmpty) return;
@@ -108,10 +218,12 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       final base = totalOvers ~/ ids.length;
       final remainder = totalOvers % ids.length;
       for (var index = 0; index < ids.length; index++) {
-        quota.putIfAbsent(
-          ids[index],
-          () => (base + (index < remainder ? 1 : 0)) * 6,
-        );
+        final suggested = (base + (index < remainder ? 1 : 0)) * 6;
+        if (overwrite) {
+          quota[ids[index]] = suggested;
+        } else {
+          quota.putIfAbsent(ids[index], () => suggested);
+        }
       }
     }
 
@@ -129,6 +241,24 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
 
   String? _validateStep(int step) {
     if (step == 0) {
+      if (_selectedPlayerIds.length < 3) {
+        return 'Select at least three available players.';
+      }
+    }
+    if (step == 1) {
+      final assigned = <String>{..._teamA, ..._teamB};
+      if (assigned.length != _selectedPlayerIds.length ||
+          !assigned.containsAll(_selectedPlayerIds)) {
+        return 'Assign every selected player to a team.';
+      }
+      if (_teamA.length < 2 || _teamB.length < 2) {
+        return 'Each team needs at least two players. Add a player or use a Joker.';
+      }
+      if (_jokerEnabled && _jokerId == null) {
+        return 'Select one shared Joker or turn the Joker option off.';
+      }
+    }
+    if (step == 2) {
       final overs = _oversValue;
       if (overs == null || overs < 1 || overs > 100) {
         return 'Enter match overs from 1 to 100.';
@@ -137,12 +267,15 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         return 'Enter both team names.';
       }
     }
-    if (step >= 2 && (_teamA.length < 2 || _teamB.length < 2)) {
-      return 'Select at least two players for each team.';
-    }
     if (step >= 4) {
-      final coverageA = _quotaA.values.fold<int>(0, (sum, value) => sum + value);
-      final coverageB = _quotaB.values.fold<int>(0, (sum, value) => sum + value);
+      final coverageA = _quotaA.values.fold<int>(
+        0,
+        (total, value) => total + value,
+      );
+      final coverageB = _quotaB.values.fold<int>(
+        0,
+        (total, value) => total + value,
+      );
       if (coverageA < _ballLimit || coverageB < _ballLimit) {
         return 'Each team bowling quota must cover all $_ballLimit legal balls.';
       }
@@ -158,6 +291,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
+    if (_step == 0) _autoAssignUnassigned();
     if (_step < 4) {
       setState(() => _step++);
     } else {
@@ -170,7 +304,6 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     setState(() => _saving = true);
     final store = AppScope.read(context);
     try {
-      final balanced = store.defaultPointPreset.rules;
       final match = await store.createTeamMatch(
         title: _title.text,
         teamA: TeamSide(
@@ -203,19 +336,11 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
           freeHitEnabled: _freeHit,
           askLastPlayerStanding: true,
           allowConsecutiveOvers: _allowConsecutiveOvers,
-          pointRules: PointRules(
-            run: balanced.run,
-            wicket: balanced.wicket,
-            bowledBonus: balanced.bowledBonus,
-            catchPoint: balanced.catchPoint,
-            directRunOut: balanced.directRunOut,
-            assistedRunOut: balanced.assistedRunOut,
-            stumping: balanced.stumping,
-            notOutBonus: balanced.notOutBonus,
-          ),
+          pointRules: _pointRules,
         ),
-        commonJokerPlayerId: _jokerId,
+        commonJokerPlayerId: _jokerEnabled ? _jokerId : null,
         trackerPlayerId: _trackerId,
+        previousMatchId: widget.templateMatchId,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -235,9 +360,32 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final players = store.visiblePlayers;
+    final players = <Player>[...store.visiblePlayers];
+    for (final id in _selectedPlayerIds) {
+      final player = store.playerById(id);
+      if (player != null && !players.any((value) => value.id == id)) {
+        players.add(player);
+      }
+    }
+    final query = _playerSearch.text.trim().toLowerCase();
+    final rosterPlayers = players
+        .where(
+          (player) => query.isEmpty ||
+              player.name.toLowerCase().contains(query) ||
+              player.id.toLowerCase().contains(query),
+        )
+        .toList(growable: false);
+    final selectedPlayers = players
+        .where((player) => _selectedPlayerIds.contains(player.id))
+        .toList(growable: false);
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Team Match')),
+      appBar: AppBar(
+        title: Text(
+          widget.templateMatchId == null
+              ? 'Create Team Match'
+              : 'Create Next Team Match',
+        ),
+      ),
       body: Stepper(
         currentStep: _step,
         onStepTapped: (value) {
@@ -258,7 +406,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Icon(_step == 4 ? Icons.sports_cricket : Icons.arrow_forward),
-                  label: Text(_step == 4 ? 'Create & toss' : 'Continue'),
+                  label: Text(_step == 4 ? 'Create & choose start' : 'Continue'),
                 ),
               ),
               if (_step > 0) ...[
@@ -270,23 +418,150 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         ),
         steps: [
           Step(
-            title: const Text('Match details'),
-            subtitle: const Text('Teams and overs'),
+            title: const Text('Choose today’s players'),
+            subtitle: Text('${_selectedPlayerIds.length} selected'),
             isActive: _step >= 0,
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Card(
+                  color: Color(0xFFE7F8F0),
+                  child: ListTile(
+                    leading: Icon(Icons.how_to_reg_rounded, color: AppColors.greenDark),
+                    title: Text('Players first'),
+                    subtitle: Text(
+                      'Select only the friends playing now. Team assignment and the optional Joker come next, so a large friend list stays clean.',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _playerSearch,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Search players',
+                    hintText: 'Name or Player ID',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (rosterPlayers.isEmpty)
+                  const Card(
+                    child: ListTile(
+                      leading: Icon(Icons.person_search_rounded),
+                      title: Text('No players found'),
+                    ),
+                  )
+                else
+                  SizedBox(
+                    height: min(
+                      440.0,
+                      max(84.0, rosterPlayers.length * 76.0),
+                    ),
+                    child: Scrollbar(
+                      child: ListView.builder(
+                        primary: false,
+                        itemCount: rosterPlayers.length,
+                        itemBuilder: (context, index) {
+                          final player = rosterPlayers[index];
+                          final selected =
+                              _selectedPlayerIds.contains(player.id);
+                          return Card(
+                            child: ListTile(
+                              leading: PlayerAvatar(player: player, radius: 22),
+                              title: Text(
+                                player.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              subtitle: Text(player.id),
+                              trailing: Checkbox(
+                                value: selected,
+                                onChanged: (value) =>
+                                    _togglePlayer(player, value ?? false),
+                              ),
+                              onTap: () => _togglePlayer(player, !selected),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Step(
+            title: const Text('Build teams'),
+            subtitle: Text(
+              '${_teamA.length} vs ${_teamB.length}'
+              '${_jokerId == null ? '' : ' • Joker active'}',
+            ),
+            isActive: _step >= 1,
+            content: Column(
+              children: [
+                Card(
+                  child: SwitchListTile(
+                    secondary: const Icon(Icons.style_rounded),
+                    title: const Text(
+                      'Use one shared Joker',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    subtitle: const Text(
+                      'Optional. Turn this on only when one player must play for both teams.',
+                    ),
+                    value: _jokerEnabled,
+                    onChanged: _setJokerEnabled,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...selectedPlayers.map(
+                  (player) => Card(
+                    child: ListTile(
+                      leading: PlayerAvatar(player: player, radius: 22),
+                      title: Text(
+                        player.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Text(player.id),
+                      trailing: DropdownButton<String>(
+                        value: _assignment(player.id),
+                        onChanged: (value) => _assign(player, value ?? 'N'),
+                        items: [
+                          const DropdownMenuItem(value: 'N', child: Text('Choose')),
+                          const DropdownMenuItem(value: 'A', child: Text('Team A')),
+                          const DropdownMenuItem(value: 'B', child: Text('Team B')),
+                          if (_jokerEnabled)
+                            const DropdownMenuItem(value: 'J', child: Text('🃏 Joker')),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Step(
+            title: const Text('Match details & rules'),
+            subtitle: Text(_title.text.isEmpty ? 'Name, overs and extras' : _title.text),
+            isActive: _step >= 2,
             content: Column(
               children: [
                 TextField(
                   controller: _title,
+                  onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Match title',
-                    hintText: 'Evening Team Match',
+                    helperText: 'Automatic name is ready. Change it only if needed.',
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _overs,
                   keyboardType: TextInputType.number,
-                  onChanged: (_) => setState(_seedQuotas),
+                  onChanged: (_) => setState(
+                    () => _seedQuotas(overwrite: true),
+                  ),
                   decoration: const InputDecoration(
                     labelText: 'Overs per innings',
                     suffixText: 'overs',
@@ -298,6 +573,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                     Expanded(
                       child: TextField(
                         controller: _teamAName,
+                        onChanged: (_) => setState(() {}),
                         decoration: const InputDecoration(labelText: 'Team A'),
                       ),
                     ),
@@ -305,20 +581,13 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                     Expanded(
                       child: TextField(
                         controller: _teamBName,
+                        onChanged: (_) => setState(() {}),
                         decoration: const InputDecoration(labelText: 'Team B'),
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          Step(
-            title: const Text('Local rules'),
-            subtitle: const Text('Extras and over behaviour'),
-            isActive: _step >= 1,
-            content: Column(
-              children: [
+                const SizedBox(height: 10),
                 _RuleSwitch(label: 'Wide', value: _wide, onChanged: (v) => setState(() => _wide = v)),
                 _RuleSwitch(label: 'No-ball', value: _noBall, onChanged: (v) => setState(() => _noBall = v)),
                 _RuleSwitch(label: 'Bye', value: _bye, onChanged: (v) => setState(() => _bye = v)),
@@ -333,43 +602,19 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                 ),
                 const Card(
                   child: ListTile(
-                    leading: Icon(Icons.person_rounded, color: AppColors.greenDark),
-                    title: Text('Last Player Standing prompt'),
+                    leading: Icon(Icons.bolt_rounded, color: AppColors.greenDark),
+                    title: Text('Team Match points are enabled'),
                     subtitle: Text(
-                      'When one batter remains, CricXii asks Continue solo or End innings. The solo batter never changes after odd runs or over changes.',
+                      'Runs, wickets, bowled bonus, catches, run-outs, stumpings and not-outs decide Match, Today and Series awards.',
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-          Step(
-            title: const Text('Select teams'),
-            subtitle: Text('${_teamA.length} vs ${_teamB.length}${_jokerId == null ? '' : ' • Joker active'}'),
-            isActive: _step >= 2,
-            content: Column(
-              children: [
-                const Text(
-                  'Assign every player to Team A, Team B, or Joker. Joker appears in both teams.',
-                  style: TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 10),
-                ...players.map(
-                  (player) => Card(
-                    child: ListTile(
-                      leading: PlayerAvatar(player: player, radius: 22),
-                      title: Text(player.name, style: const TextStyle(fontWeight: FontWeight.w800)),
-                      subtitle: Text(player.id),
-                      trailing: DropdownButton<String>(
-                        value: _assignment(player.id),
-                        onChanged: (value) => _assign(player, value ?? 'N'),
-                        items: const [
-                          DropdownMenuItem(value: 'N', child: Text('None')),
-                          DropdownMenuItem(value: 'A', child: Text('Team A')),
-                          DropdownMenuItem(value: 'B', child: Text('Team B')),
-                          DropdownMenuItem(value: 'J', child: Text('🃏 Joker')),
-                        ],
-                      ),
+                const Card(
+                  child: ListTile(
+                    leading: Icon(Icons.person_rounded, color: AppColors.greenDark),
+                    title: Text('Last Player Standing prompt'),
+                    subtitle: Text(
+                      'When one batter remains, choose Continue solo or End innings. The solo batter stays on strike.',
                     ),
                   ),
                 ),
@@ -388,14 +633,14 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   ids: _teamA,
                   captain: _captainA,
                   keeper: _keeperA,
-                  players: players,
+                  players: selectedPlayers,
                   onCaptain: (value) => setState(() => _captainA = value),
                   onKeeper: (value) => setState(() => _keeperA = value),
                 ),
                 _OrderEditor(
                   title: '${_teamAName.text} batting order',
                   order: _teamA,
-                  players: players,
+                  players: selectedPlayers,
                   jokerId: _jokerId,
                   onReorder: (oldIndex, newIndex) => _move(_teamA, oldIndex, newIndex),
                 ),
@@ -405,14 +650,14 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   ids: _teamB,
                   captain: _captainB,
                   keeper: _keeperB,
-                  players: players,
+                  players: selectedPlayers,
                   onCaptain: (value) => setState(() => _captainB = value),
                   onKeeper: (value) => setState(() => _keeperB = value),
                 ),
                 _OrderEditor(
                   title: '${_teamBName.text} batting order',
                   order: _teamB,
-                  players: players,
+                  players: selectedPlayers,
                   jokerId: _jokerId,
                   onReorder: (oldIndex, newIndex) => _move(_teamB, oldIndex, newIndex),
                 ),
@@ -422,7 +667,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   decoration: const InputDecoration(labelText: 'Scorer / tracker'),
                   items: [
                     const DropdownMenuItem(value: '', child: Text('Host scores')),
-                    ...players.map(
+                    ...selectedPlayers.map(
                       (player) => DropdownMenuItem(value: player.id, child: Text(player.name)),
                     ),
                   ],
@@ -442,7 +687,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   title: '${_teamAName.text} bowling limits',
                   ids: _teamA,
                   quota: _quotaA,
-                  players: players,
+                  players: selectedPlayers,
                   maxOvers: max(1, _oversValue ?? 1),
                   onChanged: () => setState(() {}),
                 ),
@@ -451,7 +696,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   title: '${_teamBName.text} bowling limits',
                   ids: _teamB,
                   quota: _quotaB,
-                  players: players,
+                  players: selectedPlayers,
                   maxOvers: max(1, _oversValue ?? 1),
                   onChanged: () => setState(() {}),
                 ),
@@ -462,11 +707,21 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                     leading: const Icon(Icons.fact_check_outlined, color: AppColors.greenDark),
                     title: Text('${_teamA.length} vs ${_teamB.length} • ${_oversValue ?? 0} overs'),
                     subtitle: Text(
-                      '${_jokerId == null ? 'No Joker' : 'Joker enabled'} • '
+                      '${!_jokerEnabled || _jokerId == null ? 'No Joker' : 'Joker enabled'} • '
                       '${[_wide ? 'Wide' : null, _noBall ? 'No-ball' : null, _bye ? 'Bye' : null, _legBye ? 'Leg bye' : null].whereType<String>().join(', ')}',
                     ),
                   ),
                 ),
+                if (widget.templateMatchId != null)
+                  const Card(
+                    child: ListTile(
+                      leading: Icon(Icons.replay_rounded),
+                      title: Text('Linked next match'),
+                      subtitle: Text(
+                        'This match stays in the same series, so Series points and awards continue automatically.',
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -606,7 +861,8 @@ class _QuotaEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final coverage = quota.values.fold<int>(0, (sum, value) => sum + value) ~/ 6;
+    final coverage =
+        quota.values.fold<int>(0, (total, value) => total + value) ~/ 6;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
