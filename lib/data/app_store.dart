@@ -1798,8 +1798,8 @@ class AppStore extends ChangeNotifier {
         .where((innings) => innings.bowlingTeamId == teamId)
         .fold<int>(
           0,
-          (sum, innings) =>
-              sum + TeamScoringEngine.bowlerBalls(innings, bowlerId),
+          (total, innings) =>
+              total + TeamScoringEngine.bowlerBalls(innings, bowlerId),
         );
     if (legalBalls < alreadyBowled) {
       throw StateError('The limit cannot be below balls already bowled.');
@@ -1808,7 +1808,7 @@ class AppStore extends ChangeNotifier {
     side.bowlingQuotaBalls[bowlerId] = legalBalls;
     final totalCoverage = side.bowlingQuotaBalls.values.fold<int>(
       0,
-      (sum, value) => sum + value,
+      (total, value) => total + value,
     );
     if (totalCoverage < match.rules.ballLimit) {
       side.bowlingQuotaBalls[bowlerId] = previous;
@@ -3285,21 +3285,21 @@ class AppStore extends ChangeNotifier {
       if (appearances.isEmpty) continue;
       player.teamStats
         ..matches += 1
-        ..runs += appearances.fold<int>(0, (sum, value) => sum + value.runs)
-        ..balls += appearances.fold<int>(0, (sum, value) => sum + value.balls)
+        ..runs += appearances.fold<int>(0, (total, value) => total + value.runs)
+        ..balls += appearances.fold<int>(0, (total, value) => total + value.balls)
         ..outs += appearances.where((value) => value.dismissed).length
-        ..wickets += appearances.fold<int>(0, (sum, value) => sum + value.wickets)
-        ..catches += appearances.fold<int>(0, (sum, value) => sum + value.catches)
+        ..wickets += appearances.fold<int>(0, (total, value) => total + value.wickets)
+        ..catches += appearances.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts += appearances.fold<int>(
           0,
-          (sum, value) => sum + value.directRunOuts,
+          (total, value) => total + value.directRunOuts,
         )
         ..assistedRunOuts += appearances.fold<int>(
           0,
-          (sum, value) => sum + value.assistedRunOuts,
+          (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings += appearances.fold<int>(0, (sum, value) => sum + value.stumpings)
-        ..points += appearances.fold<int>(0, (sum, value) => sum + value.points);
+        ..stumpings += appearances.fold<int>(0, (total, value) => total + value.stumpings)
+        ..points += appearances.fold<int>(0, (total, value) => total + value.points);
       final result = TeamScoringEngine.result(match);
       if (result.winnerTeamId != null &&
           match.side(result.winnerTeamId!).playerIds.contains(player.id) &&
@@ -4022,21 +4022,21 @@ class AppStore extends ChangeNotifier {
       final values = entry.value;
       player.teamStats
         ..matches += 1
-        ..runs += values.fold<int>(0, (sum, value) => sum + value.runs)
-        ..balls += values.fold<int>(0, (sum, value) => sum + value.balls)
+        ..runs += values.fold<int>(0, (total, value) => total + value.runs)
+        ..balls += values.fold<int>(0, (total, value) => total + value.balls)
         ..outs += values.where((value) => value.dismissed).length
-        ..wickets += values.fold<int>(0, (sum, value) => sum + value.wickets)
-        ..catches += values.fold<int>(0, (sum, value) => sum + value.catches)
+        ..wickets += values.fold<int>(0, (total, value) => total + value.wickets)
+        ..catches += values.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts += values.fold<int>(
           0,
-          (sum, value) => sum + value.directRunOuts,
+          (total, value) => total + value.directRunOuts,
         )
         ..assistedRunOuts += values.fold<int>(
           0,
-          (sum, value) => sum + value.assistedRunOuts,
+          (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings += values.fold<int>(0, (sum, value) => sum + value.stumpings)
-        ..points += values.fold<int>(0, (sum, value) => sum + value.points);
+        ..stumpings += values.fold<int>(0, (total, value) => total + value.stumpings)
+        ..points += values.fold<int>(0, (total, value) => total + value.points);
       final winnerSide = result.winnerTeamId == null
           ? null
           : match.side(result.winnerTeamId!);
@@ -4062,21 +4062,21 @@ class AppStore extends ChangeNotifier {
       final values = entry.value;
       player.teamStats
         ..matches -= 1
-        ..runs -= values.fold<int>(0, (sum, value) => sum + value.runs)
-        ..balls -= values.fold<int>(0, (sum, value) => sum + value.balls)
+        ..runs -= values.fold<int>(0, (total, value) => total + value.runs)
+        ..balls -= values.fold<int>(0, (total, value) => total + value.balls)
         ..outs -= values.where((value) => value.dismissed).length
-        ..wickets -= values.fold<int>(0, (sum, value) => sum + value.wickets)
-        ..catches -= values.fold<int>(0, (sum, value) => sum + value.catches)
+        ..wickets -= values.fold<int>(0, (total, value) => total + value.wickets)
+        ..catches -= values.fold<int>(0, (total, value) => total + value.catches)
         ..directRunOuts -= values.fold<int>(
           0,
-          (sum, value) => sum + value.directRunOuts,
+          (total, value) => total + value.directRunOuts,
         )
         ..assistedRunOuts -= values.fold<int>(
           0,
-          (sum, value) => sum + value.assistedRunOuts,
+          (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings -= values.fold<int>(0, (sum, value) => sum + value.stumpings)
-        ..points -= values.fold<int>(0, (sum, value) => sum + value.points);
+        ..stumpings -= values.fold<int>(0, (total, value) => total + value.stumpings)
+        ..points -= values.fold<int>(0, (total, value) => total + value.points);
       final winnerSide = result.winnerTeamId == null
           ? null
           : match.side(result.winnerTeamId!);

@@ -1029,29 +1029,32 @@ class _PlayerRoleCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Card(
-        color: highlighted ? const Color(0xFFE7F8F0) : null,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 12),
-            child: Column(
-              children: [
-                if (player != null)
-                  PlayerAvatar(player: player, radius: 21)
-                else
-                  const CircleAvatar(radius: 21, child: Icon(Icons.person_outline_rounded)),
-                const SizedBox(height: 7),
-                Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 2),
-                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                if (joker) const Text('🃏 JOKER', style: TextStyle(fontSize: 9, color: AppColors.greenDark, fontWeight: FontWeight.w900)),
-              ],
-            ),
+  Widget build(BuildContext context) {
+    final rolePlayer = player;
+    return Card(
+      color: highlighted ? const Color(0xFFE7F8F0) : null,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 12),
+          child: Column(
+            children: [
+              if (rolePlayer != null)
+                PlayerAvatar(player: rolePlayer, radius: 21)
+              else
+                const CircleAvatar(radius: 21, child: Icon(Icons.person_outline_rounded)),
+              const SizedBox(height: 7),
+              Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 2),
+              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+              if (joker) const Text('🃏 JOKER', style: TextStyle(fontSize: 9, color: AppColors.greenDark, fontWeight: FontWeight.w900)),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _DarkBadge extends StatelessWidget {
