@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -91,6 +92,20 @@ class DailyPerformanceExport {
 
     final logoData = await rootBundle.load('assets/branding/cricxii_app_icon.png');
     final logo = pw.MemoryImage(logoData.buffer.asUint8List());
+    final avatarIds = summary.matches
+        .expand((match) => match.rankings.map((row) => row.playerId))
+        .toSet();
+    final avatarEntries = await Future.wait(
+      avatarIds.map((id) async {
+        final player = players[id];
+        if (player == null) return null;
+        return MapEntry<String, pw.MemoryImage?>(id, await _avatarFor(player));
+      }),
+    );
+    final avatars = <String, pw.MemoryImage?>{
+      for (final entry in avatarEntries)
+        if (entry != null) entry.key: entry.value,
+    };
     const ink = PdfColor.fromInt(0xFF071A13);
     const green = PdfColor.fromInt(0xFF087A4B);
     const accent = PdfColor.fromInt(0xFF19C37D);
@@ -367,7 +382,7 @@ class DailyPerformanceExport {
             widgets.addAll([
               _section('MATCH-WISE RESULTS', ink),
               pw.SizedBox(height: 7),
-              _matchSummaryTable(summary.matches, ink, green, pale, goldPale, line),
+              _matchSummaryTable(summary.matches, players, ink, green, pale, goldPale, line),
               pw.SizedBox(height: 16),
             ]);
           }
@@ -384,6 +399,7 @@ class DailyPerformanceExport {
                   index + 1,
                   match,
                   players,
+                  avatars,
                   ink: ink,
                   green: green,
                   muted: muted,
@@ -454,7 +470,8 @@ class DailyPerformanceExport {
   static List<pw.Widget> _fullMatchSection(
     int number,
     DailyMatchEntry entry,
-    Map<String, Player> players, {
+    Map<String, Player> players,
+    Map<String, pw.MemoryImage?> avatars, {
     required PdfColor ink,
     required PdfColor green,
     required PdfColor muted,
@@ -512,7 +529,7 @@ class DailyPerformanceExport {
             pw.SizedBox(
               width: 145,
               child: pw.Text(
-                entry.resultLabel,
+                _resultLabel(entry, players),
                 maxLines: 2,
                 overflow: pw.TextOverflow.clip,
                 textAlign: pw.TextAlign.right,
@@ -535,6 +552,7 @@ class DailyPerformanceExport {
           entry.teamMatch!,
           entry,
           players,
+          avatars,
           ink: ink,
           green: green,
           muted: muted,
@@ -548,6 +566,7 @@ class DailyPerformanceExport {
           entry.singlesMatch!,
           entry,
           players,
+          avatars,
           ink: ink,
           green: green,
           muted: muted,
@@ -566,7 +585,8 @@ class DailyPerformanceExport {
   static List<pw.Widget> _singlesMatchDetails(
     CricketMatch match,
     DailyMatchEntry entry,
-    Map<String, Player> players, {
+    Map<String, Player> players,
+    Map<String, pw.MemoryImage?> avatars, {
     required PdfColor ink,
     required PdfColor green,
     required PdfColor muted,
@@ -600,7 +620,7 @@ class DailyPerformanceExport {
         ),
       ),
       _scorecardTable(
-        const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+        const ['', 'BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
         data.batters
             .map(
               (row) => [
@@ -620,14 +640,18 @@ class DailyPerformanceExport {
         muted: muted,
         line: line,
         columnWidths: const {
-          0: pw.FlexColumnWidth(2.4),
-          1: pw.FlexColumnWidth(2.8),
-          2: pw.FlexColumnWidth(.65),
+          0: pw.FixedColumnWidth(23),
+          1: pw.FlexColumnWidth(2.2),
+          2: pw.FlexColumnWidth(2.6),
           3: pw.FlexColumnWidth(.65),
           4: pw.FlexColumnWidth(.65),
           5: pw.FlexColumnWidth(.65),
-          6: pw.FlexColumnWidth(.95),
+          6: pw.FlexColumnWidth(.65),
+          7: pw.FlexColumnWidth(.95),
         },
+        playerIds: data.batters.map((row) => row.playerId).toList(growable: false),
+        players: players,
+        avatars: avatars,
       ),
       _scoreSummaryRow(
         'Extras',
@@ -648,7 +672,7 @@ class DailyPerformanceExport {
       widgets.addAll([
         pw.SizedBox(height: 7),
         _scorecardTable(
-          const ['BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+          const ['', 'BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
           data.bowlers
               .map(
                 (row) => [
@@ -666,14 +690,18 @@ class DailyPerformanceExport {
           muted: muted,
           line: line,
           columnWidths: const {
-            0: pw.FlexColumnWidth(2.7),
-            1: pw.FlexColumnWidth(.72),
+            0: pw.FixedColumnWidth(23),
+            1: pw.FlexColumnWidth(2.45),
             2: pw.FlexColumnWidth(.72),
             3: pw.FlexColumnWidth(.72),
             4: pw.FlexColumnWidth(.72),
             5: pw.FlexColumnWidth(.72),
-            6: pw.FlexColumnWidth(.95),
+            6: pw.FlexColumnWidth(.72),
+            7: pw.FlexColumnWidth(.95),
           },
+          playerIds: data.bowlers.map((row) => row.playerId).toList(growable: false),
+          players: players,
+          avatars: avatars,
         ),
       ]);
     }
@@ -697,7 +725,8 @@ class DailyPerformanceExport {
   static List<pw.Widget> _teamMatchDetails(
     TeamMatch match,
     DailyMatchEntry entry,
-    Map<String, Player> players, {
+    Map<String, Player> players,
+    Map<String, pw.MemoryImage?> avatars, {
     required PdfColor ink,
     required PdfColor green,
     required PdfColor muted,
@@ -786,7 +815,7 @@ class DailyPerformanceExport {
             ),
           ),
         _scorecardTable(
-          const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+          const ['', 'BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
           data.batters
               .map(
                 (row) => [
@@ -804,14 +833,18 @@ class DailyPerformanceExport {
           muted: muted,
           line: line,
           columnWidths: const {
-            0: pw.FlexColumnWidth(2.4),
-            1: pw.FlexColumnWidth(2.8),
-            2: pw.FlexColumnWidth(.65),
+            0: pw.FixedColumnWidth(23),
+            1: pw.FlexColumnWidth(2.2),
+            2: pw.FlexColumnWidth(2.6),
             3: pw.FlexColumnWidth(.65),
             4: pw.FlexColumnWidth(.65),
             5: pw.FlexColumnWidth(.65),
-            6: pw.FlexColumnWidth(.95),
+            6: pw.FlexColumnWidth(.65),
+            7: pw.FlexColumnWidth(.95),
           },
+          playerIds: data.batters.map((row) => row.playerId).toList(growable: false),
+          players: players,
+          avatars: avatars,
         ),
         _scoreSummaryRow(
           'Extras',
@@ -840,7 +873,7 @@ class DailyPerformanceExport {
         widgets.addAll([
           pw.SizedBox(height: 6),
           _scorecardTable(
-            const ['BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
+            const ['', 'BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
             data.bowlers
                 .map(
                   (row) => [
@@ -859,15 +892,19 @@ class DailyPerformanceExport {
             muted: muted,
             line: line,
             columnWidths: const {
-              0: pw.FlexColumnWidth(2.7),
-              1: pw.FlexColumnWidth(.72),
-              2: pw.FlexColumnWidth(.65),
+              0: pw.FixedColumnWidth(23),
+              1: pw.FlexColumnWidth(2.4),
+              2: pw.FlexColumnWidth(.72),
               3: pw.FlexColumnWidth(.65),
               4: pw.FlexColumnWidth(.65),
-              5: pw.FlexColumnWidth(.7),
+              5: pw.FlexColumnWidth(.65),
               6: pw.FlexColumnWidth(.7),
-              7: pw.FlexColumnWidth(.92),
+              7: pw.FlexColumnWidth(.7),
+              8: pw.FlexColumnWidth(.92),
             },
+            playerIds: data.bowlers.map((row) => row.playerId).toList(growable: false),
+            players: players,
+            avatars: avatars,
           ),
         ]);
       }
@@ -967,6 +1004,9 @@ class DailyPerformanceExport {
     required PdfColor muted,
     required PdfColor line,
     required Map<int, pw.TableColumnWidth> columnWidths,
+    List<String>? playerIds,
+    Map<String, Player>? players,
+    Map<String, pw.MemoryImage?>? avatars,
   }) => pw.Table(
     border: pw.TableBorder.all(color: line, width: .45),
     columnWidths: columnWidths,
@@ -991,32 +1031,44 @@ class DailyPerformanceExport {
             )
             .toList(),
       ),
-      ...rows.map(
-        (row) => pw.TableRow(
-          children: row.asMap().entries
-              .map(
-                (cell) => pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
-                  child: pw.Text(
-                    cell.value,
-                    textAlign: cell.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      color: cell.key == 0
-                          ? const PdfColor.fromInt(0xFF0B5FFF)
-                          : cell.key == 1
-                              ? muted
-                              : ink,
-                      fontSize: 6.6,
-                      fontWeight: cell.key == 2 || cell.key == 4
-                          ? pw.FontWeight.bold
-                          : pw.FontWeight.normal,
-                    ),
+      ...rows.asMap().entries.map((rowEntry) {
+        final row = rowEntry.value;
+        final playerId = playerIds == null || rowEntry.key >= playerIds.length
+            ? null
+            : playerIds[rowEntry.key];
+        final player = playerId == null ? null : players?[playerId];
+        return pw.TableRow(
+          children: [
+            if (playerIds != null)
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(3),
+                child: player == null
+                    ? pw.SizedBox(width: 17, height: 17)
+                    : _pdfAvatar(player, avatars?[player.id], size: 17),
+              ),
+            ...row.asMap().entries.map(
+              (cell) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
+                child: pw.Text(
+                  cell.value,
+                  textAlign: cell.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                  style: pw.TextStyle(
+                    color: cell.key == 0
+                        ? const PdfColor.fromInt(0xFF0B5FFF)
+                        : cell.key == 1
+                            ? muted
+                            : ink,
+                    fontSize: 6.6,
+                    fontWeight: cell.key == 2 || cell.key == 4
+                        ? pw.FontWeight.bold
+                        : pw.FontWeight.normal,
                   ),
                 ),
-              )
-              .toList(),
-        ),
-      ),
+              ),
+            ),
+          ],
+        );
+      }),
     ],
   );
 
@@ -1143,8 +1195,78 @@ class DailyPerformanceExport {
         ],
       );
 
+  static String _resultLabel(
+    DailyMatchEntry entry,
+    Map<String, Player> players,
+  ) {
+    if (!entry.isSingles || entry.rankings.isEmpty) return entry.resultLabel;
+    final winner = entry.rankings.first;
+    final name = players[winner.playerId]?.name ?? winner.playerId;
+    return '$name won | ${winner.points} PTS';
+  }
+
+  static pw.Widget _pdfAvatar(
+    Player player,
+    pw.MemoryImage? image, {
+    required double size,
+  }) => pw.Container(
+    width: size,
+    height: size,
+    alignment: pw.Alignment.center,
+    decoration: pw.BoxDecoration(
+      color: PdfColor.fromInt(player.avatarColor),
+      borderRadius: pw.BorderRadius.circular(size * .24),
+    ),
+    child: image != null
+        ? pw.Image(image, width: size, height: size, fit: pw.BoxFit.cover)
+        : pw.Text(
+            player.initials,
+            style: pw.TextStyle(
+              color: PdfColors.white,
+              fontSize: size * .28,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+  );
+
+  static Future<pw.MemoryImage?> _avatarFor(Player player) async {
+    final url = player.resolvedAvatarUrl;
+    if (url != null && Uri.tryParse(url)?.isScheme('https') == true) {
+      final remote = await _downloadImage(url);
+      if (remote != null) return pw.MemoryImage(remote);
+    }
+    try {
+      final preset = player.avatarPreset.clamp(1, 5);
+      final data = await rootBundle.load('assets/avatars/avatar_$preset.png');
+      return pw.MemoryImage(data.buffer.asUint8List());
+    } on Object {
+      return null;
+    }
+  }
+
+  static Future<Uint8List?> _downloadImage(String url) async {
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 3);
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      final bytes = <int>[];
+      await for (final chunk in response) {
+        bytes.addAll(chunk);
+        if (bytes.length > 4 * 1024 * 1024) return null;
+      }
+      return Uint8List.fromList(bytes);
+    } on Object {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   static pw.Widget _matchSummaryTable(
     List<DailyMatchEntry> matches,
+    Map<String, Player> players,
     PdfColor ink,
     PdfColor green,
     PdfColor pale,
@@ -1172,7 +1294,7 @@ class DailyPerformanceExport {
                 _cell('${entry.key + 1}', bold: true, color: ink),
                 _cell('${match.title}\n${_time(match.completedAt)}', bold: true, color: ink),
                 _cell(match.isTeam ? 'TEAM' : 'SINGLES', bold: true, color: green),
-                _cell(match.resultLabel, color: ink),
+                _cell(_resultLabel(match, players), color: ink),
                 _cell('${match.playerCount}', color: ink),
               ],
             );
@@ -1319,14 +1441,14 @@ class DailyPerformanceExport {
         : 'elected to bat';
     return switch (toss.mode) {
       TeamTossMode.inApp => toss.winnerTeamId == null
-          ? 'In-app toss • $battingName batting first'
+          ? 'In-app toss | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
       TeamTossMode.manual => toss.winnerTeamId == null
-          ? 'Manual toss • $battingName batting first'
+          ? 'Manual toss | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
-      TeamTossMode.skipped => 'No toss • $battingName batting first',
+      TeamTossMode.skipped => 'No toss | $battingName batting first',
       TeamTossMode.previousWinnerChoice => toss.winnerTeamId == null
-          ? 'Previous winner choice • $battingName batting first'
+          ? 'Previous winner choice | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} had the choice and ${decisionLabel()}',
     };
   }

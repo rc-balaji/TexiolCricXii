@@ -556,26 +556,28 @@ class _InningsScorecard extends StatelessWidget {
               ),
             ),
           _scoreTableHeader(
-            const ['Batter', '', 'R', 'B', '4s', '6s', 'SR'],
+            const ['', 'Batter', '', 'R', 'B', '4s', '6s', 'SR'],
             const {
-              0: FlexColumnWidth(2.3),
-              1: FlexColumnWidth(2.6),
-              2: FixedColumnWidth(34),
-              3: FixedColumnWidth(34),
-              4: FixedColumnWidth(34),
-              5: FixedColumnWidth(34),
-              6: FixedColumnWidth(48),
+              0: FixedColumnWidth(44),
+              1: FlexColumnWidth(1.9),
+              2: FlexColumnWidth(2.3),
+              3: FixedColumnWidth(32),
+              4: FixedColumnWidth(32),
+              5: FixedColumnWidth(32),
+              6: FixedColumnWidth(32),
+              7: FixedColumnWidth(46),
             },
           ),
           Table(
             columnWidths: const {
-              0: FlexColumnWidth(2.3),
-              1: FlexColumnWidth(2.6),
-              2: FixedColumnWidth(34),
-              3: FixedColumnWidth(34),
-              4: FixedColumnWidth(34),
-              5: FixedColumnWidth(34),
-              6: FixedColumnWidth(48),
+              0: FixedColumnWidth(44),
+              1: FlexColumnWidth(1.9),
+              2: FlexColumnWidth(2.3),
+              3: FixedColumnWidth(32),
+              4: FixedColumnWidth(32),
+              5: FixedColumnWidth(32),
+              6: FixedColumnWidth(32),
+              7: FixedColumnWidth(46),
             },
             border: const TableBorder(
               horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
@@ -584,6 +586,7 @@ class _InningsScorecard extends StatelessWidget {
               for (final row in data.batters)
                 TableRow(
                   children: [
+                    _scoreAvatarCell(store.playerById(row.playerId)),
                     _scoreCell(name(row.playerId), linkLike: true),
                     _scoreCell(row.dismissal.text(name), muted: true),
                     _scoreCell('${row.runs}', bold: true, center: true),
@@ -613,28 +616,30 @@ class _InningsScorecard extends StatelessWidget {
           if (data.bowlers.isNotEmpty) ...[
             const SizedBox(height: 8),
             _scoreTableHeader(
-              const ['Bowler', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
+              const ['', 'Bowler', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
               const {
-                0: FlexColumnWidth(2.7),
-                1: FixedColumnWidth(38),
+                0: FixedColumnWidth(44),
+                1: FlexColumnWidth(2.3),
                 2: FixedColumnWidth(34),
-                3: FixedColumnWidth(34),
-                4: FixedColumnWidth(34),
-                5: FixedColumnWidth(34),
-                6: FixedColumnWidth(34),
-                7: FixedColumnWidth(48),
+                3: FixedColumnWidth(30),
+                4: FixedColumnWidth(30),
+                5: FixedColumnWidth(30),
+                6: FixedColumnWidth(30),
+                7: FixedColumnWidth(30),
+                8: FixedColumnWidth(46),
               },
             ),
             Table(
               columnWidths: const {
-                0: FlexColumnWidth(2.7),
-                1: FixedColumnWidth(38),
+                0: FixedColumnWidth(44),
+                1: FlexColumnWidth(2.3),
                 2: FixedColumnWidth(34),
-                3: FixedColumnWidth(34),
-                4: FixedColumnWidth(34),
-                5: FixedColumnWidth(34),
-                6: FixedColumnWidth(34),
-                7: FixedColumnWidth(48),
+                3: FixedColumnWidth(30),
+                4: FixedColumnWidth(30),
+                5: FixedColumnWidth(30),
+                6: FixedColumnWidth(30),
+                7: FixedColumnWidth(30),
+                8: FixedColumnWidth(46),
               },
               border: const TableBorder(
                 horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
@@ -643,6 +648,7 @@ class _InningsScorecard extends StatelessWidget {
                 for (final row in data.bowlers)
                   TableRow(
                     children: [
+                      _scoreAvatarCell(store.playerById(row.playerId)),
                       _scoreCell(name(row.playerId), linkLike: true),
                       _scoreCell(row.overs, center: true),
                       _scoreCell('${row.maidens}', center: true),
@@ -756,6 +762,19 @@ class _InningsScorecard extends StatelessWidget {
               .toList(),
         ),
       ],
+    ),
+  );
+
+  static Widget _scoreAvatarCell(Player? player) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: player == null
+          ? const CircleAvatar(
+              radius: 16,
+              child: Icon(Icons.person_rounded, size: 16),
+            )
+          : PlayerAvatar(player: player, radius: 16),
     ),
   );
 

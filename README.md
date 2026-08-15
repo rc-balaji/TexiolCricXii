@@ -1,6 +1,6 @@
-# CricXii v1.6.0 — Cricket-Style Scorecards
+# CricXii v1.6.1 — Scorecard Avatars & Match-Day UX
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.6.0+23` keeps the hardened live Team/Super Over and mixed daily-report flow, and replaces summary-only match tables with cricket-style scorecards across result screens and PDFs while remaining Firebase Spark-friendly.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.6.1+25` keeps the hardened live Team/Super Over and mixed daily-report flow, adds player avatars to cricket-style scorecards across mobile/PDF, and simplifies Home around match creation, unfinished matches and recent results while keeping performance reporting in Profile.
 
 ## v1.6 highlights
 

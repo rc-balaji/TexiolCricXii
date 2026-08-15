@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,7 +27,7 @@ class TeamScorecardExport {
     for (final innings in match.innings) {
       final side = match.side(innings.battingTeamId);
       buffer.writeln(
-        '${TeamScoringEngine.inningsLabel(innings)} • ${side.name}: '
+        '${TeamScoringEngine.inningsLabel(innings)} | ${side.name}: '
         '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)} '
         '(${TeamScoringEngine.overLabel(match, innings)} ov)',
       );
@@ -45,6 +46,17 @@ class TeamScorecardExport {
   }) async {
     final logoData = await rootBundle.load('assets/branding/cricxii_app_icon.png');
     final logo = pw.MemoryImage(logoData.buffer.asUint8List());
+    final avatarEntries = await Future.wait(
+      match.participantIds.map((id) async {
+        final player = players[id];
+        if (player == null) return null;
+        return MapEntry<String, pw.MemoryImage?>(id, await _avatarFor(player));
+      }),
+    );
+    final avatars = <String, pw.MemoryImage?>{
+      for (final entry in avatarEntries)
+        if (entry != null) entry.key: entry.value,
+    };
     final result = TeamScoringEngine.result(match);
     final pomId = TeamScoringEngine.playerOfMatchId(match);
     final pomPoints = pomId == null
@@ -111,7 +123,7 @@ class TeamScorecardExport {
                 if (pomId != null) ...[
                   pw.SizedBox(height: 4),
                   pw.Text(
-                    'Player of the Match: ${players[pomId]?.name ?? pomId} • $pomPoints pts',
+                    'Player of the Match: ${players[pomId]?.name ?? pomId} | $pomPoints pts',
                     style: const pw.TextStyle(color: PdfColors.white, fontSize: 9),
                   ),
                 ],
@@ -145,6 +157,7 @@ class TeamScorecardExport {
               match,
               innings,
               players,
+              avatars,
               ink: ink,
               green: greenDark,
               muted: muted,
@@ -224,7 +237,7 @@ class TeamScorecardExport {
   static pw.Widget _inningsTile(TeamMatch match, TeamInnings innings, PdfColor pale, PdfColor ink, PdfColor muted) {
     final side = match.side(innings.battingTeamId);
     return _metricTile(
-      '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} • ${side.name.toUpperCase()}',
+      '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} | ${side.name.toUpperCase()}',
       '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}  (${TeamScoringEngine.overLabel(match, innings)} ov)',
       pale,
       ink,
@@ -260,14 +273,14 @@ class TeamScorecardExport {
         : 'elected to bat';
     return switch (toss.mode) {
       TeamTossMode.inApp => toss.winnerTeamId == null
-          ? 'In-app toss • $battingName batting first'
+          ? 'In-app toss | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
       TeamTossMode.manual => toss.winnerTeamId == null
-          ? 'Manual toss • $battingName batting first'
+          ? 'Manual toss | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} won the toss and ${decisionLabel()}',
-      TeamTossMode.skipped => 'No toss • $battingName batting first',
+      TeamTossMode.skipped => 'No toss | $battingName batting first',
       TeamTossMode.previousWinnerChoice => toss.winnerTeamId == null
-          ? 'Previous winner choice • $battingName batting first'
+          ? 'Previous winner choice | $battingName batting first'
           : '${match.side(toss.winnerTeamId!).name} had the choice and ${decisionLabel()}',
     };
   }
@@ -312,7 +325,8 @@ class TeamScorecardExport {
   static List<pw.Widget> _inningsSection(
     TeamMatch match,
     TeamInnings innings,
-    Map<String, Player> players, {
+    Map<String, Player> players,
+    Map<String, pw.MemoryImage?> avatars, {
     required PdfColor ink,
     required PdfColor green,
     required PdfColor muted,
@@ -408,20 +422,24 @@ class TeamScorecardExport {
             ),
           ),
         _scorecardTable(
-          const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+          const ['', 'BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
           battingRows,
           ink: ink,
           muted: muted,
           line: line,
           columnWidths: const {
-            0: pw.FlexColumnWidth(2.4),
-            1: pw.FlexColumnWidth(2.8),
-            2: pw.FlexColumnWidth(.65),
+            0: pw.FixedColumnWidth(24),
+            1: pw.FlexColumnWidth(2.2),
+            2: pw.FlexColumnWidth(2.6),
             3: pw.FlexColumnWidth(.65),
             4: pw.FlexColumnWidth(.65),
             5: pw.FlexColumnWidth(.65),
-            6: pw.FlexColumnWidth(.95),
+            6: pw.FlexColumnWidth(.65),
+            7: pw.FlexColumnWidth(.95),
           },
+          playerIds: data.batters.map((row) => row.playerId).toList(growable: false),
+          players: players,
+          avatars: avatars,
         ),
         _scoreSummaryRow(
           'Extras',
@@ -447,21 +465,25 @@ class TeamScorecardExport {
         if (bowlingRows.isNotEmpty) ...[
           pw.SizedBox(height: 8),
           _scorecardTable(
-            const ['BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
+            const ['', 'BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
             bowlingRows,
             ink: ink,
             muted: muted,
             line: line,
             columnWidths: const {
-              0: pw.FlexColumnWidth(2.7),
-              1: pw.FlexColumnWidth(.72),
-              2: pw.FlexColumnWidth(.65),
+              0: pw.FixedColumnWidth(24),
+              1: pw.FlexColumnWidth(2.4),
+              2: pw.FlexColumnWidth(.72),
               3: pw.FlexColumnWidth(.65),
               4: pw.FlexColumnWidth(.65),
-              5: pw.FlexColumnWidth(.7),
+              5: pw.FlexColumnWidth(.65),
               6: pw.FlexColumnWidth(.7),
-              7: pw.FlexColumnWidth(.92),
+              7: pw.FlexColumnWidth(.7),
+              8: pw.FlexColumnWidth(.92),
             },
+            playerIds: data.bowlers.map((row) => row.playerId).toList(growable: false),
+            players: players,
+            avatars: avatars,
           ),
         ],
         if (fallRows.isNotEmpty) ...[
@@ -537,6 +559,9 @@ class TeamScorecardExport {
     required PdfColor muted,
     required PdfColor line,
     required Map<int, pw.TableColumnWidth> columnWidths,
+    List<String>? playerIds,
+    Map<String, Player>? players,
+    Map<String, pw.MemoryImage?>? avatars,
   }) => pw.Table(
     border: pw.TableBorder.all(color: line, width: .45),
     columnWidths: columnWidths,
@@ -561,32 +586,44 @@ class TeamScorecardExport {
             )
             .toList(),
       ),
-      ...rows.map(
-        (row) => pw.TableRow(
-          children: row.asMap().entries
-              .map(
-                (entry) => pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                  child: pw.Text(
-                    entry.value,
-                    textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      color: entry.key == 0
-                          ? greenForScorecard
-                          : entry.key == 1
-                              ? muted
-                              : ink,
-                      fontSize: 6.9,
-                      fontWeight: entry.key == 2 || entry.key == 4
-                          ? pw.FontWeight.bold
-                          : pw.FontWeight.normal,
-                    ),
+      ...rows.asMap().entries.map((rowEntry) {
+        final row = rowEntry.value;
+        final playerId = playerIds == null || rowEntry.key >= playerIds.length
+            ? null
+            : playerIds[rowEntry.key];
+        final player = playerId == null ? null : players?[playerId];
+        return pw.TableRow(
+          children: [
+            if (playerIds != null)
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(3),
+                child: player == null
+                    ? pw.SizedBox(width: 18, height: 18)
+                    : _pdfAvatar(player, avatars?[player.id], size: 18),
+              ),
+            ...row.asMap().entries.map(
+              (entry) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                child: pw.Text(
+                  entry.value,
+                  textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                  style: pw.TextStyle(
+                    color: entry.key == 0
+                        ? greenForScorecard
+                        : entry.key == 1
+                            ? muted
+                            : ink,
+                    fontSize: 6.9,
+                    fontWeight: entry.key == 2 || entry.key == 4
+                        ? pw.FontWeight.bold
+                        : pw.FontWeight.normal,
                   ),
                 ),
-              )
-              .toList(),
-        ),
-      ),
+              ),
+            ),
+          ],
+        );
+      }),
     ],
   );
 
@@ -636,6 +673,65 @@ class TeamScorecardExport {
       ],
     ),
   );
+
+  static pw.Widget _pdfAvatar(
+    Player player,
+    pw.MemoryImage? image, {
+    required double size,
+  }) => pw.Container(
+    width: size,
+    height: size,
+    alignment: pw.Alignment.center,
+    decoration: pw.BoxDecoration(
+      color: PdfColor.fromInt(player.avatarColor),
+      borderRadius: pw.BorderRadius.circular(size * .24),
+    ),
+    child: image != null
+        ? pw.Image(image, width: size, height: size, fit: pw.BoxFit.cover)
+        : pw.Text(
+            player.initials,
+            style: pw.TextStyle(
+              color: PdfColors.white,
+              fontSize: size * .28,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+  );
+
+  static Future<pw.MemoryImage?> _avatarFor(Player player) async {
+    final url = player.resolvedAvatarUrl;
+    if (url != null && Uri.tryParse(url)?.isScheme('https') == true) {
+      final remote = await _downloadImage(url);
+      if (remote != null) return pw.MemoryImage(remote);
+    }
+    try {
+      final preset = player.avatarPreset.clamp(1, 5);
+      final data = await rootBundle.load('assets/avatars/avatar_$preset.png');
+      return pw.MemoryImage(data.buffer.asUint8List());
+    } on Object {
+      return null;
+    }
+  }
+
+  static Future<Uint8List?> _downloadImage(String url) async {
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 3);
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      final bytes = <int>[];
+      await for (final chunk in response) {
+        bytes.addAll(chunk);
+        if (bytes.length > 4 * 1024 * 1024) return null;
+      }
+      return Uint8List.fromList(bytes);
+    } on Object {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   static pw.Widget _section(String value, PdfColor ink) => pw.Text(
         value,

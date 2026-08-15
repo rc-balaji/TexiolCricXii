@@ -1,4 +1,4 @@
-# CricXii v1.6.0 verification
+# CricXii v1.6.1 verification
 
 ## v1.6 scorecard regression checks
 

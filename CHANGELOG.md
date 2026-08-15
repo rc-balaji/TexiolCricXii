@@ -1,3 +1,12 @@
+# CricXii v1.6.1+25 — Scorecard Avatars & Match-Day UX
+
+- Added player avatars as the first column in Singles and Team batting/bowling scorecards on mobile result screens.
+- Added the same avatar-first scorecard treatment to standalone Singles PDFs, Team PDFs, and mixed Daily Performance full-scorecard sections.
+- Replaced the unsupported Singles result separator in Daily Performance with PDF-safe text and now shows the Singles winner name in Daily PDF match-wise results.
+- Simplified Home into a match-day launcher: create Singles/Team first, continue unfinished matches only when needed, and show recent completed matches last.
+- Moved Daily Performance/PDF access off Home and into Profile, where career Singles + Team stats already live.
+- Preserves the v1.6.0+24 analyzer cleanup changes; this review build intentionally remains unstaged and uncommitted.
+
 # CricXii v1.6.0+24 — Analyzer Cleanup
 
 - Removed four redundant non-null assertions in Team scorecard partnership calculation.

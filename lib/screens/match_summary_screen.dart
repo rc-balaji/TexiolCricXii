@@ -490,22 +490,24 @@ class _SinglesScorecard extends StatelessWidget {
     String name(String id) => store.playerById(id)?.name ?? id;
 
     const battingWidths = <int, TableColumnWidth>{
-      0: FlexColumnWidth(2.2),
-      1: FlexColumnWidth(2.6),
-      2: FixedColumnWidth(34),
-      3: FixedColumnWidth(34),
-      4: FixedColumnWidth(34),
-      5: FixedColumnWidth(34),
-      6: FixedColumnWidth(48),
+      0: FixedColumnWidth(44),
+      1: FlexColumnWidth(1.9),
+      2: FlexColumnWidth(2.3),
+      3: FixedColumnWidth(32),
+      4: FixedColumnWidth(32),
+      5: FixedColumnWidth(32),
+      6: FixedColumnWidth(32),
+      7: FixedColumnWidth(46),
     };
     const bowlingWidths = <int, TableColumnWidth>{
-      0: FlexColumnWidth(2.7),
-      1: FixedColumnWidth(38),
-      2: FixedColumnWidth(34),
-      3: FixedColumnWidth(34),
-      4: FixedColumnWidth(34),
-      5: FixedColumnWidth(34),
-      6: FixedColumnWidth(48),
+      0: FixedColumnWidth(44),
+      1: FlexColumnWidth(2.4),
+      2: FixedColumnWidth(36),
+      3: FixedColumnWidth(32),
+      4: FixedColumnWidth(32),
+      5: FixedColumnWidth(32),
+      6: FixedColumnWidth(32),
+      7: FixedColumnWidth(46),
     };
 
     return Card(
@@ -539,7 +541,7 @@ class _SinglesScorecard extends StatelessWidget {
             ),
           ),
           _header(
-            const ['Batter', '', 'R', 'B', '4s', '6s', 'SR'],
+            const ['', 'Batter', '', 'R', 'B', '4s', '6s', 'SR'],
             battingWidths,
           ),
           Table(
@@ -551,6 +553,7 @@ class _SinglesScorecard extends StatelessWidget {
               for (final row in data.batters)
                 TableRow(
                   children: [
+                    _avatarCell(store.playerById(row.playerId)),
                     _cell(name(row.playerId), linkLike: true),
                     _cell(row.dismissal.text(name), muted: true),
                     _cell('${row.runs}', bold: true, center: true),
@@ -579,7 +582,7 @@ class _SinglesScorecard extends StatelessWidget {
           if (data.bowlers.isNotEmpty && match.scoringMode == ScoringMode.ballByBall) ...[
             const SizedBox(height: 8),
             _header(
-              const ['Bowler', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+              const ['', 'Bowler', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
               bowlingWidths,
             ),
             Table(
@@ -591,6 +594,7 @@ class _SinglesScorecard extends StatelessWidget {
                 for (final row in data.bowlers)
                   TableRow(
                     children: [
+                      _avatarCell(store.playerById(row.playerId)),
                       _cell(name(row.playerId), linkLike: true),
                       _cell(row.overs, center: true),
                       _cell('${row.runs}', center: true),
@@ -645,6 +649,19 @@ class _SinglesScorecard extends StatelessWidget {
               .toList(),
         ),
       ],
+    ),
+  );
+
+  static Widget _avatarCell(Player? player) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: player == null
+          ? const CircleAvatar(
+              radius: 16,
+              child: Icon(Icons.person_rounded, size: 16),
+            )
+          : PlayerAvatar(player: player, radius: 16),
     ),
   );
 

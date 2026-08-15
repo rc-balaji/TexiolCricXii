@@ -11,6 +11,7 @@ import '../widgets/player_avatar.dart';
 import '../widgets/team_match_sync_indicator.dart';
 import '../widgets/ui_bits.dart';
 import 'account_settings_screen.dart';
+import 'daily_performance_screen.dart';
 import 'match_summary_screen.dart';
 import 'team_match_summary_screen.dart';
 import 'player_management_screen.dart';
@@ -360,6 +361,30 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           const SizedBox(height: 24),
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(16),
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE7F8F0),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(Icons.insights_rounded, color: AppColors.greenDark),
+              ),
+              title: const Text(
+                'Daily performance & PDF',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: const Text(
+                'Review any day, mix Singles + Team Matches and export selected scorecards.',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _open(context, const DailyPerformanceScreen()),
+            ),
+          ),
+          const SizedBox(height: 18),
           SegmentedButton<_ProfileMatchFilter>(
             showSelectedIcon: false,
             segments: const [

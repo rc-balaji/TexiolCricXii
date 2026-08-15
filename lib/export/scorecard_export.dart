@@ -47,16 +47,25 @@ class ScorecardExport {
     final rankings = ScoringEngine.rankings(match);
     final logoData = await rootBundle.load('assets/branding/cricxii_app_icon.png');
     final logo = pw.MemoryImage(logoData.buffer.asUint8List());
-    final avatars = <String, pw.MemoryImage?>{};
-    for (final stats in rankings) {
-      final player = players[stats.playerId];
-      if (player != null) avatars[player.id] = await _avatarFor(player);
-    }
+    final avatarEntries = await Future.wait(
+      rankings.map((stats) async {
+        final player = players[stats.playerId];
+        if (player == null) return null;
+        return MapEntry<String, pw.MemoryImage?>(
+          player.id,
+          await _avatarFor(player),
+        );
+      }),
+    );
+    final avatars = <String, pw.MemoryImage?>{
+      for (final entry in avatarEntries)
+        if (entry != null) entry.key: entry.value,
+    };
 
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v1.6.0',
+      creator: 'CricXii v1.6.1',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -149,7 +158,7 @@ class ScorecardExport {
             ),
           ),
           _singlesScorecardTable(
-            const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+            const ['', 'BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
             scorecard.batters
                 .map(
                   (row) => [
@@ -169,14 +178,18 @@ class ScorecardExport {
             muted: muted,
             line: line,
             columnWidths: const {
-              0: pw.FlexColumnWidth(2.4),
-              1: pw.FlexColumnWidth(2.8),
-              2: pw.FlexColumnWidth(.65),
+              0: pw.FixedColumnWidth(24),
+              1: pw.FlexColumnWidth(2.2),
+              2: pw.FlexColumnWidth(2.6),
               3: pw.FlexColumnWidth(.65),
               4: pw.FlexColumnWidth(.65),
               5: pw.FlexColumnWidth(.65),
-              6: pw.FlexColumnWidth(.95),
+              6: pw.FlexColumnWidth(.65),
+              7: pw.FlexColumnWidth(.95),
             },
+            playerIds: scorecard.batters.map((row) => row.playerId).toList(growable: false),
+            players: players,
+            avatars: avatars,
           ),
           _singlesSummaryRow(
             'Extras',
@@ -195,7 +208,7 @@ class ScorecardExport {
               match.scoringMode == ScoringMode.ballByBall) ...[
             pw.SizedBox(height: 9),
             _singlesScorecardTable(
-              const ['BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+              const ['', 'BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
               scorecard.bowlers
                   .map(
                     (row) => [
@@ -213,14 +226,18 @@ class ScorecardExport {
               muted: muted,
               line: line,
               columnWidths: const {
-                0: pw.FlexColumnWidth(2.7),
-                1: pw.FlexColumnWidth(.72),
+                0: pw.FixedColumnWidth(24),
+                1: pw.FlexColumnWidth(2.45),
                 2: pw.FlexColumnWidth(.72),
                 3: pw.FlexColumnWidth(.72),
                 4: pw.FlexColumnWidth(.72),
                 5: pw.FlexColumnWidth(.72),
-                6: pw.FlexColumnWidth(.95),
+                6: pw.FlexColumnWidth(.72),
+                7: pw.FlexColumnWidth(.95),
               },
+              playerIds: scorecard.bowlers.map((row) => row.playerId).toList(growable: false),
+              players: players,
+              avatars: avatars,
             ),
           ],
           pw.SizedBox(height: 9),
@@ -283,7 +300,7 @@ class ScorecardExport {
                   child: pw.Text(
                     match.scoringMode == ScoringMode.ballByBall
                         ? '${OversFormat.setupOversLabel(match.ballLimit).toUpperCase()} EACH'
-                        : 'DIRECT RUNS • ${OversFormat.setupOversLabel(match.ballLimit).toUpperCase()}',
+                        : 'DIRECT RUNS | ${OversFormat.setupOversLabel(match.ballLimit).toUpperCase()}',
                     style: pw.TextStyle(
                       color: greenDark,
                       fontSize: 7.5,
@@ -679,6 +696,9 @@ class ScorecardExport {
     required PdfColor muted,
     required PdfColor line,
     required Map<int, pw.TableColumnWidth> columnWidths,
+    List<String>? playerIds,
+    Map<String, Player>? players,
+    Map<String, pw.MemoryImage?>? avatars,
   }) => pw.Table(
     border: pw.TableBorder.all(color: line, width: .45),
     columnWidths: columnWidths,
@@ -703,32 +723,50 @@ class ScorecardExport {
             )
             .toList(),
       ),
-      ...rows.map(
-        (row) => pw.TableRow(
-          children: row.asMap().entries
-              .map(
-                (entry) => pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                  child: pw.Text(
-                    entry.value,
-                    textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      color: entry.key == 0
-                          ? const PdfColor.fromInt(0xFF0B5FFF)
-                          : entry.key == 1
-                              ? muted
-                              : ink,
-                      fontSize: 6.9,
-                      fontWeight: entry.key == 2 || entry.key == 3
-                          ? pw.FontWeight.bold
-                          : pw.FontWeight.normal,
-                    ),
+      ...rows.asMap().entries.map((rowEntry) {
+        final row = rowEntry.value;
+        final playerId = playerIds == null || rowEntry.key >= playerIds.length
+            ? null
+            : playerIds[rowEntry.key];
+        final player = playerId == null ? null : players?[playerId];
+        return pw.TableRow(
+          children: [
+            if (playerIds != null)
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(3),
+                child: player == null
+                    ? pw.SizedBox(width: 18, height: 18)
+                    : _pdfAvatar(
+                        player,
+                        avatars?[player.id],
+                        size: 18,
+                        background: PdfColor.fromInt(player.avatarColor),
+                        textColor: PdfColors.white,
+                      ),
+              ),
+            ...row.asMap().entries.map(
+              (entry) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                child: pw.Text(
+                  entry.value,
+                  textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                  style: pw.TextStyle(
+                    color: entry.key == 0
+                        ? const PdfColor.fromInt(0xFF0B5FFF)
+                        : entry.key == 1
+                            ? muted
+                            : ink,
+                    fontSize: 6.9,
+                    fontWeight: entry.key == 2 || entry.key == 3
+                        ? pw.FontWeight.bold
+                        : pw.FontWeight.normal,
                   ),
                 ),
-              )
-              .toList(),
-        ),
-      ),
+              ),
+            ),
+          ],
+        );
+      }),
     ],
   );
 

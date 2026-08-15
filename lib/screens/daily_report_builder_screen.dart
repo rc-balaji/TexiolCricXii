@@ -548,6 +548,7 @@ class _MatchPreview extends StatelessWidget {
       _miniHeader(const ['Batter', 'R', 'B', '4s', '6s', 'SR']),
       ...data.batters.map(
         (row) => _miniRow(
+          row.playerId,
           name(row.playerId),
           row.dismissal.text(name),
           [
@@ -565,6 +566,7 @@ class _MatchPreview extends StatelessWidget {
         _miniHeader(const ['Bowler', 'O', 'R', 'W', 'WD', 'ECO']),
         ...data.bowlers.map(
           (row) => _miniRow(
+            row.playerId,
             name(row.playerId),
             null,
             [
@@ -604,6 +606,7 @@ class _MatchPreview extends StatelessWidget {
         _miniHeader(const ['Batter', 'R', 'B', '4s', '6s', 'SR']),
         ...data.batters.map(
           (row) => _miniRow(
+            row.playerId,
             name(row.playerId),
             row.dismissal.text(name),
             [
@@ -628,6 +631,7 @@ class _MatchPreview extends StatelessWidget {
           _miniHeader(const ['Bowler', 'O', 'M', 'R', 'W', 'ECO']),
           ...data.bowlers.map(
             (row) => _miniRow(
+              row.playerId,
               name(row.playerId),
               null,
               [
@@ -675,6 +679,7 @@ class _MatchPreview extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         child: Row(
           children: [
+            const SizedBox(width: 40),
             Expanded(flex: 4, child: Text(values.first, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11))),
             for (final value in values.skip(1))
               Expanded(
@@ -688,13 +693,30 @@ class _MatchPreview extends StatelessWidget {
         ),
       );
 
-  static Widget _miniRow(String player, String? dismissal, List<String> values) => Container(
+  Widget _miniRow(
+    String playerId,
+    String player,
+    String? dismissal,
+    List<String> values,
+  ) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         decoration: const BoxDecoration(
           border: Border(bottom: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
         ),
         child: Row(
           children: [
+            SizedBox(
+              width: 40,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: players[playerId] == null
+                    ? const CircleAvatar(
+                        radius: 14,
+                        child: Icon(Icons.person_rounded, size: 14),
+                      )
+                    : PlayerAvatar(player: players[playerId]!, radius: 14),
+              ),
+            ),
             Expanded(
               flex: 4,
               child: Column(

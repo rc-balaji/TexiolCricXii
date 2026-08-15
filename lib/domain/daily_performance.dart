@@ -247,7 +247,7 @@ class DailyPerformanceSummary {
           rankings: rankings,
           resultLabel: winner == null
               ? 'Completed Singles match'
-              : '${winner.points} PTS • Singles winner',
+              : '${winner.points} PTS | Singles winner',
           singlesMatch: match,
         ),
       );
