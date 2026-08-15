@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
 import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
+import '../domain/singles_scorecard.dart';
 import '../export/scorecard_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
@@ -341,6 +343,18 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
             ),
             const SizedBox(height: 22),
             const Text(
+              'SCORECARD',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.3,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _SinglesScorecard(match: match),
+            const SizedBox(height: 22),
+            const Text(
               'FINAL RANKING',
               style: TextStyle(
                 color: AppColors.muted,
@@ -462,4 +476,230 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
       ),
     );
   }
+}
+
+class _SinglesScorecard extends StatelessWidget {
+  const _SinglesScorecard({required this.match});
+
+  final CricketMatch match;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppScope.read(context);
+    final data = SinglesScorecardBuilder.build(match);
+    String name(String id) => store.playerById(id)?.name ?? id;
+
+    const battingWidths = <int, TableColumnWidth>{
+      0: FlexColumnWidth(2.2),
+      1: FlexColumnWidth(2.6),
+      2: FixedColumnWidth(34),
+      3: FixedColumnWidth(34),
+      4: FixedColumnWidth(34),
+      5: FixedColumnWidth(34),
+      6: FixedColumnWidth(48),
+    };
+    const bowlingWidths = <int, TableColumnWidth>{
+      0: FlexColumnWidth(2.7),
+      1: FixedColumnWidth(38),
+      2: FixedColumnWidth(34),
+      3: FixedColumnWidth(34),
+      4: FixedColumnWidth(34),
+      5: FixedColumnWidth(34),
+      6: FixedColumnWidth(48),
+    };
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            color: AppColors.greenDark,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Singles Match Scorecard',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${data.batters.length} Players',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _header(
+            const ['Batter', '', 'R', 'B', '4s', '6s', 'SR'],
+            battingWidths,
+          ),
+          Table(
+            columnWidths: battingWidths,
+            border: const TableBorder(
+              horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
+            ),
+            children: [
+              for (final row in data.batters)
+                TableRow(
+                  children: [
+                    _cell(name(row.playerId), linkLike: true),
+                    _cell(row.dismissal.text(name), muted: true),
+                    _cell('${row.runs}', bold: true, center: true),
+                    _cell(row.ballDataAvailable ? '${row.balls}' : '-', center: true),
+                    _cell(row.ballDataAvailable ? '${row.fours}' : '-', center: true),
+                    _cell(row.ballDataAvailable ? '${row.sixes}' : '-', center: true),
+                    _cell(
+                      row.ballDataAvailable && row.balls > 0
+                          ? row.strikeRate.toStringAsFixed(2)
+                          : '-',
+                      center: true,
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          _summaryRow(
+            label: 'Extras',
+            value: '${data.extras} (${data.extrasBreakdown})',
+          ),
+          _summaryRow(
+            label: 'Recorded Runs',
+            value: '${data.aggregateRuns} batter runs across all turns',
+            bold: true,
+          ),
+          if (data.bowlers.isNotEmpty && match.scoringMode == ScoringMode.ballByBall) ...[
+            const SizedBox(height: 8),
+            _header(
+              const ['Bowler', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+              bowlingWidths,
+            ),
+            Table(
+              columnWidths: bowlingWidths,
+              border: const TableBorder(
+                horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
+              ),
+              children: [
+                for (final row in data.bowlers)
+                  TableRow(
+                    children: [
+                      _cell(name(row.playerId), linkLike: true),
+                      _cell(row.overs, center: true),
+                      _cell('${row.runs}', center: true),
+                      _cell('${row.wickets}', bold: true, center: true),
+                      _cell('${row.noBalls}', center: true),
+                      _cell('${row.wides}', center: true),
+                      _cell(row.economy.toStringAsFixed(2), center: true),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+          Container(
+            color: const Color(0xFFF6F8F7),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Text(
+              'Ranking is shown separately below because Singles winner order is based on ${match.winnerMetric == MatchWinnerMetric.runs ? 'runs' : 'overall points'}, not a team innings total.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _header(
+    List<String> labels,
+    Map<int, TableColumnWidth> widths,
+  ) => Container(
+    color: const Color(0xFFE9E7E7),
+    child: Table(
+      columnWidths: widths,
+      children: [
+        TableRow(
+          children: labels
+              .map(
+                (label) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+                  child: Text(
+                    label,
+                    textAlign: label.isEmpty || label == 'Batter' || label == 'Bowler'
+                        ? TextAlign.left
+                        : TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    ),
+  );
+
+  static Widget _cell(
+    String value, {
+    bool bold = false,
+    bool muted = false,
+    bool linkLike = false,
+    bool center = false,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+    child: Text(
+      value,
+      textAlign: center ? TextAlign.center : TextAlign.left,
+      softWrap: true,
+      style: TextStyle(
+        color: linkLike
+            ? const Color(0xFF0B5FFF)
+            : muted
+                ? AppColors.muted
+                : AppColors.ink,
+        fontSize: 12,
+        height: 1.25,
+        fontWeight: bold ? FontWeight.w900 : FontWeight.w500,
+      ),
+    ),
+  );
+
+  static Widget _summaryRow({
+    required String label,
+    required String value,
+    bool bold = false,
+  }) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+    decoration: const BoxDecoration(
+      border: Border(top: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 105,
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: AppColors.ink,
+              fontWeight: bold ? FontWeight.w900 : FontWeight.w500,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

@@ -1,3 +1,13 @@
+# CricXii v1.6.0+23 — Cricket-Style Scorecards
+
+- Rebuilt Team Match result scorecards to follow the familiar cricket scorecard structure from the supplied reference: green innings strip, batter + dismissal detail, R/B/4s/6s/SR, Extras, Total, Yet to Bat, bowling O/M/R/W/NB/WD/ECO, Fall of Wickets and Partnerships.
+- Added captain `(c)`, wicketkeeper `(wk)` and Joker `(J)` markers to Team scorecard player labels.
+- Added reusable Team scorecard presentation logic so app result screens, Team PDFs and Today Performance PDFs calculate the same batting, dismissal, extras, bowling, FOW and partnership values.
+- Reworked Singles result presentation into a true scorecard section first, followed by the existing official ranking as a separate section. Direct Runs mode uses `-` for ball-derived fields that were never captured.
+- Reworked Singles PDF export into a cricket-style scorecard page plus a separate winner/ranking page.
+- Upgraded Today Performance full-match sections and preview from ranking-only blocks to full Singles/Team scorecards plus rankings.
+- Team PDFs now expose innings scorecard blocks as MultiPage-friendly widgets so large rosters and repeat Super Overs can paginate instead of being trapped inside one oversized column.
+
 # CricXii v1.5.0+22 — Live Batting Choices, Repeat Super Overs & Mixed Daily Reports
 
 - Analyzer hotfix: removed two invalid `const pw.TextStyle` usages in mixed daily PDF export and applied the null-aware assignment lint in Team scoring fallback logic.

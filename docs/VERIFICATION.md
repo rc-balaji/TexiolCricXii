@@ -1,4 +1,16 @@
-# CricXii v1.5.0 verification
+# CricXii v1.6.0 verification
+
+## v1.6 scorecard regression checks
+
+- Team result screen and Team PDF show the same batter order, dismissal text, R/B/4s/6s/SR, Extras, Total, Yet to Bat and bowling figures.
+- Bowling table columns are O/M/R/W/NB/WD/ECO and bowlers are shown in first-appearance order.
+- Fall of Wickets records dismissed player, cumulative score and legal-ball over position.
+- Partnerships split when the batting pair changes or a wicket falls and include each batter contribution.
+- Captain, wicketkeeper and Joker markers remain visible in Team scorecard labels.
+- Singles result screen shows scorecard first and official ranking separately; Direct Runs displays `-` for ball-derived fields.
+- Singles PDF contains a scorecard section/page and a separate ranking page.
+- Today Performance full-match preview/PDF uses full scorecards plus rankings for Singles and Team selections.
+- Large teams and repeat Super Overs paginate without wrapping a complete innings inside one unsplittable PDF column.
 
 ## v1.5 focused regression checks
 

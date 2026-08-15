@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../domain/cricket_match.dart';
 import '../domain/daily_performance.dart';
+import '../domain/enums.dart';
 import '../domain/player.dart';
+import '../domain/singles_scorecard.dart';
+import '../domain/team_match.dart';
+import '../domain/team_scorecard.dart';
+import '../domain/team_scoring_engine.dart';
 import '../export/daily_performance_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/player_avatar.dart';
@@ -185,7 +191,7 @@ class _DailyReportBuilderScreenState extends State<DailyReportBuilderScreen> {
           _check('Overall rankings', _overallRanking, (value) => _overallRanking = value),
           _check('Player performance', _playerPerformance, (value) => _playerPerformance = value),
           _check('Match-wise results', _matchSummary, (value) => _matchSummary = value),
-          _check('Full rankings per match', _matchRankings, (value) => _matchRankings = value),
+          _check('Full scorecards + rankings', _matchRankings, (value) => _matchRankings = value),
           const SizedBox(height: 22),
           const _SectionTitle('Include matches'),
           const SizedBox(height: 8),
@@ -447,7 +453,7 @@ class _DailyReportPreviewScreen extends StatelessWidget {
               const SizedBox(height: 14),
             ],
             if (options.matchRankings) ...[
-              const _SectionTitle('Full rankings per match'),
+              const _SectionTitle('Full scorecards + rankings'),
               ...summary.matches.map((match) => _MatchPreview(match: match, players: players)),
             ],
           ],
@@ -489,14 +495,33 @@ class _MatchPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
         margin: const EdgeInsets.only(bottom: 12),
+        clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(match.title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-              Text('${match.isSingles ? 'Singles' : 'Team Match'} • ${match.resultLabel}', style: const TextStyle(color: AppColors.muted)),
-              const Divider(height: 20),
+              Text(
+                '${match.isSingles ? 'Singles' : 'Team Match'} • ${match.resultLabel}',
+                style: const TextStyle(color: AppColors.muted),
+              ),
+              const SizedBox(height: 10),
+              if (match.teamMatch != null)
+                ..._teamScorecards(match.teamMatch!)
+              else if (match.singlesMatch != null)
+                ..._singlesScorecard(match.singlesMatch!),
+              const SizedBox(height: 12),
+              const Text(
+                'RANKING',
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: 4),
               ...match.rankings.asMap().entries.map((entry) {
                 final row = entry.value;
                 return Padding(
@@ -512,6 +537,199 @@ class _MatchPreview extends StatelessWidget {
               }),
             ],
           ),
+        ),
+      );
+
+  List<Widget> _singlesScorecard(CricketMatch value) {
+    final data = SinglesScorecardBuilder.build(value);
+    String name(String id) => players[id]?.name ?? id;
+    return [
+      _greenBar('Singles Match Scorecard', '${data.batters.length} Players'),
+      _miniHeader(const ['Batter', 'R', 'B', '4s', '6s', 'SR']),
+      ...data.batters.map(
+        (row) => _miniRow(
+          name(row.playerId),
+          row.dismissal.text(name),
+          [
+            '${row.runs}',
+            row.ballDataAvailable ? '${row.balls}' : '-',
+            row.ballDataAvailable ? '${row.fours}' : '-',
+            row.ballDataAvailable ? '${row.sixes}' : '-',
+            row.ballDataAvailable && row.balls > 0 ? row.strikeRate.toStringAsFixed(1) : '-',
+          ],
+        ),
+      ),
+      _summary('Extras', '${data.extras} (${data.extrasBreakdown})'),
+      if (data.bowlers.isNotEmpty && value.scoringMode == ScoringMode.ballByBall) ...[
+        const SizedBox(height: 8),
+        _miniHeader(const ['Bowler', 'O', 'R', 'W', 'WD', 'ECO']),
+        ...data.bowlers.map(
+          (row) => _miniRow(
+            name(row.playerId),
+            null,
+            [
+              row.overs,
+              '${row.runs}',
+              '${row.wickets}',
+              '${row.wides}',
+              row.economy.toStringAsFixed(1),
+            ],
+          ),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _teamScorecards(TeamMatch value) {
+    String name(String id) {
+      final base = players[id]?.name ?? id;
+      final side = value.teamA.playerIds.contains(id) ? value.teamA : value.teamB;
+      final tags = <String>[
+        if (side.captainPlayerId == id) 'c',
+        if (side.wicketkeeperPlayerId == id) 'wk',
+        if (id == value.commonJokerPlayerId) 'J',
+      ];
+      return tags.isEmpty ? base : '$base (${tags.join(', ')})';
+    }
+
+    final widgets = <Widget>[];
+    for (final innings in value.innings) {
+      final batting = value.side(innings.battingTeamId);
+      final data = TeamScorecardBuilder.build(value, innings);
+      widgets.addAll([
+        _greenBar(
+          '${batting.name} ${TeamScoringEngine.inningsLabel(innings)}',
+          '${data.total}-${data.wickets} (${data.overs} Ov)',
+        ),
+        _miniHeader(const ['Batter', 'R', 'B', '4s', '6s', 'SR']),
+        ...data.batters.map(
+          (row) => _miniRow(
+            name(row.playerId),
+            row.dismissal.text(name),
+            [
+              '${row.runs}',
+              '${row.balls}',
+              '${row.fours}',
+              '${row.sixes}',
+              row.strikeRate.toStringAsFixed(1),
+            ],
+          ),
+        ),
+        _summary('Extras', '${data.extras} (${data.extrasBreakdown})'),
+        _summary(
+          'Total',
+          '${data.total}-${data.wickets} (${data.overs} Overs, RR ${data.runRate.toStringAsFixed(2)})',
+          bold: true,
+        ),
+        if (data.yetToBat.isNotEmpty)
+          _summary('Yet to Bat', data.yetToBat.map(name).join(', ')),
+        if (data.bowlers.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _miniHeader(const ['Bowler', 'O', 'M', 'R', 'W', 'ECO']),
+          ...data.bowlers.map(
+            (row) => _miniRow(
+              name(row.playerId),
+              null,
+              [
+                row.overs,
+                '${row.maidens}',
+                '${row.runs}',
+                '${row.wickets}',
+                row.economy.toStringAsFixed(1),
+              ],
+            ),
+          ),
+        ],
+        if (data.falls.isNotEmpty)
+          _summary(
+            'Fall of Wickets',
+            data.falls.map((fall) => '${name(fall.playerId)} ${fall.scoreLabel} (${fall.overLabel})').join(', '),
+          ),
+        const SizedBox(height: 10),
+      ]);
+    }
+    return widgets;
+  }
+
+  static Widget _greenBar(String left, String right) => Container(
+        color: AppColors.greenDark,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                left,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12),
+              ),
+            ),
+            Text(
+              right,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+
+  static Widget _miniHeader(List<String> values) => Container(
+        color: const Color(0xFFE9E7E7),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        child: Row(
+          children: [
+            Expanded(flex: 4, child: Text(values.first, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11))),
+            for (final value in values.skip(1))
+              Expanded(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 10),
+                ),
+              ),
+          ],
+        ),
+      );
+
+  static Widget _miniRow(String player, String? dismissal, List<String> values) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(player, style: const TextStyle(color: Color(0xFF0B5FFF), fontSize: 11.5)),
+                  if (dismissal != null)
+                    Text(dismissal, style: const TextStyle(color: AppColors.muted, fontSize: 9.5)),
+                ],
+              ),
+            ),
+            for (final value in values)
+              Expanded(
+                child: Text(value, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10.5)),
+              ),
+          ],
+        ),
+      );
+
+  static Widget _summary(String label, String value, {bool bold = false}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 95, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11))),
+            Expanded(
+              child: Text(
+                value,
+                style: TextStyle(fontWeight: bold ? FontWeight.w900 : FontWeight.w500, fontSize: 11),
+              ),
+            ),
+          ],
         ),
       );
 }

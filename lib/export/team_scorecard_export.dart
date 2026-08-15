@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import '../domain/enums.dart';
 import '../domain/player.dart';
 import '../domain/team_match.dart';
+import '../domain/team_scorecard.dart';
 import '../domain/team_scoring_engine.dart';
 
 class TeamScorecardExport {
@@ -141,7 +142,7 @@ class TeamScorecardExport {
           _details(match, pale, ink, muted),
           for (final innings in match.innings) ...[
             pw.SizedBox(height: 18),
-            _inningsSection(
+            ..._inningsSection(
               match,
               innings,
               players,
@@ -309,7 +310,7 @@ class TeamScorecardExport {
     );
   }
 
-  static pw.Widget _inningsSection(
+  static List<pw.Widget> _inningsSection(
     TeamMatch match,
     TeamInnings innings,
     Map<String, Player> players, {
@@ -320,103 +321,322 @@ class TeamScorecardExport {
     required PdfColor line,
   }) {
     final batting = match.side(innings.battingTeamId);
-    final bowling = match.side(innings.bowlingTeamId);
-    final inningsStats = TeamScoringEngine.inningsAppearanceStats(match, innings);
-    TeamPlayerMatchStats stat(String teamId, String playerId) =>
-        inningsStats['$teamId:$playerId'] ??
-        TeamPlayerMatchStats(playerId: playerId, teamId: teamId);
-    final battingRows = TeamScoringEngine.battingDisplayOrder(match, innings).map((id) {
-      final value = stat(batting.id, id);
-      final status = value.dismissed
-          ? 'out'
-          : value.balls == 0 && value.runs == 0
-              ? 'did not bat'
-              : 'not out';
-      return [
-        '${players[id]?.name ?? id}${id == match.commonJokerPlayerId ? ' (J)' : ''}',
-        status,
-        '${value.runs}',
-        '${value.balls}',
-        '${value.fours}',
-        '${value.sixes}',
-        value.strikeRate.toStringAsFixed(1),
+    final data = TeamScorecardBuilder.build(match, innings);
+    String name(String id) {
+      final value = players[id]?.name ?? id;
+      final side = match.teamA.playerIds.contains(id) ? match.teamA : match.teamB;
+      final tags = <String>[
+        if (side.captainPlayerId == id) 'c',
+        if (side.wicketkeeperPlayerId == id) 'wk',
+        if (id == match.commonJokerPlayerId) 'J',
       ];
-    }).toList();
-    final bowlingRows = bowling.playerIds
-        .map((id) => stat(bowling.id, id))
-        .where((value) => value.ballsBowled > 0)
+      return tags.isEmpty ? value : '$value (${tags.join(', ')})';
+    }
+
+    final battingRows = data.batters
         .map(
-          (value) => [
-            '${players[value.playerId]?.name ?? value.playerId}${value.playerId == match.commonJokerPlayerId ? ' (J)' : ''}',
-            '${value.ballsBowled ~/ match.rules.ballsPerOver}.${value.ballsBowled % match.rules.ballsPerOver}',
-            '${value.runsConceded}',
-            '${value.wickets}',
-            value.economy.toStringAsFixed(2),
-            '${value.wides}',
-            '${value.noBalls}',
+          (row) => [
+            name(row.playerId),
+            row.dismissal.text(name),
+            '${row.runs}',
+            '${row.balls}',
+            '${row.fours}',
+            '${row.sixes}',
+            row.strikeRate.toStringAsFixed(2),
           ],
         )
-        .toList();
-    var running = 0;
-    final falls = <String>[];
-    for (final event in innings.events) {
-      running += event.totalRuns;
-      if (event.isWicket) {
-        falls.add('$running-${TeamScoringEngine.wicketsBefore(innings, event.sequence) + 1} (${players[event.dismissedPlayerId]?.name ?? event.dismissedPlayerId})');
-      }
-    }
-    final extraBreakdown = <ExtraType, int>{};
-    for (final event in innings.events) {
-      if (event.extraType != ExtraType.none) {
-        extraBreakdown[event.extraType] = (extraBreakdown[event.extraType] ?? 0) + event.extraRuns;
-      }
-    }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        _section(
-          '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} | ${batting.name.toUpperCase()} '
-          '${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}',
-          ink,
+        .toList(growable: false);
+    final bowlingRows = data.bowlers
+        .map(
+          (row) => [
+            name(row.playerId),
+            row.overs,
+            '${row.maidens}',
+            '${row.runs}',
+            '${row.wickets}',
+            '${row.noBalls}',
+            '${row.wides}',
+            row.economy.toStringAsFixed(2),
+          ],
+        )
+        .toList(growable: false);
+    final fallRows = data.falls
+        .map(
+          (fall) => [name(fall.playerId), fall.scoreLabel, fall.overLabel],
+        )
+        .toList(growable: false);
+
+    return [
+        pw.Container(
+          width: double.infinity,
+          color: green,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Text(
+                  '${batting.name} ${TeamScoringEngine.inningsLabel(innings)}',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.Text(
+                '${data.total}-${data.wickets} (${data.overs} Ov)',
+                style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 10,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
-        pw.SizedBox(height: 6),
-        _table(
-          const ['BATTER', 'STATUS', 'R', 'B', '4', '6', 'SR'],
+        if (innings.target != null)
+          pw.Container(
+            width: double.infinity,
+            color: pale,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            child: pw.Text(
+              'Target ${innings.target}${innings.completionReason == null ? '' : ' | ${innings.completionReason}'}',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 7.2,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+        _scorecardTable(
+          const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
           battingRows,
           ink: ink,
-          green: green,
-          pale: pale,
+          muted: muted,
           line: line,
-          firstFlex: 2.5,
+          columnWidths: const {
+            0: pw.FlexColumnWidth(2.4),
+            1: pw.FlexColumnWidth(2.8),
+            2: pw.FlexColumnWidth(.65),
+            3: pw.FlexColumnWidth(.65),
+            4: pw.FlexColumnWidth(.65),
+            5: pw.FlexColumnWidth(.65),
+            6: pw.FlexColumnWidth(.95),
+          },
         ),
-        pw.SizedBox(height: 8),
-        pw.Text(
-          'Extras ${TeamScoringEngine.extras(innings)} '
-          '${extraBreakdown.entries.map((entry) => '${_extraShort(entry.key)} ${entry.value}').join(', ')}',
-          style: pw.TextStyle(color: muted, fontSize: 7.5),
+        _scoreSummaryRow(
+          'Extras',
+          '${data.extras} (${data.extrasBreakdown})',
+          ink: ink,
+          line: line,
         ),
-        if (falls.isNotEmpty) ...[
-          pw.SizedBox(height: 3),
-          pw.Text('Fall of wickets: ${falls.join(', ')}', style: pw.TextStyle(color: muted, fontSize: 7.5)),
-        ],
-        pw.SizedBox(height: 10),
-        pw.Text('BOWLING | ${bowling.name.toUpperCase()}', style: pw.TextStyle(color: ink, fontSize: 9, fontWeight: pw.FontWeight.bold)),
-        pw.SizedBox(height: 5),
-        if (bowlingRows.isEmpty)
-          pw.Text('No bowling figures yet.', style: pw.TextStyle(color: muted, fontSize: 8))
-        else
-          _table(
-            const ['BOWLER', 'O', 'R', 'W', 'ECO', 'WD', 'NB'],
+        _scoreSummaryRow(
+          'Total',
+          '${data.total}-${data.wickets} (${data.overs} Overs, RR: ${data.runRate.toStringAsFixed(2)})',
+          ink: ink,
+          line: line,
+          bold: true,
+        ),
+        if (data.yetToBat.isNotEmpty)
+          _scoreSummaryRow(
+            'Yet to Bat',
+            data.yetToBat.map(name).join(', '),
+            ink: ink,
+            line: line,
+            valueColor: green,
+          ),
+        if (bowlingRows.isNotEmpty) ...[
+          pw.SizedBox(height: 8),
+          _scorecardTable(
+            const ['BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
             bowlingRows,
             ink: ink,
-            green: green,
-            pale: pale,
+            muted: muted,
             line: line,
-            firstFlex: 2.5,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2.7),
+              1: pw.FlexColumnWidth(.72),
+              2: pw.FlexColumnWidth(.65),
+              3: pw.FlexColumnWidth(.65),
+              4: pw.FlexColumnWidth(.65),
+              5: pw.FlexColumnWidth(.7),
+              6: pw.FlexColumnWidth(.7),
+              7: pw.FlexColumnWidth(.92),
+            },
           ),
-      ],
-    );
+        ],
+        if (fallRows.isNotEmpty) ...[
+          pw.SizedBox(height: 8),
+          _scorecardTable(
+            const ['FALL OF WICKETS', 'SCORE', 'OVER'],
+            fallRows,
+            ink: ink,
+            muted: muted,
+            line: line,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(4),
+              1: pw.FlexColumnWidth(1.1),
+              2: pw.FlexColumnWidth(1.1),
+            },
+          ),
+        ],
+        if (data.partnerships.isNotEmpty) ...[
+          pw.SizedBox(height: 8),
+          pw.Container(
+            width: double.infinity,
+            color: const PdfColor.fromInt(0xFFE9E7E7),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+            child: pw.Text(
+              'PARTNERSHIPS',
+              style: pw.TextStyle(
+                color: ink,
+                fontSize: 7.2,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+          ...data.partnerships.map(
+            (partnership) => pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+              decoration: pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(color: line, width: .5)),
+              ),
+              child: pw.Row(
+                children: [
+                  pw.Expanded(
+                    child: pw.Text(
+                      partnership.playerIds
+                          .map(
+                            (id) =>
+                                '${name(id)} ${partnership.runsByPlayer[id] ?? 0}(${partnership.ballsByPlayer[id] ?? 0})',
+                          )
+                          .join('  |  '),
+                      style: pw.TextStyle(color: green, fontSize: 6.8),
+                    ),
+                  ),
+                  pw.Text(
+                    '${partnership.runs}(${partnership.balls})',
+                    style: pw.TextStyle(
+                      color: ink,
+                      fontSize: 7,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+    ];
   }
+
+  static pw.Widget _scorecardTable(
+    List<String> headers,
+    List<List<String>> rows, {
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required Map<int, pw.TableColumnWidth> columnWidths,
+  }) => pw.Table(
+    border: pw.TableBorder.all(color: line, width: .45),
+    columnWidths: columnWidths,
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(
+          color: PdfColor.fromInt(0xFFE9E7E7),
+        ),
+        children: headers
+            .map(
+              (value) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                child: pw.Text(
+                  value,
+                  style: pw.TextStyle(
+                    color: ink,
+                    fontSize: 6.8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+      ...rows.map(
+        (row) => pw.TableRow(
+          children: row.asMap().entries
+              .map(
+                (entry) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                  child: pw.Text(
+                    entry.value,
+                    textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      color: entry.key == 0
+                          ? greenForScorecard
+                          : entry.key == 1
+                              ? muted
+                              : ink,
+                      fontSize: 6.9,
+                      fontWeight: entry.key == 2 || entry.key == 4
+                          ? pw.FontWeight.bold
+                          : pw.FontWeight.normal,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    ],
+  );
+
+  static const PdfColor greenForScorecard = PdfColor.fromInt(0xFF0B5FFF);
+
+  static pw.Widget _scoreSummaryRow(
+    String label,
+    String value, {
+    required PdfColor ink,
+    required PdfColor line,
+    bool bold = false,
+    PdfColor? valueColor,
+  }) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+    decoration: pw.BoxDecoration(
+      border: pw.Border(
+        left: pw.BorderSide(color: line, width: .45),
+        right: pw.BorderSide(color: line, width: .45),
+        bottom: pw.BorderSide(color: line, width: .45),
+      ),
+    ),
+    child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(
+          width: 88,
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              color: ink,
+              fontSize: 7,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Text(
+            value,
+            style: pw.TextStyle(
+              color: valueColor ?? ink,
+              fontSize: 7,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   static pw.Widget _table(
     List<String> headers,

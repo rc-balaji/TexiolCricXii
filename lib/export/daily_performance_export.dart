@@ -6,10 +6,13 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
+import '../domain/cricket_match.dart';
 import '../domain/daily_performance.dart';
 import '../domain/enums.dart';
 import '../domain/player.dart';
+import '../domain/singles_scorecard.dart';
 import '../domain/team_match.dart';
+import '../domain/team_scorecard.dart';
 import '../domain/team_scoring_engine.dart';
 
 class DailyReportOptions {
@@ -371,7 +374,7 @@ class DailyPerformanceExport {
 
           if (options.matchRankings && summary.matches.isNotEmpty) {
             widgets.addAll([
-              _section('FULL RANKINGS PER MATCH', ink),
+              _section('FULL SCORECARDS + RANKINGS', ink),
               pw.SizedBox(height: 7),
             ]);
             for (var index = 0; index < summary.matches.length; index++) {
@@ -539,11 +542,155 @@ class DailyPerformanceExport {
           line: line,
         ),
       );
+    } else if (entry.singlesMatch != null) {
+      widgets.addAll(
+        _singlesMatchDetails(
+          entry.singlesMatch!,
+          entry,
+          players,
+          ink: ink,
+          green: green,
+          muted: muted,
+          pale: pale,
+          line: line,
+        ),
+      );
     } else {
       widgets.add(
         _rankingTable(entry.rankings, players, ink, green, pale, line),
       );
     }
+    return widgets;
+  }
+
+  static List<pw.Widget> _singlesMatchDetails(
+    CricketMatch match,
+    DailyMatchEntry entry,
+    Map<String, Player> players, {
+    required PdfColor ink,
+    required PdfColor green,
+    required PdfColor muted,
+    required PdfColor pale,
+    required PdfColor line,
+  }) {
+    final data = SinglesScorecardBuilder.build(match);
+    String name(String id) => players[id]?.name ?? id;
+    final widgets = <pw.Widget>[
+      pw.Container(
+        width: double.infinity,
+        color: green,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              child: pw.Text(
+                'SINGLES MATCH SCORECARD',
+                style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8.4,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.Text(
+              '${data.batters.length} players',
+              style: const pw.TextStyle(color: PdfColors.white, fontSize: 7),
+            ),
+          ],
+        ),
+      ),
+      _scorecardTable(
+        const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+        data.batters
+            .map(
+              (row) => [
+                name(row.playerId),
+                row.dismissal.text(name),
+                '${row.runs}',
+                row.ballDataAvailable ? '${row.balls}' : '-',
+                row.ballDataAvailable ? '${row.fours}' : '-',
+                row.ballDataAvailable ? '${row.sixes}' : '-',
+                row.ballDataAvailable && row.balls > 0
+                    ? row.strikeRate.toStringAsFixed(2)
+                    : '-',
+              ],
+            )
+            .toList(growable: false),
+        ink: ink,
+        muted: muted,
+        line: line,
+        columnWidths: const {
+          0: pw.FlexColumnWidth(2.4),
+          1: pw.FlexColumnWidth(2.8),
+          2: pw.FlexColumnWidth(.65),
+          3: pw.FlexColumnWidth(.65),
+          4: pw.FlexColumnWidth(.65),
+          5: pw.FlexColumnWidth(.65),
+          6: pw.FlexColumnWidth(.95),
+        },
+      ),
+      _scoreSummaryRow(
+        'Extras',
+        '${data.extras} (${data.extrasBreakdown})',
+        ink: ink,
+        line: line,
+      ),
+      _scoreSummaryRow(
+        'Recorded Runs',
+        '${data.aggregateRuns} batter runs across all turns',
+        ink: ink,
+        line: line,
+        bold: true,
+      ),
+    ];
+
+    if (data.bowlers.isNotEmpty && match.scoringMode == ScoringMode.ballByBall) {
+      widgets.addAll([
+        pw.SizedBox(height: 7),
+        _scorecardTable(
+          const ['BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+          data.bowlers
+              .map(
+                (row) => [
+                  name(row.playerId),
+                  row.overs,
+                  '${row.runs}',
+                  '${row.wickets}',
+                  '${row.noBalls}',
+                  '${row.wides}',
+                  row.economy.toStringAsFixed(2),
+                ],
+              )
+              .toList(growable: false),
+          ink: ink,
+          muted: muted,
+          line: line,
+          columnWidths: const {
+            0: pw.FlexColumnWidth(2.7),
+            1: pw.FlexColumnWidth(.72),
+            2: pw.FlexColumnWidth(.72),
+            3: pw.FlexColumnWidth(.72),
+            4: pw.FlexColumnWidth(.72),
+            5: pw.FlexColumnWidth(.72),
+            6: pw.FlexColumnWidth(.95),
+          },
+        ),
+      ]);
+    }
+
+    widgets.addAll([
+      pw.SizedBox(height: 8),
+      pw.Text(
+        'FINAL RANKING',
+        style: pw.TextStyle(
+          color: ink,
+          fontSize: 8.5,
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+      pw.SizedBox(height: 5),
+      _rankingTable(entry.rankings, players, ink, green, pale, line),
+    ]);
     return widgets;
   }
 
@@ -586,32 +733,221 @@ class DailyPerformanceExport {
       pw.SizedBox(height: 8),
     ];
 
+    String name(String id) {
+      final value = players[id]?.name ?? id;
+      final side = match.teamA.playerIds.contains(id) ? match.teamA : match.teamB;
+      final tags = <String>[
+        if (side.captainPlayerId == id) 'c',
+        if (side.wicketkeeperPlayerId == id) 'wk',
+        if (id == match.commonJokerPlayerId) 'J',
+      ];
+      return tags.isEmpty ? value : '$value (${tags.join(', ')})';
+    }
+
     for (final innings in match.innings) {
+      final batting = match.side(innings.battingTeamId);
+      final data = TeamScorecardBuilder.build(match, innings);
       widgets.addAll([
-        pw.Text(
-          '${TeamScoringEngine.inningsLabel(innings).toUpperCase()} | ${match.side(innings.battingTeamId).name.toUpperCase()} ${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)} (${TeamScoringEngine.overLabel(match, innings)} ov)',
-          style: pw.TextStyle(
-            color: ink,
-            fontSize: 8.5,
-            fontWeight: pw.FontWeight.bold,
+        pw.Container(
+          width: double.infinity,
+          color: green,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Text(
+                  '${batting.name} ${TeamScoringEngine.inningsLabel(innings)}',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 8.4,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.Text(
+                '${data.total}-${data.wickets} (${data.overs} Ov)',
+                style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8.4,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
           ),
         ),
         if (innings.target != null)
-          pw.Text(
-            'Target ${innings.target} | ${innings.completionReason ?? ''}',
-            style: pw.TextStyle(color: muted, fontSize: 6.5),
+          pw.Container(
+            width: double.infinity,
+            color: pale,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: pw.Text(
+              'Target ${innings.target}${innings.completionReason == null ? '' : ' | ${innings.completionReason}'}',
+              style: pw.TextStyle(color: green, fontSize: 6.6),
+            ),
           ),
-        pw.SizedBox(height: 5),
-        _teamBattingTable(match, innings, players, ink, green, pale, line),
-        pw.SizedBox(height: 6),
-        _teamBowlingTable(match, innings, players, ink, green, pale, line),
-        pw.SizedBox(height: 9),
+        _scorecardTable(
+          const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+          data.batters
+              .map(
+                (row) => [
+                  name(row.playerId),
+                  row.dismissal.text(name),
+                  '${row.runs}',
+                  '${row.balls}',
+                  '${row.fours}',
+                  '${row.sixes}',
+                  row.strikeRate.toStringAsFixed(2),
+                ],
+              )
+              .toList(growable: false),
+          ink: ink,
+          muted: muted,
+          line: line,
+          columnWidths: const {
+            0: pw.FlexColumnWidth(2.4),
+            1: pw.FlexColumnWidth(2.8),
+            2: pw.FlexColumnWidth(.65),
+            3: pw.FlexColumnWidth(.65),
+            4: pw.FlexColumnWidth(.65),
+            5: pw.FlexColumnWidth(.65),
+            6: pw.FlexColumnWidth(.95),
+          },
+        ),
+        _scoreSummaryRow(
+          'Extras',
+          '${data.extras} (${data.extrasBreakdown})',
+          ink: ink,
+          line: line,
+        ),
+        _scoreSummaryRow(
+          'Total',
+          '${data.total}-${data.wickets} (${data.overs} Overs, RR: ${data.runRate.toStringAsFixed(2)})',
+          ink: ink,
+          line: line,
+          bold: true,
+        ),
+        if (data.yetToBat.isNotEmpty)
+          _scoreSummaryRow(
+            'Yet to Bat',
+            data.yetToBat.map(name).join(', '),
+            ink: ink,
+            line: line,
+            valueColor: green,
+          ),
       ]);
+
+      if (data.bowlers.isNotEmpty) {
+        widgets.addAll([
+          pw.SizedBox(height: 6),
+          _scorecardTable(
+            const ['BOWLER', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
+            data.bowlers
+                .map(
+                  (row) => [
+                    name(row.playerId),
+                    row.overs,
+                    '${row.maidens}',
+                    '${row.runs}',
+                    '${row.wickets}',
+                    '${row.noBalls}',
+                    '${row.wides}',
+                    row.economy.toStringAsFixed(2),
+                  ],
+                )
+                .toList(growable: false),
+            ink: ink,
+            muted: muted,
+            line: line,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2.7),
+              1: pw.FlexColumnWidth(.72),
+              2: pw.FlexColumnWidth(.65),
+              3: pw.FlexColumnWidth(.65),
+              4: pw.FlexColumnWidth(.65),
+              5: pw.FlexColumnWidth(.7),
+              6: pw.FlexColumnWidth(.7),
+              7: pw.FlexColumnWidth(.92),
+            },
+          ),
+        ]);
+      }
+
+      if (data.falls.isNotEmpty) {
+        widgets.addAll([
+          pw.SizedBox(height: 6),
+          _scorecardTable(
+            const ['FALL OF WICKETS', 'SCORE', 'OVER'],
+            data.falls
+                .map((fall) => [name(fall.playerId), fall.scoreLabel, fall.overLabel])
+                .toList(growable: false),
+            ink: ink,
+            muted: muted,
+            line: line,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(4),
+              1: pw.FlexColumnWidth(1.1),
+              2: pw.FlexColumnWidth(1.1),
+            },
+          ),
+        ]);
+      }
+
+      if (data.partnerships.isNotEmpty) {
+        widgets.addAll([
+          pw.SizedBox(height: 6),
+          pw.Container(
+            width: double.infinity,
+            color: const PdfColor.fromInt(0xFFE9E7E7),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+            child: pw.Text(
+              'PARTNERSHIPS',
+              style: pw.TextStyle(
+                color: ink,
+                fontSize: 6.8,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+          ...data.partnerships.map(
+            (partnership) => pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 4.5),
+              decoration: pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(color: line, width: .45)),
+              ),
+              child: pw.Row(
+                children: [
+                  pw.Expanded(
+                    child: pw.Text(
+                      partnership.playerIds
+                          .map(
+                            (id) =>
+                                '${name(id)} ${partnership.runsByPlayer[id] ?? 0}(${partnership.ballsByPlayer[id] ?? 0})',
+                          )
+                          .join(' | '),
+                      style: pw.TextStyle(color: green, fontSize: 6.4),
+                    ),
+                  ),
+                  pw.Text(
+                    '${partnership.runs}(${partnership.balls})',
+                    style: pw.TextStyle(
+                      color: ink,
+                      fontSize: 6.5,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ]);
+      }
+      widgets.add(pw.SizedBox(height: 9));
     }
 
     widgets.addAll([
       pw.Text(
-        'TEAM MATCH PLAYER POINTS',
+        'TEAM MATCH PLAYER RANKING',
         style: pw.TextStyle(
           color: ink,
           fontSize: 8.5,
@@ -624,91 +960,110 @@ class DailyPerformanceExport {
     return widgets;
   }
 
-  static pw.Widget _teamBattingTable(
-    TeamMatch match,
-    TeamInnings innings,
-    Map<String, Player> players,
-    PdfColor ink,
-    PdfColor green,
-    PdfColor pale,
-    PdfColor line,
-  ) {
-    final order = TeamScoringEngine.battingDisplayOrder(match, innings);
-    final rows = order.map((id) {
-      final events = innings.events.where((event) => event.strikerId == id).toList();
-      final runs = events.fold<int>(0, (sum, event) => sum + event.batRuns);
-      final balls = events.where((event) => event.legalBall).length;
-      final dismissed = innings.dismissedPlayerIds.contains(id);
-      final status = dismissed
-          ? 'out'
-          : events.isEmpty
-              ? 'did not bat'
-              : 'not out';
-      return [
-        '${players[id]?.name ?? id}${id == match.commonJokerPlayerId ? ' (J)' : ''}',
-        status,
-        '$runs',
-        '$balls',
-      ];
-    }).toList();
-    return _simpleTable(
-      const ['BATTER', 'STATUS', 'R', 'B'],
-      rows,
-      ink: ink,
-      green: green,
-      pale: pale,
-      line: line,
-      firstFlex: 2.5,
-    );
-  }
+  static pw.Widget _scorecardTable(
+    List<String> headers,
+    List<List<String>> rows, {
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required Map<int, pw.TableColumnWidth> columnWidths,
+  }) => pw.Table(
+    border: pw.TableBorder.all(color: line, width: .45),
+    columnWidths: columnWidths,
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(
+          color: PdfColor.fromInt(0xFFE9E7E7),
+        ),
+        children: headers
+            .map(
+              (value) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
+                child: pw.Text(
+                  value,
+                  style: pw.TextStyle(
+                    color: ink,
+                    fontSize: 6.5,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+      ...rows.map(
+        (row) => pw.TableRow(
+          children: row.asMap().entries
+              .map(
+                (cell) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4.5),
+                  child: pw.Text(
+                    cell.value,
+                    textAlign: cell.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      color: cell.key == 0
+                          ? const PdfColor.fromInt(0xFF0B5FFF)
+                          : cell.key == 1
+                              ? muted
+                              : ink,
+                      fontSize: 6.6,
+                      fontWeight: cell.key == 2 || cell.key == 4
+                          ? pw.FontWeight.bold
+                          : pw.FontWeight.normal,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    ],
+  );
 
-  static pw.Widget _teamBowlingTable(
-    TeamMatch match,
-    TeamInnings innings,
-    Map<String, Player> players,
-    PdfColor ink,
-    PdfColor green,
-    PdfColor pale,
-    PdfColor line,
-  ) {
-    final bowling = match.side(innings.bowlingTeamId);
-    final rows = <List<String>>[];
-    for (final id in bowling.playerIds) {
-      final events = innings.events.where((event) => event.bowlerId == id).toList();
-      if (events.isEmpty) continue;
-      final balls = events.where((event) => event.legalBall).length;
-      var conceded = 0;
-      var wickets = 0;
-      for (final event in events) {
-        final excluded = event.extraType == ExtraType.bye ||
-            event.extraType == ExtraType.legBye ||
-            event.extraType == ExtraType.penalty;
-        conceded += excluded ? event.batRuns : event.totalRuns;
-        if (event.isWicket && event.dismissalType.creditsBowler) wickets++;
-      }
-      rows.add([
-        '${players[id]?.name ?? id}${id == match.commonJokerPlayerId ? ' (J)' : ''}',
-        '${balls ~/ match.rules.ballsPerOver}.${balls % match.rules.ballsPerOver}',
-        '$conceded',
-        '$wickets',
-      ]);
-    }
-    if (rows.isEmpty) {
-      return pw.Text(
-        'No bowling figures.',
-        style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
-      );
-    }
-    return _simpleTable(
-      const ['BOWLER', 'O', 'R', 'W'],
-      rows,
-      ink: ink,
-      green: green,
-      pale: pale,
-      line: line,
-      firstFlex: 2.5,
-    );
-  }
+  static pw.Widget _scoreSummaryRow(
+    String label,
+    String value, {
+    required PdfColor ink,
+    required PdfColor line,
+    bool bold = false,
+    PdfColor? valueColor,
+  }) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 4.5),
+    decoration: pw.BoxDecoration(
+      border: pw.Border(
+        left: pw.BorderSide(color: line, width: .45),
+        right: pw.BorderSide(color: line, width: .45),
+        bottom: pw.BorderSide(color: line, width: .45),
+      ),
+    ),
+    child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(
+          width: 84,
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              color: ink,
+              fontSize: 6.7,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Text(
+            value,
+            style: pw.TextStyle(
+              color: valueColor ?? ink,
+              fontSize: 6.7,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   static pw.Widget _rankingTable(
     List<DailyMatchStanding> rankings,

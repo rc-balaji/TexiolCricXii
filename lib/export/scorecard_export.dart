@@ -11,6 +11,7 @@ import '../domain/enums.dart';
 import '../domain/match_planning.dart';
 import '../domain/player.dart';
 import '../domain/scoring_engine.dart';
+import '../domain/singles_scorecard.dart';
 
 class ScorecardExport {
   const ScorecardExport._();
@@ -55,7 +56,7 @@ class ScorecardExport {
     final document = pw.Document(
       title: 'CricXii Scorecard ${match.id}',
       author: 'CricXii by Texiol',
-      creator: 'CricXii v1.0.1',
+      creator: 'CricXii v1.6.0',
     );
 
     const ink = PdfColor.fromInt(0xFF071A13);
@@ -77,6 +78,164 @@ class ScorecardExport {
         : (pageContentWidth - ((podium.length - 1) * 8)) / podium.length;
     final compactRanking = rankings.length > 6;
     final shownRankings = rankings.take(12).toList(growable: false);
+    final scorecard = SinglesScorecardBuilder.build(match);
+    String playerName(String id) => players[id]?.name ?? id;
+
+    document.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(22, 20, 22, 18),
+        header: (_) => _header(logo: logo, ink: ink, green: green),
+        footer: (context) => pw.Container(
+          padding: const pw.EdgeInsets.only(top: 7),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(top: pw.BorderSide(color: line, width: .6)),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'CricXii | Singles scorecard',
+                style: const pw.TextStyle(color: muted, fontSize: 6.8),
+              ),
+              pw.Text(
+                'Page ${context.pageNumber}/${context.pagesCount} | ${match.id}',
+                style: const pw.TextStyle(color: muted, fontSize: 6.8),
+              ),
+            ],
+          ),
+        ),
+        build: (_) => [
+          pw.SizedBox(height: 12),
+          pw.Text(
+            match.title,
+            style: pw.TextStyle(
+              color: ink,
+              fontSize: 22,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Text(
+            '${_date(match.createdAt)} | Match ID ${match.id} | ${match.scoringMode.label}',
+            style: const pw.TextStyle(color: muted, fontSize: 8.2),
+          ),
+          pw.SizedBox(height: 11),
+          pw.Container(
+            width: double.infinity,
+            color: greenDark,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pw.Text(
+                    'Singles Match Scorecard',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 11,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+                pw.Text(
+                  '${scorecard.batters.length} Players',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _singlesScorecardTable(
+            const ['BATTER', '', 'R', 'B', '4s', '6s', 'SR'],
+            scorecard.batters
+                .map(
+                  (row) => [
+                    playerName(row.playerId),
+                    row.dismissal.text(playerName),
+                    '${row.runs}',
+                    row.ballDataAvailable ? '${row.balls}' : '-',
+                    row.ballDataAvailable ? '${row.fours}' : '-',
+                    row.ballDataAvailable ? '${row.sixes}' : '-',
+                    row.ballDataAvailable && row.balls > 0
+                        ? row.strikeRate.toStringAsFixed(2)
+                        : '-',
+                  ],
+                )
+                .toList(growable: false),
+            ink: ink,
+            muted: muted,
+            line: line,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2.4),
+              1: pw.FlexColumnWidth(2.8),
+              2: pw.FlexColumnWidth(.65),
+              3: pw.FlexColumnWidth(.65),
+              4: pw.FlexColumnWidth(.65),
+              5: pw.FlexColumnWidth(.65),
+              6: pw.FlexColumnWidth(.95),
+            },
+          ),
+          _singlesSummaryRow(
+            'Extras',
+            '${scorecard.extras} (${scorecard.extrasBreakdown})',
+            ink: ink,
+            line: line,
+          ),
+          _singlesSummaryRow(
+            'Recorded Runs',
+            '${scorecard.aggregateRuns} batter runs across all turns',
+            ink: ink,
+            line: line,
+            bold: true,
+          ),
+          if (scorecard.bowlers.isNotEmpty &&
+              match.scoringMode == ScoringMode.ballByBall) ...[
+            pw.SizedBox(height: 9),
+            _singlesScorecardTable(
+              const ['BOWLER', 'O', 'R', 'W', 'NB', 'WD', 'ECO'],
+              scorecard.bowlers
+                  .map(
+                    (row) => [
+                      playerName(row.playerId),
+                      row.overs,
+                      '${row.runs}',
+                      '${row.wickets}',
+                      '${row.noBalls}',
+                      '${row.wides}',
+                      row.economy.toStringAsFixed(2),
+                    ],
+                  )
+                  .toList(growable: false),
+              ink: ink,
+              muted: muted,
+              line: line,
+              columnWidths: const {
+                0: pw.FlexColumnWidth(2.7),
+                1: pw.FlexColumnWidth(.72),
+                2: pw.FlexColumnWidth(.72),
+                3: pw.FlexColumnWidth(.72),
+                4: pw.FlexColumnWidth(.72),
+                5: pw.FlexColumnWidth(.72),
+                6: pw.FlexColumnWidth(.95),
+              },
+            ),
+          ],
+          pw.SizedBox(height: 9),
+          pw.Container(
+            width: double.infinity,
+            color: pale,
+            padding: const pw.EdgeInsets.all(8),
+            child: pw.Text(
+              'Singles ranking is shown on the next page. It stays separate from this scorecard because the official winner is decided by ${match.winnerMetric == MatchWinnerMetric.runs ? 'runs' : 'overall points'}, not by a team innings total.',
+              style: const pw.TextStyle(color: muted, fontSize: 7.2),
+            ),
+          ),
+        ],
+      ),
+    );
 
     document.addPage(
       pw.Page(
@@ -510,6 +669,109 @@ class ScorecardExport {
           ),
         ],
       ),
+    ),
+  );
+
+  static pw.Widget _singlesScorecardTable(
+    List<String> headers,
+    List<List<String>> rows, {
+    required PdfColor ink,
+    required PdfColor muted,
+    required PdfColor line,
+    required Map<int, pw.TableColumnWidth> columnWidths,
+  }) => pw.Table(
+    border: pw.TableBorder.all(color: line, width: .45),
+    columnWidths: columnWidths,
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(
+          color: PdfColor.fromInt(0xFFE9E7E7),
+        ),
+        children: headers
+            .map(
+              (value) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                child: pw.Text(
+                  value,
+                  style: pw.TextStyle(
+                    color: ink,
+                    fontSize: 6.8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+      ...rows.map(
+        (row) => pw.TableRow(
+          children: row.asMap().entries
+              .map(
+                (entry) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                  child: pw.Text(
+                    entry.value,
+                    textAlign: entry.key < 2 ? pw.TextAlign.left : pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      color: entry.key == 0
+                          ? const PdfColor.fromInt(0xFF0B5FFF)
+                          : entry.key == 1
+                              ? muted
+                              : ink,
+                      fontSize: 6.9,
+                      fontWeight: entry.key == 2 || entry.key == 3
+                          ? pw.FontWeight.bold
+                          : pw.FontWeight.normal,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    ],
+  );
+
+  static pw.Widget _singlesSummaryRow(
+    String label,
+    String value, {
+    required PdfColor ink,
+    required PdfColor line,
+    bool bold = false,
+  }) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+    decoration: pw.BoxDecoration(
+      border: pw.Border(
+        left: pw.BorderSide(color: line, width: .45),
+        right: pw.BorderSide(color: line, width: .45),
+        bottom: pw.BorderSide(color: line, width: .45),
+      ),
+    ),
+    child: pw.Row(
+      children: [
+        pw.SizedBox(
+          width: 90,
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              color: ink,
+              fontSize: 7,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Text(
+            value,
+            style: pw.TextStyle(
+              color: ink,
+              fontSize: 7,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
     ),
   );
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/player.dart';
 import '../domain/team_match.dart';
+import '../domain/team_scorecard.dart';
 import '../domain/team_scoring_engine.dart';
 import '../export/team_scorecard_export.dart';
 import '../theme/app_theme.dart';
@@ -497,98 +498,320 @@ class _InningsScorecard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.read(context);
-    final stats = TeamScoringEngine.inningsAppearanceStats(match, innings);
     final batting = match.side(innings.battingTeamId);
-    final bowling = match.side(innings.bowlingTeamId);
-    TeamPlayerMatchStats stat(String teamId, String id) =>
-        stats['$teamId:$id'] ?? TeamPlayerMatchStats(playerId: id, teamId: teamId);
-    final bowlers = bowling.playerIds
-        .map((id) => stat(bowling.id, id))
-        .where((value) => value.ballsBowled > 0)
-        .toList();
+    final data = TeamScorecardBuilder.build(match, innings);
+    String name(String id) {
+      final value = store.playerById(id)?.name ?? id;
+      final side = match.teamA.playerIds.contains(id) ? match.teamA : match.teamB;
+      final tags = <String>[
+        if (side.captainPlayerId == id) 'c',
+        if (side.wicketkeeperPlayerId == id) 'wk',
+        if (id == match.commonJokerPlayerId) 'J',
+      ];
+      return tags.isEmpty ? value : '$value (${tags.join(', ')})';
+    }
+
     return Card(
-      child: ExpansionTile(
-        initiallyExpanded: innings.index == 0,
-        title: Text(
-          '${TeamScoringEngine.inningsLabel(innings)} • ${batting.name} • ${TeamScoringEngine.total(innings)}/${TeamScoringEngine.wickets(innings)}',
-          style: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        subtitle: Text('${TeamScoringEngine.overLabel(match, innings)} overs • Extras ${TeamScoringEngine.extras(innings)}'),
-        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Divider(height: 1),
-          const SizedBox(height: 8),
-          const Align(alignment: Alignment.centerLeft, child: Text('BATTING', style: TextStyle(color: AppColors.greenDark, fontSize: 11, fontWeight: FontWeight.w900))),
-          const SizedBox(height: 6),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columnSpacing: 18,
-              headingRowHeight: 34,
-              dataRowMinHeight: 38,
-              dataRowMaxHeight: 46,
-              columns: const [
-                DataColumn(label: Text('Batter')),
-                DataColumn(label: Text('R')),
-                DataColumn(label: Text('B')),
-                DataColumn(label: Text('4')),
-                DataColumn(label: Text('6')),
-                DataColumn(label: Text('SR')),
+          Container(
+            color: AppColors.greenDark,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${batting.name} ${TeamScoringEngine.inningsLabel(innings)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${data.total}-${data.wickets} (${data.overs} Ov)',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
+                ),
               ],
-              rows: TeamScoringEngine.battingDisplayOrder(match, innings).map((id) {
-                final value = stat(batting.id, id);
-                final player = store.playerById(id);
-                return DataRow(cells: [
-                  DataCell(Row(children: [
-                    if (player != null) PlayerAvatar(player: player, radius: 13),
-                    if (player != null) const SizedBox(width: 6),
-                    Text('${player?.name ?? id}${id == match.commonJokerPlayerId ? ' 🃏' : ''}${value.dismissed ? '' : '*'}'),
-                  ])),
-                  DataCell(Text('${value.runs}')),
-                  DataCell(Text('${value.balls}')),
-                  DataCell(Text('${value.fours}')),
-                  DataCell(Text('${value.sixes}')),
-                  DataCell(Text(value.strikeRate.toStringAsFixed(1))),
-                ]);
-              }).toList(),
             ),
           ),
-          if (bowlers.isNotEmpty) ...[
-            const Align(alignment: Alignment.centerLeft, child: Text('BOWLING', style: TextStyle(color: AppColors.greenDark, fontSize: 11, fontWeight: FontWeight.w900))),
-            const SizedBox(height: 6),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columnSpacing: 18,
-                headingRowHeight: 34,
-                dataRowMinHeight: 38,
-                dataRowMaxHeight: 46,
-                columns: const [
-                  DataColumn(label: Text('Bowler')),
-                  DataColumn(label: Text('O')),
-                  DataColumn(label: Text('R')),
-                  DataColumn(label: Text('W')),
-                  DataColumn(label: Text('Eco')),
-                  DataColumn(label: Text('Wd')),
-                  DataColumn(label: Text('Nb')),
-                ],
-                rows: bowlers.map((value) {
-                  final player = store.playerById(value.playerId);
-                  return DataRow(cells: [
-                    DataCell(Text('${player?.name ?? value.playerId}${value.playerId == match.commonJokerPlayerId ? ' 🃏' : ''}')),
-                    DataCell(Text('${value.ballsBowled ~/ match.rules.ballsPerOver}.${value.ballsBowled % match.rules.ballsPerOver}')),
-                    DataCell(Text('${value.runsConceded}')),
-                    DataCell(Text('${value.wickets}')),
-                    DataCell(Text(value.economy.toStringAsFixed(2))),
-                    DataCell(Text('${value.wides}')),
-                    DataCell(Text('${value.noBalls}')),
-                  ]);
-                }).toList(),
+          if (innings.target != null)
+            Container(
+              color: const Color(0xFFE7F8F0),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Text(
+                'Target ${innings.target}${innings.completionReason == null ? '' : ' • ${innings.completionReason}'}',
+                style: const TextStyle(
+                  color: AppColors.greenDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
               ),
             ),
+          _scoreTableHeader(
+            const ['Batter', '', 'R', 'B', '4s', '6s', 'SR'],
+            const {
+              0: FlexColumnWidth(2.3),
+              1: FlexColumnWidth(2.6),
+              2: FixedColumnWidth(34),
+              3: FixedColumnWidth(34),
+              4: FixedColumnWidth(34),
+              5: FixedColumnWidth(34),
+              6: FixedColumnWidth(48),
+            },
+          ),
+          Table(
+            columnWidths: const {
+              0: FlexColumnWidth(2.3),
+              1: FlexColumnWidth(2.6),
+              2: FixedColumnWidth(34),
+              3: FixedColumnWidth(34),
+              4: FixedColumnWidth(34),
+              5: FixedColumnWidth(34),
+              6: FixedColumnWidth(48),
+            },
+            border: const TableBorder(
+              horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
+            ),
+            children: [
+              for (final row in data.batters)
+                TableRow(
+                  children: [
+                    _scoreCell(name(row.playerId), linkLike: true),
+                    _scoreCell(row.dismissal.text(name), muted: true),
+                    _scoreCell('${row.runs}', bold: true, center: true),
+                    _scoreCell('${row.balls}', center: true),
+                    _scoreCell('${row.fours}', center: true),
+                    _scoreCell('${row.sixes}', center: true),
+                    _scoreCell(row.strikeRate.toStringAsFixed(2), center: true),
+                  ],
+                ),
+            ],
+          ),
+          _scoreSummaryRow(
+            label: 'Extras',
+            value: '${data.extras} (${data.extrasBreakdown})',
+          ),
+          _scoreSummaryRow(
+            label: 'Total',
+            value: '${data.total}-${data.wickets} (${data.overs} Overs, RR: ${data.runRate.toStringAsFixed(2)})',
+            bold: true,
+          ),
+          if (data.yetToBat.isNotEmpty)
+            _scoreSummaryRow(
+              label: 'Yet to Bat',
+              value: data.yetToBat.map(name).join(', '),
+              linkLike: true,
+            ),
+          if (data.bowlers.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _scoreTableHeader(
+              const ['Bowler', 'O', 'M', 'R', 'W', 'NB', 'WD', 'ECO'],
+              const {
+                0: FlexColumnWidth(2.7),
+                1: FixedColumnWidth(38),
+                2: FixedColumnWidth(34),
+                3: FixedColumnWidth(34),
+                4: FixedColumnWidth(34),
+                5: FixedColumnWidth(34),
+                6: FixedColumnWidth(34),
+                7: FixedColumnWidth(48),
+              },
+            ),
+            Table(
+              columnWidths: const {
+                0: FlexColumnWidth(2.7),
+                1: FixedColumnWidth(38),
+                2: FixedColumnWidth(34),
+                3: FixedColumnWidth(34),
+                4: FixedColumnWidth(34),
+                5: FixedColumnWidth(34),
+                6: FixedColumnWidth(34),
+                7: FixedColumnWidth(48),
+              },
+              border: const TableBorder(
+                horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
+              ),
+              children: [
+                for (final row in data.bowlers)
+                  TableRow(
+                    children: [
+                      _scoreCell(name(row.playerId), linkLike: true),
+                      _scoreCell(row.overs, center: true),
+                      _scoreCell('${row.maidens}', center: true),
+                      _scoreCell('${row.runs}', center: true),
+                      _scoreCell('${row.wickets}', bold: true, center: true),
+                      _scoreCell('${row.noBalls}', center: true),
+                      _scoreCell('${row.wides}', center: true),
+                      _scoreCell(row.economy.toStringAsFixed(2), center: true),
+                    ],
+                  ),
+              ],
+            ),
           ],
+          if (data.falls.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _scoreTableHeader(
+              const ['Fall of Wickets', 'Score', 'Over'],
+              const {
+                0: FlexColumnWidth(3.8),
+                1: FlexColumnWidth(1.2),
+                2: FlexColumnWidth(1.2),
+              },
+            ),
+            Table(
+              columnWidths: const {
+                0: FlexColumnWidth(3.8),
+                1: FlexColumnWidth(1.2),
+                2: FlexColumnWidth(1.2),
+              },
+              border: const TableBorder(
+                horizontalInside: BorderSide(color: Color(0xFFE2E7E4), width: .7),
+              ),
+              children: [
+                for (final fall in data.falls)
+                  TableRow(
+                    children: [
+                      _scoreCell(name(fall.playerId), linkLike: true),
+                      _scoreCell(fall.scoreLabel, bold: true, center: true),
+                      _scoreCell(fall.overLabel, center: true),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+          if (data.partnerships.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              color: const Color(0xFFE9E7E7),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: const Text(
+                'Partnerships',
+                style: TextStyle(fontWeight: FontWeight.w900, color: AppColors.ink),
+              ),
+            ),
+            for (final partnership in data.partnerships)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        partnership.playerIds
+                            .map((id) => '${name(id)} ${partnership.runsByPlayer[id] ?? 0}(${partnership.ballsByPlayer[id] ?? 0})')
+                            .join('  •  '),
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF0B5FFF)),
+                      ),
+                    ),
+                    Text(
+                      '${partnership.runs}(${partnership.balls})',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
+
+  static Widget _scoreTableHeader(
+    List<String> labels,
+    Map<int, TableColumnWidth> widths,
+  ) => Container(
+    color: const Color(0xFFE9E7E7),
+    child: Table(
+      columnWidths: widths,
+      children: [
+        TableRow(
+          children: labels
+              .map(
+                (label) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+                  child: Text(
+                    label,
+                    textAlign: label.isEmpty || label == 'Batter' || label == 'Bowler' || label == 'Fall of Wickets'
+                        ? TextAlign.left
+                        : TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    ),
+  );
+
+  static Widget _scoreCell(
+    String value, {
+    bool bold = false,
+    bool muted = false,
+    bool linkLike = false,
+    bool center = false,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+    child: Text(
+      value,
+      textAlign: center ? TextAlign.center : TextAlign.left,
+      softWrap: true,
+      style: TextStyle(
+        color: linkLike
+            ? const Color(0xFF0B5FFF)
+            : muted
+                ? AppColors.muted
+                : AppColors.ink,
+        fontSize: 12,
+        height: 1.25,
+        fontWeight: bold ? FontWeight.w900 : FontWeight.w500,
+      ),
+    ),
+  );
+
+  static Widget _scoreSummaryRow({
+    required String label,
+    required String value,
+    bool bold = false,
+    bool linkLike = false,
+  }) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+    decoration: const BoxDecoration(
+      border: Border(top: BorderSide(color: Color(0xFFE2E7E4), width: .7)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 95,
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: linkLike ? const Color(0xFF0B5FFF) : AppColors.ink,
+              fontWeight: bold ? FontWeight.w900 : FontWeight.w500,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
