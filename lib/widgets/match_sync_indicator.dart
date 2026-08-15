@@ -27,7 +27,8 @@ class MatchSyncIndicator extends StatelessWidget {
               final latest = AppScope.read(context);
               final message = latest.isMatchSynced(matchId)
                   ? 'Match synced.'
-                  : 'Still offline or another device has a newer revision.';
+                  : latest.matchSyncError(matchId) ??
+                      'Still waiting to sync. Check the connection and retry.';
               ScaffoldMessenger.of(
                 context,
               ).showSnackBar(SnackBar(content: Text(message)));

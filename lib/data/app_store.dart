@@ -18,6 +18,8 @@ import '../domain/player.dart';
 import '../domain/player_history.dart';
 import '../domain/scoring_engine.dart';
 import '../domain/social.dart';
+import '../domain/team_match.dart';
+import '../domain/team_scoring_engine.dart';
 
 class CreatedPlayer {
   const CreatedPlayer({required this.player, required this.loginEmail});
@@ -57,12 +59,15 @@ class AppStore extends ChangeNotifier {
   final List<Player> players = <Player>[];
   final List<Gang> gangs = <Gang>[];
   final List<CricketMatch> matches = <CricketMatch>[];
+  final List<TeamMatch> teamMatches = <TeamMatch>[];
   final List<FriendRequest> friendRequests = <FriendRequest>[];
   final List<CricNotification> notifications = <CricNotification>[];
   final List<PointPreset> pointPresets = <PointPreset>[];
   final Set<String> _sharedMatchIds = <String>{};
+  final Set<String> _sharedTeamMatchIds = <String>{};
   final Set<String> _pendingSharedMatchDeletes = <String>{};
   final Map<String, String> _lastSharedMatchPayloads = <String, String>{};
+  final Map<String, String> _lastSharedTeamMatchPayloads = <String, String>{};
   String? _lastPublicProfileFingerprint;
   Future<void> _cloudSyncTail = Future<void>.value();
   Map<String, Object?>? _pendingCloudState;
@@ -70,7 +75,9 @@ class AppStore extends ChangeNotifier {
   final Set<String> _pendingMatchSyncIds = <String>{};
   final Map<String, String> _matchSyncErrors = <String, String>{};
   DateTime? _oldestSharedActivityAt;
+  DateTime? _oldestSharedTeamActivityAt;
   bool _hasOlderSharedHistory = true;
+  bool _hasOlderSharedTeamHistory = true;
   static const int _sharedMatchPageSize = 60;
   static const Duration _controlLeaseDuration = Duration(minutes: 2);
   String defaultPointPresetId = 'balanced';
@@ -184,6 +191,20 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  bool isActiveTeamMatchForPlayer(TeamMatch match, String playerId) {
+    if (!match.participantIds.contains(playerId)) return false;
+    return match.status != TeamMatchStatus.completed;
+  }
+
+  List<TeamMatch> get activeTeamMatches {
+    final id = activePlayerId;
+    if (id == null) return const [];
+    return teamMatches
+        .where((match) => isActiveTeamMatchForPlayer(match, id))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
   bool _leaseAvailableOnThisDevice(CricketMatch match) {
     final uid = firebaseUser?.uid;
     final leaseUntil = match.controllerLeaseUntil;
@@ -225,18 +246,64 @@ class AppStore extends ChangeNotifier {
         : canHostMatch(match);
   }
 
+  bool _teamLeaseAvailableOnThisDevice(TeamMatch match) {
+    final uid = firebaseUser?.uid;
+    final leaseUntil = match.controllerLeaseUntil;
+    if (match.controllerUid == null || leaseUntil == null) return true;
+    if (uid != null && match.controllerUid == uid) return true;
+    return leaseUntil.isBefore(DateTime.now());
+  }
+
+  bool isTeamMatchHost(TeamMatch match) =>
+      activePlayerId != null && match.creatorPlayerId == activePlayerId;
+
+  bool isTeamMatchTracker(TeamMatch match) =>
+      activePlayerId != null && match.trackerPlayerId == activePlayerId;
+
+  bool canTakeTeamMatchControl(TeamMatch match) =>
+      isTeamMatchHost(match) ||
+      (match.status != TeamMatchStatus.completed && isTeamMatchTracker(match));
+
+  bool canHostTeamMatch(TeamMatch match) =>
+      isTeamMatchHost(match) && _teamLeaseAvailableOnThisDevice(match);
+
+  bool canScoreTeamMatch(TeamMatch match) =>
+      match.status == TeamMatchStatus.live &&
+      (isTeamMatchHost(match) || isTeamMatchTracker(match)) &&
+      _teamLeaseAvailableOnThisDevice(match);
+
+  bool canControlTeamMatch(TeamMatch match) {
+    if (match.status == TeamMatchStatus.completed) return isTeamMatchHost(match);
+    if (match.status == TeamMatchStatus.toss) return canHostTeamMatch(match);
+    return (isTeamMatchHost(match) || isTeamMatchTracker(match)) &&
+        _teamLeaseAvailableOnThisDevice(match);
+  }
+
   bool isMatchSynced(String matchId) {
     final match = matchById(matchId);
     if (match != null && canTakeMatchControl(match) && !cloudConnected) {
       return false;
     }
     return !_pendingMatchSyncIds.contains(matchId) &&
-        !_matchSyncErrors.containsKey(matchId);
+        !_matchSyncErrors.containsKey(matchId) &&
+        _sharedMatchIds.contains(matchId);
   }
 
   String? matchSyncError(String matchId) => _matchSyncErrors[matchId];
 
+  bool isTeamMatchSynced(String matchId) {
+    final match = teamMatchById(matchId);
+    if (match != null && canTakeTeamMatchControl(match) && !cloudConnected) {
+      return false;
+    }
+    return !_pendingMatchSyncIds.contains(matchId) &&
+        !_matchSyncErrors.containsKey(matchId) &&
+        _sharedTeamMatchIds.contains(matchId);
+  }
+
   bool get hasOlderMatchHistory => _hasOlderSharedHistory;
+
+  bool get hasOlderTeamMatchHistory => _hasOlderSharedTeamHistory;
 
   Future<void> cancelMatch(String matchId) async {
     final index = matches.indexWhere((match) => match.id == matchId);
@@ -278,6 +345,7 @@ class AppStore extends ChangeNotifier {
         await _bindCurrentSession(savedPlayerId);
         await _restoreCloudState(replaceLocal: players.isEmpty);
         await _refreshSharedMatches(migrateLegacy: true);
+        await _refreshSharedTeamMatches();
         await _refreshSocialGraph();
         await _persistLocal();
         await _syncActivePlayerPublicProfile();
@@ -489,6 +557,7 @@ class AppStore extends ChangeNotifier {
       activePlayerId = playerId;
     }
     await _refreshSharedMatches(migrateLegacy: true);
+    await _refreshSharedTeamMatches();
     await _persistLocal();
     await _syncActivePlayerPublicProfile();
     await _refreshSocialGraph();
@@ -585,6 +654,13 @@ class AppStore extends ChangeNotifier {
     ).toList(growable: false)) {
       await firestore.collection('matches').doc(match.id).delete();
     }
+    for (final match in teamMatches.where(
+      (value) =>
+          value.creatorPlayerId == player.id &&
+          value.status != TeamMatchStatus.completed,
+    ).toList(growable: false)) {
+      await firestore.collection('teamMatches').doc(match.id).delete();
+    }
 
     final batch = firestore.batch();
     batch.delete(firestore.collection('loginCredentials').doc(_emailKey(email)));
@@ -601,6 +677,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> refreshMatchHistory() async {
     await _refreshSharedMatches(migrateLegacy: true);
+    await _refreshSharedTeamMatches();
     await _persistLocal();
     await _syncActivePlayerPublicProfile();
     notifyListeners();
@@ -623,6 +700,13 @@ class AppStore extends ChangeNotifier {
 
   CricketMatch? matchById(String id) {
     for (final match in matches) {
+      if (match.id == id) return match;
+    }
+    return null;
+  }
+
+  TeamMatch? teamMatchById(String id) {
+    for (final match in teamMatches) {
       if (match.id == id) return match;
     }
     return null;
@@ -791,6 +875,140 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _requireTeamMatchHost(TeamMatch match) async {
+    if (!isTeamMatchHost(match)) {
+      throw StateError('Only the Team Match host can change this setup.');
+    }
+    await _ensureTeamMatchControlLease(
+      match,
+      scorerAllowed: false,
+      force: match.status == TeamMatchStatus.completed,
+    );
+  }
+
+  Future<void> _requireTeamMatchScorer(TeamMatch match) async {
+    if (!(isTeamMatchHost(match) || isTeamMatchTracker(match))) {
+      throw StateError('Only the host or selected scorer can enter the score.');
+    }
+    await _ensureTeamMatchControlLease(
+      match,
+      scorerAllowed: true,
+      force: match.status == TeamMatchStatus.completed && isTeamMatchHost(match),
+    );
+  }
+
+  Future<void> _ensureTeamMatchControlLease(
+    TeamMatch match, {
+    required bool scorerAllowed,
+    bool force = false,
+  }) async {
+    final playerId = activePlayerId;
+    final uid = firebaseUser?.uid;
+    if (playerId == null) throw StateError('Sign in first.');
+    final roleAllowed = isTeamMatchHost(match) ||
+        (scorerAllowed && isTeamMatchTracker(match));
+    if (!roleAllowed) throw StateError('You do not have control permission.');
+
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null || uid == null) {
+      if (match.controllerUid != null &&
+          match.controllerUid != uid &&
+          match.controllerLeaseUntil?.isAfter(DateTime.now()) == true) {
+        throw StateError('This Team Match is active on another device.');
+      }
+      match
+        ..controllerUid = uid
+        ..controllerPlayerId = playerId
+        ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
+      _pendingMatchSyncIds.add(match.id);
+      return;
+    }
+
+    final now = DateTime.now();
+    if (!force &&
+        match.controllerUid == uid &&
+        match.controllerLeaseUntil?.isAfter(
+              now.add(const Duration(seconds: 30)),
+            ) ==
+            true) {
+      return;
+    }
+    final ref = firestore.collection('teamMatches').doc(match.id);
+    final leaseUntil = now.add(_controlLeaseDuration);
+    try {
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        if (!snapshot.exists) {
+          match
+            ..controllerUid = uid
+            ..controllerPlayerId = playerId
+            ..controllerLeaseUntil = leaseUntil;
+          return;
+        }
+        final data = snapshot.data()!;
+        final remoteController = data['controllerUid']?.toString();
+        final remoteRevision = data['revision'] as int? ?? 0;
+        final rawLease = data['controllerLeaseUntil'];
+        final remoteLease = rawLease is Timestamp
+            ? rawLease.toDate()
+            : DateTime.tryParse(rawLease?.toString() ?? '');
+        final ours = remoteController == uid;
+        final expired = remoteLease == null || !remoteLease.isAfter(now);
+        if (!force && !ours && remoteRevision > match.revision) {
+          throw StateError(
+            'A newer Team Match score exists. Refresh before taking control.',
+          );
+        }
+        if (!force && remoteController != null && !ours && !expired) {
+          throw StateError('Another device currently controls this Team Match.');
+        }
+        transaction.update(ref, {
+          'controllerUid': uid,
+          'controllerPlayerId': playerId,
+          'controllerLeaseUntil': Timestamp.fromDate(leaseUntil),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+      match
+        ..controllerUid = uid
+        ..controllerPlayerId = playerId
+        ..controllerLeaseUntil = leaseUntil;
+    } on FirebaseException catch (error) {
+      const offlineCodes = {
+        'unavailable',
+        'deadline-exceeded',
+        'network-request-failed',
+      };
+      if (!offlineCodes.contains(error.code)) rethrow;
+      match
+        ..controllerUid = uid
+        ..controllerPlayerId = playerId
+        ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
+      _pendingMatchSyncIds.add(match.id);
+      _matchSyncErrors[match.id] =
+          'Offline - Team Match is safe on this device and waiting to sync.';
+    }
+  }
+
+  Future<void> takeTeamMatchControl(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    if (!canTakeTeamMatchControl(match)) {
+      throw StateError('Only the host or selected scorer can take control.');
+    }
+    await _refreshSharedTeamMatches();
+    final latest = teamMatchById(matchId);
+    if (latest == null) throw StateError('Team Match no longer exists.');
+    await _ensureTeamMatchControlLease(
+      latest,
+      scorerAllowed: true,
+      force: true,
+    );
+    _pendingMatchSyncIds.add(matchId);
+    await _persistLocal();
+    notifyListeners();
+  }
+
   Future<void> savePlayerProfile(Player player) async {
     if (playerById(player.id) == null) throw StateError('Player not found.');
     if (player.id != activePlayerId) {
@@ -822,9 +1040,9 @@ class AppStore extends ChangeNotifier {
     if (playerId == activePlayerId) {
       throw StateError('Use Delete account for your own account.');
     }
-    final isReferenced = matches.any(
-      (match) => match.participantIds.contains(playerId),
-    );
+    final isReferenced =
+        matches.any((match) => match.participantIds.contains(playerId)) ||
+        teamMatches.any((match) => match.participantIds.contains(playerId));
     if (isReferenced) {
       player.archived = true;
     } else {
@@ -859,6 +1077,27 @@ class AppStore extends ChangeNotifier {
           match.participantIds.contains(player.id) &&
           match.status != MatchStatus.completed,
     );
+    final hostedTeamMatches = teamMatches
+        .where(
+          (match) =>
+              match.creatorPlayerId == player.id &&
+              match.status != TeamMatchStatus.completed,
+        )
+        .toList(growable: false);
+    if (cloudConnected && _firestore != null) {
+      for (final match in hostedTeamMatches) {
+        try {
+          await _firestore!.collection('teamMatches').doc(match.id).delete();
+        } on FirebaseException {
+          // Account reset remains local-first; a later account delete retries.
+        }
+      }
+    }
+    teamMatches.removeWhere(
+      (match) =>
+          match.participantIds.contains(player.id) &&
+          match.status != TeamMatchStatus.completed,
+    );
     for (final cached in players) {
       cached.friendIds.remove(player.id);
     }
@@ -867,7 +1106,7 @@ class AppStore extends ChangeNotifier {
       player.stats,
       PlayerHistory.calculateSinglesCareer(player.id, matches),
     );
-    _clearStats(player.teamStats);
+    _rebuildActiveTeamCareer();
     friendRequests.removeWhere(
       (request) =>
           request.fromPlayerId == player.id || request.toPlayerId == player.id,
@@ -1397,6 +1636,327 @@ class AppStore extends ChangeNotifier {
     pointPresets.removeAt(index);
     if (defaultPointPresetId == presetId) defaultPointPresetId = 'balanced';
     await _commit();
+  }
+
+  Future<String> _reserveUniqueTeamMatchId({
+    required String creatorPlayerId,
+    required String originToken,
+  }) async {
+    final firestore = _firestore;
+    for (var attempt = 0; attempt < 20; attempt++) {
+      final id = _ids.teamMatchId();
+      if (teamMatchById(id) != null) continue;
+      if (!cloudConnected || firestore == null) return id;
+      final matchRef = firestore.collection('teamMatches').doc(id);
+      final reservationRef = firestore.collection('teamMatchReservations').doc(id);
+      try {
+        final reserved = await firestore.runTransaction<bool>((transaction) async {
+          final existingMatch = await transaction.get(matchRef);
+          final existingReservation = await transaction.get(reservationRef);
+          if (existingMatch.exists || existingReservation.exists) return false;
+          transaction.set(reservationRef, {
+            'matchId': id,
+            'creatorPlayerId': creatorPlayerId,
+            'originToken': originToken,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          return true;
+        });
+        if (reserved) return id;
+      } on FirebaseException {
+        return id;
+      }
+    }
+    throw StateError('Could not reserve a Team Match ID. Try again.');
+  }
+
+  Future<TeamMatch> createTeamMatch({
+    required String title,
+    required TeamSide teamA,
+    required TeamSide teamB,
+    required TeamMatchRules rules,
+    String? commonJokerPlayerId,
+    String? trackerPlayerId,
+  }) async {
+    final creator = activePlayer;
+    if (creator == null) throw StateError('Sign in first.');
+    final ids = <String>{...teamA.playerIds, ...teamB.playerIds};
+    if (ids.any((id) => playerById(id) == null)) {
+      throw StateError('Every selected team member needs a valid Player ID.');
+    }
+    if (commonJokerPlayerId != null &&
+        (!teamA.playerIds.contains(commonJokerPlayerId) ||
+            !teamB.playerIds.contains(commonJokerPlayerId))) {
+      throw StateError('The Joker must be included in both teams.');
+    }
+    if (trackerPlayerId != null && playerById(trackerPlayerId) == null) {
+      throw StateError('The selected scorer needs a valid Player ID.');
+    }
+    final originToken = _ids.eventId();
+    final id = await _reserveUniqueTeamMatchId(
+      creatorPlayerId: creator.id,
+      originToken: originToken,
+    );
+    final match = TeamMatch(
+      id: id,
+      originToken: originToken,
+      title: title.trim().isEmpty ? suggestMatchTitle() : title.trim(),
+      creatorPlayerId: creator.id,
+      teamA: teamA,
+      teamB: teamB,
+      rules: rules,
+      createdAt: DateTime.now(),
+      commonJokerPlayerId: commonJokerPlayerId,
+      trackerPlayerId: trackerPlayerId,
+      controllerUid: firebaseUser?.uid,
+      controllerPlayerId: creator.id,
+      controllerLeaseUntil: DateTime.now().add(_controlLeaseDuration),
+    );
+    TeamScoringEngine.validateSetup(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'team_match_created', createdAt: match.createdAt),
+    );
+    teamMatches.add(match);
+    await _commit(waitForCloud: true);
+    return match;
+  }
+
+  Future<void> startTeamMatchAfterToss(
+    String matchId, {
+    required TeamToss toss,
+    required String openingBowlerId,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchHost(match);
+    if (match.status != TeamMatchStatus.toss || match.toss != null) {
+      throw StateError('The toss is already complete.');
+    }
+    match.toss = toss;
+    TeamScoringEngine.startFirstInnings(
+      match,
+      openingBowlerId: openingBowlerId,
+    );
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_toss_completed',
+        createdAt: toss.createdAt,
+        note: '${toss.winnerTeamId}:${toss.decision.name}',
+      ),
+    );
+    await _commit(waitForCloud: true);
+  }
+
+  Future<void> startTeamSecondInnings(
+    String matchId, {
+    required String openingBowlerId,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.startSecondInnings(
+      match,
+      openingBowlerId: openingBowlerId,
+    );
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'second_innings_started', createdAt: DateTime.now()),
+    );
+    await _commit(waitForCloud: true);
+  }
+
+  Future<void> selectTeamBowler(String matchId, String bowlerId) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.currentInnings == null) {
+      throw StateError('Live Team Match not found.');
+    }
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.selectBowler(match, match.currentInnings!, bowlerId);
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_bowler_selected',
+        playerId: bowlerId,
+        createdAt: DateTime.now(),
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> updateTeamBowlingQuota(
+    String matchId, {
+    required String teamId,
+    required String bowlerId,
+    required int legalBalls,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchHost(match);
+    final side = match.side(teamId);
+    if (!side.playerIds.contains(bowlerId) || legalBalls < 0) {
+      throw StateError('Enter a valid bowler limit.');
+    }
+    final alreadyBowled = match.innings
+        .where((innings) => innings.bowlingTeamId == teamId)
+        .fold<int>(
+          0,
+          (sum, innings) =>
+              sum + TeamScoringEngine.bowlerBalls(innings, bowlerId),
+        );
+    if (legalBalls < alreadyBowled) {
+      throw StateError('The limit cannot be below balls already bowled.');
+    }
+    final previous = side.bowlingQuotaBalls[bowlerId] ?? 0;
+    side.bowlingQuotaBalls[bowlerId] = legalBalls;
+    final totalCoverage = side.bowlingQuotaBalls.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    if (totalCoverage < match.rules.ballLimit) {
+      side.bowlingQuotaBalls[bowlerId] = previous;
+      throw StateError(
+        '${side.name} limits must cover all ${match.rules.ballLimit} legal balls.',
+      );
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_bowling_quota_changed',
+        playerId: bowlerId,
+        createdAt: DateTime.now(),
+        note: '$teamId:$legalBalls',
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> recordTeamDelivery(
+    String matchId, {
+    required int batRuns,
+    int extraRuns = 0,
+    int? runningRuns,
+    ExtraType extraType = ExtraType.none,
+    bool isWicket = false,
+    DismissalType dismissalType = DismissalType.none,
+    String? dismissedPlayerId,
+    List<String> fielderIds = const [],
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.recordDelivery(
+      match,
+      eventId: _ids.eventId(),
+      batRuns: batRuns,
+      extraRuns: extraRuns,
+      runningRuns: runningRuns,
+      extraType: extraType,
+      isWicket: isWicket,
+      dismissalType: dismissalType,
+      dismissedPlayerId: dismissedPlayerId,
+      fielderIds: fielderIds,
+    );
+    if (match.status == TeamMatchStatus.completed) {
+      _applyTeamStatsIfComplete(match);
+    }
+    // Result/innings navigation never waits for the network. The local score
+    // is durable first and cloud upload continues through the serialized queue.
+    await _commit();
+  }
+
+  Future<void> decideTeamLastPlayer(
+    String matchId, {
+    required bool continueSolo,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.decideLastPlayerStanding(
+      match,
+      continueSolo: continueSolo,
+    );
+    if (match.status == TeamMatchStatus.completed) {
+      _applyTeamStatsIfComplete(match);
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: continueSolo ? 'last_player_continued' : 'last_player_ended',
+        createdAt: DateTime.now(),
+        playerId: match.currentInnings?.strikerId,
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> endTeamInnings(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null) throw StateError('Team Match not found.');
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.endInnings(match);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'team_innings_ended', createdAt: DateTime.now()),
+    );
+    if (match.status == TeamMatchStatus.completed) _applyTeamStatsIfComplete(match);
+    await _commit();
+  }
+
+  Future<bool> undoLastTeamDelivery(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null) return false;
+    await _requireTeamMatchScorer(match);
+    if (match.currentInnings == null || match.currentInnings!.events.isEmpty) {
+      return false;
+    }
+    if (match.statsApplied) _revertAppliedTeamStats(match);
+    final changed = TeamScoringEngine.undoLast(match);
+    if (changed) {
+      match.auditTrail.add(
+        MatchAuditEntry(type: 'team_delivery_undone', createdAt: DateTime.now()),
+      );
+    }
+    await _commit();
+    return changed;
+  }
+
+  Future<void> cancelTeamMatch(String matchId) async {
+    final index = teamMatches.indexWhere((match) => match.id == matchId);
+    if (index < 0) return;
+    final match = teamMatches[index];
+    await _requireTeamMatchHost(match);
+    if (match.status == TeamMatchStatus.completed) {
+      throw StateError('Completed Team Matches stay in history.');
+    }
+    teamMatches.removeAt(index);
+    final firestore = _firestore;
+    if (cloudConnected && firestore != null) {
+      try {
+        await firestore.collection('teamMatches').doc(match.id).delete();
+      } on FirebaseException {
+        _matchSyncErrors[match.id] = 'Could not remove the shared Team Match.';
+      }
+    }
+    await _commit(waitForCloud: true);
+  }
+
+  Future<bool> syncMatchNow(String matchId) async {
+    final match = matchById(matchId);
+    if (match == null) return false;
+    _lastSharedMatchPayloads.remove(matchId);
+    _pendingMatchSyncIds.add(matchId);
+    _matchSyncErrors.remove(matchId);
+    await _syncOwnedMatchesToShared();
+    await _persistLocal();
+    notifyListeners();
+    return isMatchSynced(matchId);
+  }
+
+  Future<bool> syncTeamMatchNow(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null) return false;
+    _lastSharedTeamMatchPayloads.remove(matchId);
+    _pendingMatchSyncIds.add(matchId);
+    _matchSyncErrors.remove(matchId);
+    await _syncOwnedTeamMatchesToShared();
+    await _persistLocal();
+    notifyListeners();
+    return isTeamMatchSynced(matchId);
   }
 
   List<String> _previousRankOrderFor(
@@ -2025,6 +2585,17 @@ class AppStore extends ChangeNotifier {
           _matchSyncErrors.remove(match.id);
         }
       }
+      for (final match in teamMatches) {
+        final roleCanPublish = match.creatorPlayerId == playerId ||
+            (match.trackerPlayerId == playerId &&
+                match.controllerUid == firebaseUser?.uid);
+        if (!roleCanPublish) continue;
+        final payload = jsonEncode(match.toJson());
+        if (_lastSharedTeamMatchPayloads[match.id] != payload) {
+          _pendingMatchSyncIds.add(match.id);
+          _matchSyncErrors.remove(match.id);
+        }
+      }
     }
     final data = _stateData();
     await _persistLocal(data);
@@ -2045,12 +2616,13 @@ class AppStore extends ChangeNotifier {
     'players': players.map((value) => value.toJson()).toList(),
     'gangs': gangs.map((value) => value.toJson()).toList(),
     'matches': matches.map((value) => value.toJson()).toList(),
+    'teamMatches': teamMatches.map((value) => value.toJson()).toList(),
     'friendRequests': friendRequests.map((value) => value.toJson()).toList(),
     'notifications': notifications.map((value) => value.toJson()).toList(),
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
     'defaultPointPresetId': defaultPointPresetId,
     'pendingSharedMatchDeletes': _pendingSharedMatchDeletes.toList(),
-    'schemaVersion': 9,
+    'schemaVersion': 10,
   };
 
   void _replaceState(Map<String, dynamic> json) {
@@ -2071,6 +2643,13 @@ class AppStore extends ChangeNotifier {
       (json['matches'] as List? ?? const []).map(
         (value) =>
             CricketMatch.fromJson(Map<String, dynamic>.from(value as Map)),
+      ),
+    );
+    teamMatches.addAll(
+      (json['teamMatches'] as List? ?? const []).map(
+        (value) => TeamMatch.fromJson(
+          Map<String, dynamic>.from(value as Map),
+        ),
       ),
     );
     friendRequests.addAll(
@@ -2109,16 +2688,21 @@ class AppStore extends ChangeNotifier {
     _playerIndex.clear();
     gangs.clear();
     matches.clear();
+    teamMatches.clear();
     friendRequests.clear();
     notifications.clear();
     pointPresets.clear();
     _sharedMatchIds.clear();
+    _sharedTeamMatchIds.clear();
     _pendingSharedMatchDeletes.clear();
     _lastSharedMatchPayloads.clear();
+    _lastSharedTeamMatchPayloads.clear();
     _pendingMatchSyncIds.clear();
     _matchSyncErrors.clear();
     _oldestSharedActivityAt = null;
+    _oldestSharedTeamActivityAt = null;
     _hasOlderSharedHistory = true;
+    _hasOlderSharedTeamHistory = true;
     _lastPublicProfileFingerprint = null;
     _pendingCloudState = null;
     defaultPointPresetId = 'balanced';
@@ -2166,10 +2750,11 @@ class AppStore extends ChangeNotifier {
     // accountStates, otherwise two phones signed into the same Player ID can
     // resurrect a stale private snapshot.
     cloudState['matches'] = const <Object?>[];
+    cloudState['teamMatches'] = const <Object?>[];
     try {
       await firestore.collection('accountStates').doc(player.id).set({
         'state': jsonEncode(cloudState),
-        'schemaVersion': 9,
+        'schemaVersion': 10,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } on FirebaseException {
@@ -2178,6 +2763,7 @@ class AppStore extends ChangeNotifier {
 
     await _flushPendingSharedMatchDeletes();
     await _syncOwnedMatchesToShared();
+    await _syncOwnedTeamMatchesToShared();
     await _syncActivePlayerPublicProfile();
   }
 
@@ -2253,6 +2839,15 @@ class AppStore extends ChangeNotifier {
       if (player != null) {
         snapshots[participantId] = _participantSnapshot(player);
       }
+    }
+    return snapshots;
+  }
+
+  Map<String, Object?> _teamParticipantSnapshots(TeamMatch match) {
+    final snapshots = <String, Object?>{};
+    for (final participantId in match.participantIds) {
+      final player = playerById(participantId);
+      if (player != null) snapshots[participantId] = _participantSnapshot(player);
     }
     return snapshots;
   }
@@ -2380,6 +2975,7 @@ class AppStore extends ChangeNotifier {
               match.controllerUid == uid);
     });
 
+    var localMetadataChanged = false;
     for (final match in publishable) {
       final payloadBefore = _watchSafeMatchPayload(match);
       if (_sharedMatchIds.contains(match.id) &&
@@ -2452,11 +3048,22 @@ class AppStore extends ChangeNotifier {
         _lastSharedMatchPayloads[match.id] = payload;
         _pendingMatchSyncIds.remove(match.id);
         _matchSyncErrors.remove(match.id);
+        localMetadataChanged = true;
         try {
           await firestore.collection('matchReservations').doc(match.id).delete();
         } on FirebaseException {
           // A stale reservation only blocks this already-used random ID.
         }
+      } on FirebaseException catch (error) {
+        _pendingMatchSyncIds.add(match.id);
+        _matchSyncErrors[match.id] = switch (error.code) {
+          'permission-denied' =>
+            'Firestore rules blocked match sync. Deploy the included v1.3 rules.',
+          'unavailable' || 'deadline-exceeded' || 'network-request-failed' =>
+            'Network unavailable - the match is saved locally and waiting to sync.',
+          _ => 'Match sync failed: ${error.message ?? error.code}',
+        };
+        // Keep local score intact; next refresh/commit can retry.
       } on Object catch (error) {
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] = '$error';
@@ -2464,7 +3071,347 @@ class AppStore extends ChangeNotifier {
       }
     }
 
+    if (localMetadataChanged) await _persistLocal();
+
     if (hasListeners) notifyListeners();
+  }
+
+  DateTime _teamMatchActivityAt(TeamMatch match) {
+    if (match.completedAt != null) return match.completedAt!;
+    final innings = match.currentInnings;
+    if (innings != null && innings.events.isNotEmpty) {
+      return innings.events.last.createdAt;
+    }
+    if (match.auditTrail.isNotEmpty) return match.auditTrail.last.createdAt;
+    return match.startedAt ?? match.createdAt;
+  }
+
+  Map<String, dynamic> _sharedTeamMatchDocument(TeamMatch match) => {
+    'matchId': match.id,
+    'originToken': match.originToken,
+    'creatorPlayerId': match.creatorPlayerId,
+    'trackerPlayerId': match.trackerPlayerId,
+    'participantIds': match.participantIds,
+    'participantProfiles': _teamParticipantSnapshots(match),
+    'status': match.status.name,
+    'title': match.title,
+    'createdAt': Timestamp.fromDate(match.createdAt),
+    'activityAt': Timestamp.fromDate(_teamMatchActivityAt(match)),
+    'startedAt': match.startedAt == null
+        ? null
+        : Timestamp.fromDate(match.startedAt!),
+    'completedAt': match.completedAt == null
+        ? null
+        : Timestamp.fromDate(match.completedAt!),
+    'revision': match.revision,
+    'controllerUid': match.controllerUid,
+    'controllerPlayerId': match.controllerPlayerId,
+    'controllerLeaseUntil': match.controllerLeaseUntil == null
+        ? null
+        : Timestamp.fromDate(match.controllerLeaseUntil!),
+    'teamMatchJson': jsonEncode(match.toJson()),
+    'schemaVersion': 1,
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  TeamMatch? _teamMatchFromSharedDocument(Map<String, dynamic> data) {
+    try {
+      final raw = data['teamMatchJson'];
+      if (raw is! String || raw.isEmpty) return null;
+      final match = TeamMatch.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+      match
+        ..controllerUid = data['controllerUid']?.toString() ?? match.controllerUid
+        ..controllerPlayerId =
+            data['controllerPlayerId']?.toString() ?? match.controllerPlayerId
+        ..revision = data['revision'] as int? ?? match.revision
+        ..trackerPlayerId =
+            data['trackerPlayerId']?.toString() ?? match.trackerPlayerId;
+      final rawLease = data['controllerLeaseUntil'];
+      if (rawLease is Timestamp) {
+        match.controllerLeaseUntil = rawLease.toDate();
+      } else if (rawLease is String) {
+        match.controllerLeaseUntil = DateTime.tryParse(rawLease);
+      }
+      return match;
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<void> _syncOwnedTeamMatchesToShared() async {
+    final firestore = _firestore;
+    final playerId = activePlayerId;
+    final uid = firebaseUser?.uid;
+    if (!cloudConnected || firestore == null || playerId == null || uid == null) {
+      return;
+    }
+    final publishable = teamMatches.where(
+      (match) => match.creatorPlayerId == playerId ||
+          (match.trackerPlayerId == playerId && match.controllerUid == uid),
+    );
+    var localMetadataChanged = false;
+    for (final match in publishable) {
+      final payloadBefore = jsonEncode(match.toJson());
+      if (_sharedTeamMatchIds.contains(match.id) &&
+          _lastSharedTeamMatchPayloads[match.id] == payloadBefore) {
+        _pendingMatchSyncIds.remove(match.id);
+        continue;
+      }
+      _pendingMatchSyncIds.add(match.id);
+      final ref = firestore.collection('teamMatches').doc(match.id);
+      try {
+        await firestore.runTransaction((transaction) async {
+          final remote = await transaction.get(ref);
+          final data = remote.data();
+          if (data != null) {
+            final remoteCreator = data['creatorPlayerId']?.toString();
+            final remoteOrigin = data['originToken']?.toString();
+            if ((remoteCreator != null && remoteCreator != match.creatorPlayerId) ||
+                (remoteOrigin != null &&
+                    match.originToken != null &&
+                    remoteOrigin != match.originToken)) {
+              throw StateError('Team Match ID collision detected.');
+            }
+            final remoteRevision = data['revision'] as int? ?? 0;
+            final rawLease = data['controllerLeaseUntil'];
+            final remoteLease = rawLease is Timestamp
+                ? rawLease.toDate()
+                : DateTime.tryParse(rawLease?.toString() ?? '');
+            final remoteController = data['controllerUid']?.toString();
+            if (remoteController != null &&
+                remoteController != uid &&
+                remoteLease?.isAfter(DateTime.now()) == true) {
+              throw StateError('Another device controls this Team Match.');
+            }
+            if (remoteRevision > match.revision) {
+              throw StateError(
+                'A newer Team Match revision exists. Refresh before scoring.',
+              );
+            }
+            match.revision = remoteRevision + 1;
+          } else {
+            match.revision = max(match.revision, 0) + 1;
+          }
+          match
+            ..controllerUid = uid
+            ..controllerPlayerId = playerId
+            ..controllerLeaseUntil =
+                DateTime.now().add(_controlLeaseDuration);
+          transaction.set(
+            ref,
+            _sharedTeamMatchDocument(match),
+            SetOptions(merge: true),
+          );
+        });
+        final payload = jsonEncode(match.toJson());
+        _sharedTeamMatchIds.add(match.id);
+        _lastSharedTeamMatchPayloads[match.id] = payload;
+        _pendingMatchSyncIds.remove(match.id);
+        _matchSyncErrors.remove(match.id);
+        localMetadataChanged = true;
+        try {
+          await firestore
+              .collection('teamMatchReservations')
+              .doc(match.id)
+              .delete();
+        } on FirebaseException {
+          // A consumed reservation is harmless and can be cleaned later.
+        }
+      } on FirebaseException catch (error) {
+        _pendingMatchSyncIds.add(match.id);
+        _matchSyncErrors[match.id] = switch (error.code) {
+          'permission-denied' =>
+            'Firestore rules blocked Team Match sync. Deploy v1.3 rules.',
+          'unavailable' || 'deadline-exceeded' || 'network-request-failed' =>
+            'Offline - Team Match is saved locally and waiting to sync.',
+          _ => 'Team Match sync failed: ${error.message ?? error.code}',
+        };
+      } on Object catch (error) {
+        _pendingMatchSyncIds.add(match.id);
+        _matchSyncErrors[match.id] = '$error';
+      }
+    }
+    if (localMetadataChanged) await _persistLocal();
+    if (hasListeners) notifyListeners();
+  }
+
+  Future<void> _ingestSharedTeamMatch(TeamMatch remote) async {
+    final playerId = activePlayerId;
+    if (playerId == null || !remote.participantIds.contains(playerId)) return;
+    final index = teamMatches.indexWhere((match) => match.id == remote.id);
+    if (index < 0) {
+      teamMatches.add(remote);
+    } else {
+      final local = teamMatches[index];
+      final pending = _pendingMatchSyncIds.contains(local.id);
+      if (!(pending && remote.revision <= local.revision)) {
+        teamMatches[index] = remote;
+        if (remote.revision > local.revision) {
+          _pendingMatchSyncIds.remove(remote.id);
+          _matchSyncErrors.remove(remote.id);
+        }
+      }
+    }
+    _sharedTeamMatchIds.add(remote.id);
+    if (remote.creatorPlayerId == playerId) {
+      _lastSharedTeamMatchPayloads[remote.id] = jsonEncode(remote.toJson());
+    }
+    await _cacheTeamParticipantProfiles(remote);
+    _rebuildActiveTeamCareer();
+  }
+
+  Future<void> _cacheTeamParticipantProfiles(TeamMatch match) async {
+    for (final participantId in match.participantIds) {
+      if (playerById(participantId) == null) {
+        await findPublicPlayer(participantId, bypassSignedInGate: true);
+      }
+    }
+  }
+
+  void _rebuildActiveTeamCareer() {
+    final player = activePlayer;
+    if (player == null) return;
+    _clearStats(player.teamStats);
+    for (final match in teamMatches.where(
+      (value) =>
+          value.status == TeamMatchStatus.completed &&
+          value.participantIds.contains(player.id),
+    )) {
+      final appearances = TeamScoringEngine.appearanceStats(match).values
+          .where((value) => value.playerId == player.id)
+          .toList(growable: false);
+      if (appearances.isEmpty) continue;
+      player.teamStats
+        ..matches += 1
+        ..runs += appearances.fold<int>(0, (sum, value) => sum + value.runs)
+        ..balls += appearances.fold<int>(0, (sum, value) => sum + value.balls)
+        ..outs += appearances.where((value) => value.dismissed).length
+        ..wickets += appearances.fold<int>(0, (sum, value) => sum + value.wickets)
+        ..catches += appearances.fold<int>(0, (sum, value) => sum + value.catches)
+        ..directRunOuts += appearances.fold<int>(
+          0,
+          (sum, value) => sum + value.directRunOuts,
+        )
+        ..assistedRunOuts += appearances.fold<int>(
+          0,
+          (sum, value) => sum + value.assistedRunOuts,
+        )
+        ..stumpings += appearances.fold<int>(0, (sum, value) => sum + value.stumpings)
+        ..points += appearances.fold<int>(0, (sum, value) => sum + value.points);
+      final result = TeamScoringEngine.result(match);
+      if (result.winnerTeamId != null &&
+          match.side(result.winnerTeamId!).playerIds.contains(player.id) &&
+          player.id != match.commonJokerPlayerId) {
+        player.teamStats.wins += 1;
+      }
+    }
+  }
+
+  Future<void> _refreshSharedTeamMatches({bool loadOlder = false}) async {
+    final firestore = _firestore;
+    final playerId = activePlayerId;
+    if (!cloudConnected || firestore == null || playerId == null) return;
+    if (loadOlder && !_hasOlderSharedTeamHistory) return;
+    if (!loadOlder) {
+      _oldestSharedTeamActivityAt = null;
+      _hasOlderSharedTeamHistory = true;
+      await _syncOwnedTeamMatchesToShared();
+    }
+    Query<Map<String, dynamic>> query = firestore
+        .collection('teamMatches')
+        .where('participantIds', arrayContains: playerId)
+        .orderBy('activityAt', descending: true)
+        .limit(_sharedMatchPageSize);
+    if (loadOlder && _oldestSharedTeamActivityAt != null) {
+      query = query.startAfter([
+        Timestamp.fromDate(_oldestSharedTeamActivityAt!),
+      ]);
+    }
+    try {
+      QuerySnapshot<Map<String, dynamic>> snapshot;
+      try {
+        snapshot = await query.get();
+      } on FirebaseException catch (error) {
+        if (error.code != 'failed-precondition') rethrow;
+        snapshot = await firestore
+            .collection('teamMatches')
+            .where('participantIds', arrayContains: playerId)
+            .limit(_sharedMatchPageSize)
+            .get();
+      }
+      DateTime? oldest;
+      final remoteIds = <String>{};
+      for (final document in snapshot.docs) {
+        final data = document.data();
+        _hydrateParticipantSnapshots(data);
+        final match = _teamMatchFromSharedDocument(data);
+        if (match == null || !match.participantIds.contains(playerId)) continue;
+        remoteIds.add(match.id);
+        final rawActivity = data['activityAt'];
+        final activity = rawActivity is Timestamp
+            ? rawActivity.toDate()
+            : _teamMatchActivityAt(match);
+        if (oldest == null || activity.isBefore(oldest)) oldest = activity;
+        await _ingestSharedTeamMatch(match);
+      }
+      if (oldest != null) _oldestSharedTeamActivityAt = oldest;
+      _hasOlderSharedTeamHistory = snapshot.docs.length >= _sharedMatchPageSize;
+      if (!loadOlder) {
+        final foreignActive = teamMatches
+            .where(
+              (match) =>
+                  match.creatorPlayerId != playerId &&
+                  match.status != TeamMatchStatus.completed &&
+                  !remoteIds.contains(match.id),
+            )
+            .toList(growable: false);
+        for (final local in foreignActive) {
+          final doc = await firestore.collection('teamMatches').doc(local.id).get();
+          if (!doc.exists) {
+            teamMatches.removeWhere((match) => match.id == local.id);
+          }
+        }
+      }
+      _rebuildActiveTeamCareer();
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        for (final match in teamMatches.where(
+          (value) => value.creatorPlayerId == playerId,
+        )) {
+          _matchSyncErrors[match.id] =
+              'Firestore rules blocked Team Match refresh. Deploy v1.3 rules.';
+        }
+      }
+    }
+  }
+
+  Future<void> loadOlderTeamMatchHistory() async {
+    await _refreshSharedTeamMatches(loadOlder: true);
+    await _persistLocal();
+    notifyListeners();
+  }
+
+  Stream<TeamMatch?> watchSharedTeamMatch(String matchId) {
+    final firestore = _firestore;
+    final playerId = activePlayerId;
+    if (!cloudConnected || firestore == null || playerId == null) {
+      return Stream<TeamMatch?>.value(teamMatchById(matchId));
+    }
+    return firestore.collection('teamMatches').doc(matchId).snapshots().asyncMap(
+      (snapshot) async {
+        if (!snapshot.exists) return null;
+        final data = snapshot.data()!;
+        _hydrateParticipantSnapshots(data);
+        final remote = _teamMatchFromSharedDocument(data);
+        if (remote == null || !remote.participantIds.contains(playerId)) return null;
+        await _ingestSharedTeamMatch(remote);
+        await _persistLocal();
+        notifyListeners();
+        return teamMatchById(matchId);
+      },
+    );
   }
 
   Future<bool> _deleteSharedMatchRecord(String matchId) async {
@@ -3059,6 +4006,86 @@ class AppStore extends ChangeNotifier {
       ..clear()
       ..addAll(fixed)
       ..addAll(generated);
+  }
+
+  void _applyTeamStatsIfComplete(TeamMatch match) {
+    if (match.status != TeamMatchStatus.completed || match.statsApplied) return;
+    final appearances = TeamScoringEngine.appearanceStats(match).values;
+    final byPlayer = <String, List<TeamPlayerMatchStats>>{};
+    for (final stats in appearances) {
+      byPlayer.putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[]).add(stats);
+    }
+    final result = TeamScoringEngine.result(match);
+    for (final entry in byPlayer.entries) {
+      final player = playerById(entry.key);
+      if (player == null) continue;
+      final values = entry.value;
+      player.teamStats
+        ..matches += 1
+        ..runs += values.fold<int>(0, (sum, value) => sum + value.runs)
+        ..balls += values.fold<int>(0, (sum, value) => sum + value.balls)
+        ..outs += values.where((value) => value.dismissed).length
+        ..wickets += values.fold<int>(0, (sum, value) => sum + value.wickets)
+        ..catches += values.fold<int>(0, (sum, value) => sum + value.catches)
+        ..directRunOuts += values.fold<int>(
+          0,
+          (sum, value) => sum + value.directRunOuts,
+        )
+        ..assistedRunOuts += values.fold<int>(
+          0,
+          (sum, value) => sum + value.assistedRunOuts,
+        )
+        ..stumpings += values.fold<int>(0, (sum, value) => sum + value.stumpings)
+        ..points += values.fold<int>(0, (sum, value) => sum + value.points);
+      final winnerSide = result.winnerTeamId == null
+          ? null
+          : match.side(result.winnerTeamId!);
+      if (winnerSide?.playerIds.contains(player.id) == true &&
+          player.id != match.commonJokerPlayerId) {
+        player.teamStats.wins += 1;
+      }
+    }
+    match.statsApplied = true;
+  }
+
+  void _revertAppliedTeamStats(TeamMatch match) {
+    if (!match.statsApplied) return;
+    final appearances = TeamScoringEngine.appearanceStats(match).values;
+    final byPlayer = <String, List<TeamPlayerMatchStats>>{};
+    for (final stats in appearances) {
+      byPlayer.putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[]).add(stats);
+    }
+    final result = TeamScoringEngine.result(match);
+    for (final entry in byPlayer.entries) {
+      final player = playerById(entry.key);
+      if (player == null) continue;
+      final values = entry.value;
+      player.teamStats
+        ..matches -= 1
+        ..runs -= values.fold<int>(0, (sum, value) => sum + value.runs)
+        ..balls -= values.fold<int>(0, (sum, value) => sum + value.balls)
+        ..outs -= values.where((value) => value.dismissed).length
+        ..wickets -= values.fold<int>(0, (sum, value) => sum + value.wickets)
+        ..catches -= values.fold<int>(0, (sum, value) => sum + value.catches)
+        ..directRunOuts -= values.fold<int>(
+          0,
+          (sum, value) => sum + value.directRunOuts,
+        )
+        ..assistedRunOuts -= values.fold<int>(
+          0,
+          (sum, value) => sum + value.assistedRunOuts,
+        )
+        ..stumpings -= values.fold<int>(0, (sum, value) => sum + value.stumpings)
+        ..points -= values.fold<int>(0, (sum, value) => sum + value.points);
+      final winnerSide = result.winnerTeamId == null
+          ? null
+          : match.side(result.winnerTeamId!);
+      if (winnerSide?.playerIds.contains(player.id) == true &&
+          player.id != match.commonJokerPlayerId) {
+        player.teamStats.wins -= 1;
+      }
+    }
+    match.statsApplied = false;
   }
 
   void _applyStatsIfComplete(CricketMatch match) {

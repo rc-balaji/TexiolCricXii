@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/enums.dart';
+import '../domain/team_match.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
+import '../widgets/match_sync_indicator.dart';
 import '../widgets/player_avatar.dart';
+import '../widgets/team_match_sync_indicator.dart';
 import '../widgets/ui_bits.dart';
 import 'account_settings_screen.dart';
 import 'match_summary_screen.dart';
+import 'team_match_summary_screen.dart';
 import 'player_management_screen.dart';
 import 'profile_edit_screen.dart';
 
@@ -42,7 +46,12 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _loadOlderHistory(BuildContext context) async {
     if (_loadingOlderHistory) return;
     setState(() => _loadingOlderHistory = true);
-    await AppScope.read(context).loadOlderMatchHistory();
+    final store = AppScope.read(context);
+    if (_teamHistory) {
+      await store.loadOlderTeamMatchHistory();
+    } else {
+      await store.loadOlderMatchHistory();
+    }
     if (!mounted) return;
     setState(() => _loadingOlderHistory = false);
   }
@@ -92,6 +101,18 @@ class _ProfilePageState extends State<ProfilePage> {
         .where(
           (match) =>
               match.status == MatchStatus.completed &&
+              match.participantIds.contains(player.id),
+        )
+        .toList()
+      ..sort((a, b) {
+        final aDate = a.completedAt ?? a.createdAt;
+        final bDate = b.completedAt ?? b.createdAt;
+        return bDate.compareTo(aDate);
+      });
+    final teamHistory = store.teamMatches
+        .where(
+          (match) =>
+              match.status == TeamMatchStatus.completed &&
               match.participantIds.contains(player.id),
         )
         .toList()
@@ -316,28 +337,78 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ),
           const SizedBox(height: 24),
+          const SectionLabel('Team career stats'),
+          const SizedBox(height: 12),
+          GridView.count(
+            crossAxisCount: 2,
+            childAspectRatio: 1.55,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              MetricTile(label: 'Runs', value: '${player.teamStats.runs}', icon: Icons.show_chart_rounded),
+              MetricTile(label: 'Points', value: '${player.teamStats.points}', icon: Icons.bolt_rounded),
+              MetricTile(label: 'Wickets', value: '${player.teamStats.wickets}', icon: Icons.sports_baseball_rounded),
+              MetricTile(label: 'Catches', value: '${player.teamStats.catches}', icon: Icons.back_hand_outlined),
+              MetricTile(label: 'Matches', value: '${player.teamStats.matches}', icon: Icons.groups_2_rounded),
+              MetricTile(label: 'Wins', value: '${player.teamStats.wins}', icon: Icons.emoji_events_outlined),
+            ],
+          ),
+          const SizedBox(height: 24),
           const SectionLabel('Records & history'),
           const SizedBox(height: 10),
           SegmentedButton<bool>(
             showSelectedIcon: false,
             segments: const [
               ButtonSegment(value: false, label: Text('Singles')),
-              ButtonSegment(value: true, label: Text('Team • Soon')),
+              ButtonSegment(value: true, label: Text('Team')),
             ],
             selected: {_teamHistory},
             onSelectionChanged: (value) =>
                 setState(() => _teamHistory = value.single),
           ),
           const SizedBox(height: 12),
-          if (_teamHistory)
+          if (_teamHistory && teamHistory.isEmpty)
             const Card(
               child: ListTile(
                 leading: Icon(Icons.groups_2_outlined),
-                title: Text('Team match profile is ready'),
-                subtitle: Text('Team scoring and records arrive in a future update.'),
-                trailing: Chip(label: Text('SOON')),
+                title: Text('No completed Team Matches yet'),
               ),
             )
+          else if (_teamHistory) ...[
+            ...teamHistory.map(
+              (match) => Padding(
+                padding: const EdgeInsets.only(bottom: 9),
+                child: Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
+                    title: Text(match.title, style: const TextStyle(fontWeight: FontWeight.w900)),
+                    subtitle: Text('${match.teamA.name} vs ${match.teamB.name} • ${match.id}'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TeamMatchSyncIndicator(matchId: match.id),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                    onTap: () => _open(context, TeamMatchSummaryScreen(matchId: match.id)),
+                  ),
+                ),
+              ),
+            ),
+            if (store.hasOlderTeamMatchHistory)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: OutlinedButton.icon(
+                  onPressed: _loadingOlderHistory ? null : () => _loadOlderHistory(context),
+                  icon: _loadingOlderHistory
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.history_rounded),
+                  label: const Text('Load older Team Matches'),
+                ),
+              ),
+          ]
           else if (history.isEmpty)
             const Card(
               child: ListTile(
@@ -360,7 +431,13 @@ class _ProfilePageState extends State<ProfilePage> {
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                     subtitle: Text('${match.id} • ${match.scoringMode.label}'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        MatchSyncIndicator(matchId: match.id),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
                     onTap: () => _open(
                       context,
                       MatchSummaryScreen(matchId: match.id),

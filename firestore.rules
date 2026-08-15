@@ -95,7 +95,10 @@ service cloud.firestore {
     }
 
     match /friendRequests/{requestId} {
-      allow read: if signedIn() &&
+      // Exact GET must also work before a deterministic pair document exists;
+      // otherwise the create transaction fails before reaching allow create.
+      allow get: if hasSession();
+      allow list: if signedIn() &&
         (resource.data.fromPlayerId == currentPlayerId() ||
           resource.data.toPlayerId == currentPlayerId());
       allow create: if signedIn() &&
@@ -170,7 +173,10 @@ service cloud.firestore {
           data.controllerPlayerId == currentPlayerId();
       }
 
-      allow read: if hasSession() && isParticipant(resource.data);
+      // Creation/revision transactions first GET the exact random Match ID.
+      // Queries remain participant-scoped below.
+      allow get: if hasSession();
+      allow list: if hasSession() && isParticipant(resource.data);
 
       allow create: if hasSession() &&
         request.resource.data.matchId == matchId &&
@@ -231,6 +237,80 @@ service cloud.firestore {
           ).data.trackerPlayerId == currentPlayerId()
         );
       }
+    }
+
+    match /teamMatchReservations/{matchId} {
+      allow get: if hasSession();
+      allow list: if false;
+      allow create: if hasSession() &&
+        request.resource.data.matchId == matchId &&
+        request.resource.data.creatorPlayerId == currentPlayerId() &&
+        request.resource.data.originToken is string;
+      allow delete: if hasSession() &&
+        resource.data.creatorPlayerId == currentPlayerId();
+      allow update: if false;
+    }
+
+    match /teamMatches/{matchId} {
+      function isTeamParticipant(data) {
+        return data.participantIds is list &&
+          currentPlayerId() in data.participantIds;
+      }
+
+      function isTeamHost(data) {
+        return data.creatorPlayerId == currentPlayerId();
+      }
+
+      function isTeamTracker(data) {
+        return data.trackerPlayerId is string &&
+          data.trackerPlayerId == currentPlayerId();
+      }
+
+      function ownsTeamControllerLease(data) {
+        return data.controllerUid == request.auth.uid &&
+          data.controllerPlayerId == currentPlayerId();
+      }
+
+      allow get: if hasSession();
+      allow list: if hasSession() && isTeamParticipant(resource.data);
+
+      allow create: if hasSession() &&
+        request.resource.data.matchId == matchId &&
+        isTeamHost(request.resource.data) &&
+        isTeamParticipant(request.resource.data) &&
+        request.resource.data.status in ['toss', 'live', 'inningsBreak', 'completed'] &&
+        request.resource.data.controllerUid == request.auth.uid &&
+        request.resource.data.controllerPlayerId == currentPlayerId();
+
+      allow update: if hasSession() &&
+        isTeamHost(resource.data) &&
+        request.resource.data.matchId == matchId &&
+        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
+        isTeamParticipant(request.resource.data) &&
+        ownsTeamControllerLease(request.resource.data);
+
+      allow update: if hasSession() &&
+        isTeamTracker(resource.data) &&
+        ownsTeamControllerLease(request.resource.data) &&
+        request.resource.data.matchId == resource.data.matchId &&
+        request.resource.data.creatorPlayerId == resource.data.creatorPlayerId &&
+        request.resource.data.participantIds == resource.data.participantIds &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.trackerPlayerId == resource.data.trackerPlayerId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'activityAt',
+          'completedAt',
+          'revision',
+          'controllerUid',
+          'controllerPlayerId',
+          'controllerLeaseUntil',
+          'participantProfiles',
+          'teamMatchJson',
+          'updatedAt'
+        ]);
+
+      allow delete: if hasSession() && isTeamHost(resource.data);
     }
 
     match /{document=**} {

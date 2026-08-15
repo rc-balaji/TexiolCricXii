@@ -1,6 +1,19 @@
-# CricXii v1.2.0 — Match Hardening & Deterministic Ties
+# CricXii v1.3.0 — Team Match
 
-CricXii is Texiol's Android-first local cricket scorer. Version `1.2.0+18` promotes the stable Fresh Start account/social foundation into the first complete Singles Match release while keeping Firebase Spark-friendly operation.
+CricXii is Texiol's Android-first local cricket scorer. Version `1.3.0+19` keeps the complete Singles experience and adds production-ready Team Match scoring while remaining Firebase Spark-friendly.
+
+## Team Match features
+
+- Flexible team sizes with no eleven-player cap.
+- Optional shared **Joker** who appears for both teams, keeps separate per-side appearances and combined personal performance, and cannot bowl to themselves.
+- Animated 3D toss coin, call/result reveal, bat-or-bowl decision and opening-bowler selection.
+- Optional Wide, No-ball, Bye, Leg bye, Penalty and Free Hit rules configured per match.
+- Individual bowling limits, over-level bowler selection, exhausted-quota blocking and optional consecutive overs.
+- **Last Player Standing** prompt when one batter remains. In solo mode the same batter stays on strike after odd runs and over changes.
+- Live player photos, score/target state, innings break, participant Watch mode and controller-device lease.
+- Completed Team Match history and career stats for every participant, including cloud status on each history card.
+- Result cloud sync is informative, not blocking: leave for Home at any time, then use **Sync now / Sync again** from result or History.
+- Adaptive multi-page Team Match PDF with result, toss, innings scorecards, batting, bowling, extras, fall of wickets, Joker and local rules.
 
 ## V1 Singles features
 
@@ -29,6 +42,8 @@ Singles matches are no longer private to the creator device while they are in pr
 
 The host remains the only controller for scoring, undo, order changes, player additions, bowler replacement and cancellation. Watch mode uses a single match-document listener only while that screen is open. Completed matches remain the permanent source for each participant's applicable History and career-stat rebuild. Existing Build 15 creator-owned matches migrate using the same Match IDs.
 
+Team Matches use the equivalent canonical `teamMatches/{matchId}` channel. The host owns setup/toss, while the selected scorer can run live innings under the same single-device lease. Participant discovery, Watch, completed History, manual retry and recent-first pagination apply to both match formats.
+
 ## v1.2 hardening
 
 - Single scoring-controller device lease prevents two phones on the same account from silently overwriting each other. A confirmed **Take control** action is available for handover.
@@ -49,4 +64,4 @@ V1 uses local scoring plus the existing Firestore sync model and does not add Cl
 
 ## Build
 
-GitHub Actions bootstraps the Android shell, runs analyzer/tests and builds the release APK. Keep `FIREBASE_CONFIG_B64` configured if Firebase sync is enabled. Do not commit `google-services.json` or private credentials.
+GitHub Actions bootstraps the Android shell, runs analyzer/tests and builds the release APK. Keep the `GOOGLE_SERVICES_JSON_BASE64` repository secret configured if Firebase sync is enabled. Do not commit `google-services.json` or private credentials.

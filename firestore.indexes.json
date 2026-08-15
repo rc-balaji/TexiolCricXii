@@ -7,6 +7,14 @@
         { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "activityAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "teamMatches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "activityAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

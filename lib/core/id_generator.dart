@@ -9,6 +9,7 @@ class IdGenerator {
   String playerId() => (10000000 + _random.nextInt(90000000)).toString();
   String gangId() => 'TXG-${_segment(5)}';
   String matchId() => 'TXM-${_segment(6)}';
+  String teamMatchId() => 'TXT-${_segment(6)}';
   String eventId() =>
       'EVT-${DateTime.now().microsecondsSinceEpoch}-${_segment(3)}';
   String cardId() => 'CARD-${_segment(8)}';

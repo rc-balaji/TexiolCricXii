@@ -1,4 +1,4 @@
-# CricXii v1.1.1 verification
+# CricXii v1.3.0 verification
 
 Required scenarios:
 
@@ -12,3 +12,16 @@ Required scenarios:
 8. Existing Build 15 active/completed creator-side matches keep the same Match IDs when migrated.
 9. Rapid host scoring does not allow an older queued snapshot to overwrite a newer score snapshot.
 10. Completed-history PDFs and Today Performance continue to use completed match records only.
+
+## Team Match scenarios
+
+1. Create teams larger than eleven and confirm setup has no hard cap.
+2. Create 3 vs 3 with one shared Joker; confirm the Joker appears in both orders and cannot be selected to bowl while batting.
+3. Toggle every extra independently and confirm disabled types never appear and are rejected by the engine.
+4. Configure uneven bowling limits such as 3/3/2/2 overs; exhausted bowlers must be disabled for the next over.
+5. Dismiss all but one batter. Choose Continue solo, score an odd run and complete an over; the same batter must remain striker.
+6. Complete both innings and verify target/result, Team career stats and Team PDF batting/bowling tables.
+7. On the result page, leave while sync is pending. Home/Profile History must retain the match with a pending cloud icon.
+8. Reopen the result from History, press Sync now, and verify the icon changes to cloud-done after rules/indexes are deployed.
+9. Sign in as a participant on another phone and confirm Team Match Watch updates without scoring controls.
+10. Send and accept a Friend Request to confirm pre-create exact-document reads no longer return permission-denied.

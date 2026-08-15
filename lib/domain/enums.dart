@@ -26,7 +26,7 @@ enum BattingOrderSource { secretDraw, previousRanking }
 
 enum ScoreEventType { delivery, quickSummary }
 
-enum ExtraType { none, wide, noBall, bye, legBye }
+enum ExtraType { none, wide, noBall, bye, legBye, penalty }
 
 enum DismissalType {
   none,

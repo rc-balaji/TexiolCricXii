@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
-//import '../domain/match_planning.dart';
+import '../domain/team_match.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
 import '../widgets/player_avatar.dart';
+import '../widgets/team_match_sync_indicator.dart';
 import '../widgets/ui_bits.dart';
 import 'create_match_screen.dart';
+import 'create_team_match_screen.dart';
 import 'daily_performance_screen.dart';
 import 'match_summary_screen.dart';
 import 'notifications_screen.dart';
@@ -18,6 +20,10 @@ import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
 import 'secret_draw_screen.dart';
 import 'tracker_screen.dart';
+import 'team_live_match_screen.dart';
+import 'team_match_summary_screen.dart';
+import 'team_match_watch_screen.dart';
+import 'team_toss_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -63,6 +69,58 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
+  void _openTeamMatch(BuildContext context, TeamMatch match) {
+    final store = AppScope.read(context);
+    final page = !store.canControlTeamMatch(match) &&
+            match.status != TeamMatchStatus.completed
+        ? TeamMatchWatchScreen(matchId: match.id)
+        : switch (match.status) {
+            TeamMatchStatus.toss => TeamTossScreen(matchId: match.id),
+            TeamMatchStatus.live || TeamMatchStatus.inningsBreak =>
+              TeamLiveMatchScreen(matchId: match.id),
+            TeamMatchStatus.completed =>
+              TeamMatchSummaryScreen(matchId: match.id),
+          };
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  Future<void> _cancelTeamMatch(BuildContext context, TeamMatch match) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this Team Match?'),
+        content: Text(
+          '${match.title} and its unfinished innings will be cleared.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep match'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel & clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await AppScope.read(context).cancelTeamMatch(match.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unfinished Team Match cleared.')),
+        );
+      }
+    } on Object catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error'.replaceFirst('Bad state: ', ''))),
+        );
+      }
+    }
+  }
+
   Future<void> _cancelMatch(BuildContext context, CricketMatch match) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -97,6 +155,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final store = AppScope.of(context);
     final player = store.activePlayer!;
     final activeMatches = store.activeMatches;
+    final activeTeamMatches = store.activeTeamMatches;
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: store.refreshMatches,
@@ -202,7 +261,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
-                    'SINGLES MATCH • V1.1.0',
+                    'SINGLES MATCH • STABLE',
                     style: TextStyle(
                       color: AppColors.green,
                       fontSize: 10,
@@ -316,7 +375,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 12),
-          if (activeMatches.isEmpty)
+          if (activeMatches.isEmpty && activeTeamMatches.isEmpty)
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -414,32 +473,113 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          ...activeTeamMatches.map(
+            (match) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(14, 14, 8, 8),
+                      leading: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF4D8),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: const Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              match.title,
+                              style: const TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          if (match.commonJokerPlayerId != null)
+                            const Text('🃏', style: TextStyle(fontSize: 17)),
+                        ],
+                      ),
+                      subtitle: Text(
+                        '${match.teamA.name} vs ${match.teamB.name} • ${match.id}\n'
+                        '${store.canControlTeamMatch(match) ? (store.isTeamMatchTracker(match) && !store.isTeamMatchHost(match) ? 'Scorer controls' : 'Host controls') : 'Participant watch'}',
+                      ),
+                      isThreeLine: true,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TeamMatchSyncIndicator(matchId: match.id),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                        ],
+                      ),
+                      onTap: () => _openTeamMatch(context, match),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton.icon(
+                              onPressed: () => _openTeamMatch(context, match),
+                              icon: Icon(
+                                store.canControlTeamMatch(match)
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.visibility_rounded,
+                              ),
+                              label: Text(
+                                store.canControlTeamMatch(match) ? 'Resume Team Match' : 'Watch',
+                              ),
+                            ),
+                          ),
+                          if (store.canHostTeamMatch(match)) ...[
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: () => _cancelTeamMatch(context, match),
+                                icon: const Icon(Icons.close_rounded),
+                                label: const Text('Cancel / clear'),
+                                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 20),
-          Opacity(
-            opacity: .62,
-            child: Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: const Icon(Icons.groups_2_outlined),
-                title: const Text(
-                  'Team Match',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                subtitle: const Text('Planned for a future update'),
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
+          Card(
+            color: const Color(0xFFFFF9EB),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
+                      SizedBox(width: 9),
+                      Text('TEAM MATCH • V1.3', style: TextStyle(color: Color(0xFFA56600), fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                    ],
                   ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE9ECEA),
-                    borderRadius: BorderRadius.circular(20),
+                  const SizedBox(height: 12),
+                  const Text('Build teams. Flip the toss. Play.', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 5),
+                  const Text('Flexible team sizes, Joker player, bowling limits, optional extras and Last Player Standing.', style: TextStyle(color: AppColors.muted, height: 1.35)),
+                  const SizedBox(height: 15),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const CreateTeamMatchScreen()),
+                    ),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Create Team Match'),
                   ),
-                  child: const Text(
-                    'COMING SOON',
-                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900),
-                  ),
-                ),
+                ],
               ),
             ),
           ),

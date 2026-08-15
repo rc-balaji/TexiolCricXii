@@ -7,6 +7,7 @@ import '../domain/scoring_engine.dart';
 import '../export/scorecard_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
+import '../widgets/match_sync_indicator.dart';
 import '../widgets/player_avatar.dart';
 import 'public_player_profile_screen.dart';
 import 'quick_score_screen.dart';
@@ -24,6 +25,39 @@ class MatchSummaryScreen extends StatefulWidget {
 
 class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
   bool _exporting = false;
+  bool _syncing = false;
+
+  Future<void> _syncAgain() async {
+    if (_syncing) return;
+    setState(() => _syncing = true);
+    final store = AppScope.read(context);
+    final match = store.matchById(widget.matchId);
+    if (match == null) {
+      if (mounted) setState(() => _syncing = false);
+      return;
+    }
+    try {
+      late final bool synced;
+      if (store.canTakeMatchControl(match)) {
+        synced = await store.syncMatchNow(match.id);
+      } else {
+        await store.refreshMatchHistory();
+        synced = store.isMatchSynced(match.id);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            synced
+                ? 'This match is synced with cloud.'
+                : store.matchSyncError(match.id) ?? 'Cloud sync is still pending.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
 
   Future<void> _share() async {
     final store = AppScope.read(context);
@@ -146,6 +180,7 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
       appBar: AppBar(
         title: const Text('Match summary'),
         actions: [
+          MatchSyncIndicator(matchId: match.id),
           if (canControl)
             PopupMenuButton<String>(
               onSelected: (value) {
@@ -264,6 +299,43 @@ class _MatchSummaryScreenState extends State<MatchSummaryScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              color: store.isMatchSynced(match.id)
+                  ? const Color(0xFFE7F8F0)
+                  : const Color(0xFFFFF7E4),
+              child: ListTile(
+                leading: Icon(
+                  store.isMatchSynced(match.id)
+                      ? Icons.cloud_done_rounded
+                      : Icons.cloud_sync_rounded,
+                  color: store.isMatchSynced(match.id)
+                      ? AppColors.greenDark
+                      : const Color(0xFFA56600),
+                ),
+                title: Text(
+                  store.isMatchSynced(match.id)
+                      ? 'Synced with cloud'
+                      : 'Cloud sync pending',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: Text(
+                  store.isMatchSynced(match.id)
+                      ? 'Saved in shared history.'
+                      : store.matchSyncError(match.id) ??
+                          'Safe on this phone. You can retry now or later from History.',
+                ),
+                trailing: TextButton(
+                  onPressed: _syncing ? null : _syncAgain,
+                  child: _syncing
+                      ? const SizedBox.square(
+                          dimension: 17,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(store.isMatchSynced(match.id) ? 'Sync again' : 'Sync now'),
                 ),
               ),
             ),

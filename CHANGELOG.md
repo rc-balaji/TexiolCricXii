@@ -1,3 +1,17 @@
+# CricXii v1.3.0+19 — Team Match
+
+- Added flexible Team Match creation with unlimited team size, batting orders, captains, keepers and an optional shared Joker.
+- Added independent Wide, No-ball, Bye, Leg bye, Penalty and Free Hit switches.
+- Added individual bowler-over quotas, live quota edits, exhausted-bowler blocking and consecutive-over policy.
+- Added production toss coin animation with call, result, bat/bowl decision and opening-bowler validation.
+- Added complete two-innings scoring, target chase, photos, wickets/fielders, undo, participant Watch and innings-break flows.
+- Added Last Player Standing confirmation and true solo-striker behavior after odd runs and over changes.
+- Added Team career stats, shared participant History and adaptive Team Match scorecard PDF.
+- Added non-blocking cloud status on result/history plus optional Sync now / Sync again controls.
+- Fixed Friend Request and new-match transaction permission failures by allowing authenticated exact-document reads while keeping list queries participant-scoped.
+- Persisted successful cloud revision/lease metadata locally so a restart cannot retry from a stale revision.
+- Added Team Match Firestore rules, composite index and scoring/serialization regression tests.
+
 # CricXii v1.2.0+18 — Match Hardening
 
 - Added a single-device controller lease for same-account multi-phone scoring, with explicit takeover and stale-revision protection.
