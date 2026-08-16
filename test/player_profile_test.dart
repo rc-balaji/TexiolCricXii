@@ -96,6 +96,31 @@ void main() {
     expect(public.containsKey('avatarImageSourceHash'), isFalse);
   });
 
+  test('exact avatar blob metadata is public without the private source URL', () {
+    final player = Player(
+      id: '100245',
+      name: 'Dinesh',
+      avatarColor: 0xFF19C37D,
+      createdAt: DateTime.utc(2026, 8, 9),
+      avatarSource: AvatarSource.customUrl,
+      avatarUrl: 'https://example.com/private-original.jpg',
+      avatarImageSourceHash: 'private-url-hash',
+      avatarBlobId: 'content-hash',
+      avatarBlobChunkCount: 3,
+      avatarBlobByteLength: 1200000,
+      avatarBlobMimeType: 'image/jpeg',
+    );
+
+    final public = player.toPublicJson();
+    expect(public['avatarUrl'], isNull);
+    expect(public['avatarImageBase64'], isNull);
+    expect(public['avatarBlobId'], 'content-hash');
+    expect(public['avatarBlobChunkCount'], 3);
+    expect(public['avatarBlobByteLength'], 1200000);
+    expect(public['avatarBlobMimeType'], 'image/jpeg');
+    expect(public.containsKey('avatarImageSourceHash'), isFalse);
+  });
+
   test('private avatars preserve generated ID, name and URL', () {
     final player = Player(
       id: '100245',

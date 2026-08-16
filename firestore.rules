@@ -67,6 +67,21 @@ service cloud.firestore {
         playerId.matches('^[0-9]{8}$');
       allow update, delete: if signedIn() && isCurrentPlayer(playerId);
 
+      // Custom avatar source URLs stay private in accountStates. Public clients
+      // can only GET deterministic chunks containing the exact image bytes.
+      match /avatarChunks/{chunkId} {
+        allow get: if signedIn();
+        allow list: if false;
+        allow create, update: if signedIn() &&
+          isCurrentPlayer(playerId) &&
+          request.resource.data.ownerPlayerId == playerId &&
+          request.resource.data.blobId is string &&
+          request.resource.data.index is int &&
+          request.resource.data.data is string &&
+          request.resource.data.data.size() < 700000;
+        allow delete: if signedIn() && isCurrentPlayer(playerId);
+      }
+
       match /contactFields/{field} {
         allow get: if signedIn() && (
           isCurrentPlayer(playerId) ||

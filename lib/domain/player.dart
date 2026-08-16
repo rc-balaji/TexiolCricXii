@@ -136,6 +136,10 @@ class Player {
     this.avatarUrl,
     this.avatarImageBase64,
     this.avatarImageSourceHash,
+    this.avatarBlobId,
+    this.avatarBlobChunkCount = 0,
+    this.avatarBlobByteLength,
+    this.avatarBlobMimeType,
     List<PrivateAvatar>? privateAvatars,
     Map<String, ProfileVisibility>? contactVisibility,
     Map<String, List<String>>? contactAudienceIds,
@@ -175,6 +179,10 @@ class Player {
   String? avatarUrl;
   String? avatarImageBase64;
   String? avatarImageSourceHash;
+  String? avatarBlobId;
+  int avatarBlobChunkCount;
+  int? avatarBlobByteLength;
+  String? avatarBlobMimeType;
   final List<PrivateAvatar> privateAvatars;
   final Map<String, ProfileVisibility> contactVisibility;
   final Map<String, List<String>> contactAudienceIds;
@@ -252,6 +260,10 @@ class Player {
     'avatarUrl': avatarUrl,
     'avatarImageBase64': avatarImageBase64,
     'avatarImageSourceHash': avatarImageSourceHash,
+    'avatarBlobId': avatarBlobId,
+    'avatarBlobChunkCount': avatarBlobChunkCount,
+    'avatarBlobByteLength': avatarBlobByteLength,
+    'avatarBlobMimeType': avatarBlobMimeType,
     'privateAvatars': privateAvatars.map((value) => value.toJson()).toList(),
     'contactVisibility': contactVisibility.map(
       (key, value) => MapEntry(key, value.name),
@@ -280,7 +292,21 @@ class Player {
     'avatarSource': avatarSource.name,
     'avatarPreset': avatarPreset,
     'avatarUrl': null,
-    'avatarImageBase64': avatarSource == AvatarSource.customUrl ? avatarImageBase64 : null,
+    // New clients fetch the exact original image bytes from deterministic
+    // Firestore chunks. Legacy thumbnail data is only kept as a fallback.
+    'avatarImageBase64': avatarSource == AvatarSource.customUrl && avatarBlobId == null
+        ? avatarImageBase64
+        : null,
+    'avatarBlobId': avatarSource == AvatarSource.customUrl ? avatarBlobId : null,
+    'avatarBlobChunkCount': avatarSource == AvatarSource.customUrl
+        ? avatarBlobChunkCount
+        : 0,
+    'avatarBlobByteLength': avatarSource == AvatarSource.customUrl
+        ? avatarBlobByteLength
+        : null,
+    'avatarBlobMimeType': avatarSource == AvatarSource.customUrl
+        ? avatarBlobMimeType
+        : null,
     'archived': archived,
     'gangId': gangId,
     'gangRole': gangRole?.name,
@@ -348,6 +374,10 @@ class Player {
       avatarUrl: json['avatarUrl'] as String?,
       avatarImageBase64: json['avatarImageBase64'] as String?,
       avatarImageSourceHash: json['avatarImageSourceHash'] as String?,
+      avatarBlobId: json['avatarBlobId'] as String?,
+      avatarBlobChunkCount: json['avatarBlobChunkCount'] as int? ?? 0,
+      avatarBlobByteLength: json['avatarBlobByteLength'] as int?,
+      avatarBlobMimeType: json['avatarBlobMimeType'] as String?,
       privateAvatars: privateAvatars,
       contactVisibility: visibilityRaw.map(
         (key, value) => MapEntry(

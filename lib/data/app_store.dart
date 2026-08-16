@@ -24,6 +24,13 @@ import '../domain/social.dart';
 import '../domain/team_match.dart';
 import '../domain/team_scoring_engine.dart';
 
+class _AvatarSourceData {
+  const _AvatarSourceData({required this.bytes, required this.mimeType});
+
+  final Uint8List bytes;
+  final String mimeType;
+}
+
 class CreatedPlayer {
   const CreatedPlayer({required this.player, required this.loginEmail});
 
@@ -674,6 +681,14 @@ class AppStore extends ChangeNotifier {
       await firestore.collection('teamMatches').doc(match.id).delete();
     }
 
+    if (player.avatarBlobId != null && player.avatarBlobChunkCount > 0) {
+      await _deleteAvatarBlob(
+        player.id,
+        player.avatarBlobId!,
+        player.avatarBlobChunkCount,
+      );
+    }
+
     final batch = firestore.batch();
     batch.delete(firestore.collection('loginCredentials').doc(_emailKey(email)));
     batch.delete(firestore.collection('accountStates').doc(player.id));
@@ -1037,6 +1052,8 @@ class AppStore extends ChangeNotifier {
     player.facebookUrl = _clean(player.facebookUrl);
     player.bio = _clean(player.bio);
     player.customBowlingStyle = _clean(player.customBowlingStyle);
+    final previousBlobId = player.avatarBlobId;
+    final previousChunkCount = player.avatarBlobChunkCount;
     if (player.avatarSource == AvatarSource.customUrl) {
       final avatarUrl = player.avatarUrl ?? '';
       final avatar = Uri.tryParse(avatarUrl);
@@ -1044,14 +1061,27 @@ class AppStore extends ChangeNotifier {
         throw StateError('A custom avatar must use a complete HTTPS URL.');
       }
       final sourceHash = sha256.convert(utf8.encode(avatarUrl)).toString();
-      if (player.avatarImageBase64 == null ||
+      if (player.avatarBlobId == null ||
+          player.avatarBlobChunkCount <= 0 ||
           player.avatarImageSourceHash != sourceHash) {
         try {
-          player.avatarImageBase64 = await _downloadAvatarThumbnail(avatar);
-          player.avatarImageSourceHash = sourceHash;
+          final source = await _downloadAvatarOriginal(avatar);
+          final blobId = sha256.convert(source.bytes).toString();
+          final chunkCount = await _uploadAvatarBlob(
+            playerId: player.id,
+            blobId: blobId,
+            bytes: source.bytes,
+          );
+          player
+            ..avatarImageBase64 = null
+            ..avatarImageSourceHash = sourceHash
+            ..avatarBlobId = blobId
+            ..avatarBlobChunkCount = chunkCount
+            ..avatarBlobByteLength = source.bytes.length
+            ..avatarBlobMimeType = source.mimeType;
         } on Object catch (error) {
           throw StateError(
-            'Could not prepare this avatar for other players. Check that the HTTPS URL points directly to an image and try again. ($error)',
+            'Could not publish this avatar at original quality. Check that the HTTPS URL points directly to an image and try again. ($error)',
           );
         }
       }
@@ -1059,9 +1089,18 @@ class AppStore extends ChangeNotifier {
       player
         ..avatarUrl = null
         ..avatarImageBase64 = null
-        ..avatarImageSourceHash = null;
+        ..avatarImageSourceHash = null
+        ..avatarBlobId = null
+        ..avatarBlobChunkCount = 0
+        ..avatarBlobByteLength = null
+        ..avatarBlobMimeType = null;
     }
     await _commit(waitForCloud: true);
+    if (previousBlobId != null &&
+        previousBlobId != player.avatarBlobId &&
+        previousChunkCount > 0) {
+      unawaited(_deleteAvatarBlob(player.id, previousBlobId, previousChunkCount));
+    }
   }
 
   Future<bool> deleteCachedPlayer(String playerId) async {
@@ -2904,17 +2943,28 @@ class AppStore extends ChangeNotifier {
     final player = activePlayer;
     if (!cloudConnected || firestore == null || player == null) return;
     if (player.avatarSource == AvatarSource.customUrl &&
-        player.avatarImageBase64 == null) {
+        (player.avatarBlobId == null || player.avatarBlobChunkCount <= 0)) {
       final avatar = Uri.tryParse(player.avatarUrl ?? '');
       if (avatar != null && avatar.scheme == 'https' && avatar.host.isNotEmpty) {
         try {
-          player.avatarImageBase64 = await _downloadAvatarThumbnail(avatar);
-          player.avatarImageSourceHash =
-              sha256.convert(utf8.encode(avatar.toString())).toString();
+          final source = await _downloadAvatarOriginal(avatar);
+          final blobId = sha256.convert(source.bytes).toString();
+          player
+            ..avatarImageBase64 = null
+            ..avatarImageSourceHash =
+                sha256.convert(utf8.encode(avatar.toString())).toString()
+            ..avatarBlobId = blobId
+            ..avatarBlobChunkCount = await _uploadAvatarBlob(
+              playerId: player.id,
+              blobId: blobId,
+              bytes: source.bytes,
+            )
+            ..avatarBlobByteLength = source.bytes.length
+            ..avatarBlobMimeType = source.mimeType;
           await _persistLocal();
         } on Object {
-          // Legacy custom URLs keep their local owner-only fallback until the
-          // player explicitly saves a reachable URL from Edit profile.
+          // Legacy custom URLs keep their owner-only URL fallback until a
+          // reachable source can be published byte-for-byte.
         }
       }
     }
@@ -2971,8 +3021,12 @@ class AppStore extends ChangeNotifier {
     'avatarSource': player.avatarSource.name,
     'avatarPreset': player.avatarPreset,
     // Never publish the owner-supplied source URL in shared match documents.
-    // Other devices fetch the safe rendered thumbnail from players/{playerId}.
+    // Other devices fetch the safe exact-image chunks referenced by players/{playerId}.
     'avatarUrl': null,
+    'avatarBlobId': player.avatarBlobId,
+    'avatarBlobChunkCount': player.avatarBlobChunkCount,
+    'avatarBlobByteLength': player.avatarBlobByteLength,
+    'avatarBlobMimeType': player.avatarBlobMimeType,
     'battingStyle': player.battingStyle.name,
     'bowlingStyles': List<String>.from(player.bowlingStyles),
     'customBowlingStyle': player.customBowlingStyle,
@@ -3980,57 +4034,106 @@ class AppStore extends ChangeNotifier {
       ..addEntries(players.map((player) => MapEntry(player.id, player)));
   }
 
-  Future<String> _downloadAvatarThumbnail(Uri uri) async {
-    const maxSourceBytes = 6 * 1024 * 1024;
+  static const int _maxAvatarSourceBytes = 8 * 1024 * 1024;
+  static const int _avatarChunkRawBytes = 450 * 1024;
+
+  Future<_AvatarSourceData> _downloadAvatarOriginal(Uri uri) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final request = await client.getUrl(uri).timeout(const Duration(seconds: 10));
-      request.headers.set(HttpHeaders.userAgentHeader, 'CricXii/1.6.2');
+      request.headers.set(HttpHeaders.userAgentHeader, 'CricXii/1.6.3');
       final response = await request.close().timeout(const Duration(seconds: 10));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Image server returned HTTP ${response.statusCode}.');
       }
-      if (response.contentLength > maxSourceBytes) {
-        throw StateError('Avatar image is larger than 6 MB.');
+      if (response.contentLength > _maxAvatarSourceBytes) {
+        throw StateError('Avatar image is larger than 8 MB.');
       }
       final builder = BytesBuilder(copy: false);
       var total = 0;
-      await for (final chunk in response.timeout(const Duration(seconds: 12))) {
+      await for (final chunk in response.timeout(const Duration(seconds: 15))) {
         total += chunk.length;
-        if (total > maxSourceBytes) {
-          throw StateError('Avatar image is larger than 6 MB.');
+        if (total > _maxAvatarSourceBytes) {
+          throw StateError('Avatar image is larger than 8 MB.');
         }
         builder.add(chunk);
       }
-      final source = builder.takeBytes();
-      if (source.isEmpty) throw StateError('Avatar image is empty.');
+      final bytes = builder.takeBytes();
+      if (bytes.isEmpty) throw StateError('Avatar image is empty.');
 
-      final codec = await ui.instantiateImageCodec(
-        source,
-        targetWidth: 128,
-        targetHeight: 128,
-        allowUpscaling: false,
-      );
+      // Decode only to validate that the downloaded bytes are a real image.
+      // No resize/re-encode is performed: the original bytes are published.
+      final codec = await ui.instantiateImageCodec(bytes);
       try {
         final frame = await codec.getNextFrame();
-        try {
-          final data = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-          if (data == null) throw StateError('Avatar image could not be encoded.');
-          final thumbnail = data.buffer.asUint8List();
-          if (thumbnail.length > 220 * 1024) {
-            throw StateError('Prepared avatar is unexpectedly large.');
-          }
-          return base64Encode(thumbnail);
-        } finally {
-          frame.image.dispose();
-        }
+        frame.image.dispose();
       } finally {
         codec.dispose();
       }
+      final contentType = response.headers.contentType;
+      final mimeType = contentType == null || contentType.primaryType != 'image'
+          ? 'image/*'
+          : '${contentType.primaryType}/${contentType.subType}';
+      return _AvatarSourceData(bytes: bytes, mimeType: mimeType);
     } finally {
       client.close(force: true);
     }
   }
+
+  Future<int> _uploadAvatarBlob({
+    required String playerId,
+    required String blobId,
+    required Uint8List bytes,
+  }) async {
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null) {
+      throw StateError('Connect to the internet to publish a custom avatar.');
+    }
+    final chunkCount = (bytes.length / _avatarChunkRawBytes).ceil();
+    if (chunkCount <= 0) throw StateError('Avatar image is empty.');
+    final chunks = firestore
+        .collection('players')
+        .doc(playerId)
+        .collection('avatarChunks');
+    for (var index = 0; index < chunkCount; index++) {
+      final start = index * _avatarChunkRawBytes;
+      final end = min(start + _avatarChunkRawBytes, bytes.length);
+      final part = Uint8List.sublistView(bytes, start, end);
+      await chunks.doc(_avatarChunkId(blobId, index)).set({
+        'ownerPlayerId': playerId,
+        'blobId': blobId,
+        'index': index,
+        'chunkCount': chunkCount,
+        'byteLength': part.length,
+        'data': base64Encode(part),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    return chunkCount;
+  }
+
+  Future<void> _deleteAvatarBlob(
+    String playerId,
+    String blobId,
+    int chunkCount,
+  ) async {
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null || chunkCount <= 0) return;
+    final chunks = firestore
+        .collection('players')
+        .doc(playerId)
+        .collection('avatarChunks');
+    for (var index = 0; index < chunkCount; index++) {
+      try {
+        await chunks.doc(_avatarChunkId(blobId, index)).delete();
+      } on FirebaseException {
+        // Orphan cleanup is best effort and can retry after a future change.
+      }
+    }
+  }
+
+  String _avatarChunkId(String blobId, int index) =>
+      '${blobId}_${index.toString().padLeft(3, '0')}';
 
   String? _clean(String? value) {
     final cleaned = value?.trim();

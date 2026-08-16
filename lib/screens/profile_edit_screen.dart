@@ -138,6 +138,67 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _avatarName.clear();
   }
 
+  Future<void> _previewPrivateAvatar(PrivateAvatar avatar) => showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: .94),
+    builder: (dialogContext) => Dialog.fullscreen(
+      backgroundColor: Colors.black,
+      child: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: .75,
+                maxScale: 5,
+                child: Center(
+                  child: Image.network(
+                    avatar.url,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    loadingBuilder: (context, child, progress) => progress == null
+                        ? child
+                        : const Center(child: CircularProgressIndicator()),
+                    errorBuilder: (_, _, _) => const Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white70,
+                        size: 54,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 18,
+              right: 64,
+              top: 18,
+              child: Text(
+                avatar.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Positioned(
+              right: 10,
+              top: 8,
+              child: IconButton.filledTonal(
+                tooltip: 'Close photo',
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
@@ -348,7 +409,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   SizedBox(width: 9),
                   Expanded(
                     child: Text(
-                      'Your original custom URL stays in your private account data. CricXii publishes only a small rendered avatar image so other players can see your photo without receiving the source URL.',
+                      'Your original custom URL stays in your private account data. CricXii publishes the image bytes at original quality so other players can see the same photo without receiving the source URL.',
                       style: TextStyle(fontSize: 12.5, height: 1.35),
                     ),
                   ),
@@ -370,7 +431,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'Private HTTPS image URL',
-                helperText: 'The URL itself is never shown to friends or stored in shared matches.',
+                helperText: 'The URL stays private. The image itself is published unchanged (up to 8 MB).',
                 prefixIcon: Icon(Icons.link_rounded),
               ),
             ),
@@ -391,7 +452,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Tap one to make it your active avatar.',
+                'Tap to select. Long-press a photo to open the full preview.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
               const SizedBox(height: 8),
@@ -423,15 +484,19 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         ),
                         child: Row(
                           children: [
-                            ClipOval(
-                              child: SizedBox.square(
-                                dimension: 46,
-                                child: Image.network(
-                                  avatar.url,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => const ColoredBox(
-                                    color: Color(0xFFDDF7EB),
-                                    child: Icon(Icons.person_outline_rounded),
+                            GestureDetector(
+                              onLongPress: () => _previewPrivateAvatar(avatar),
+                              child: ClipOval(
+                                child: SizedBox.square(
+                                  dimension: 46,
+                                  child: Image.network(
+                                    avatar.url,
+                                    fit: BoxFit.cover,
+                                    filterQuality: FilterQuality.high,
+                                    errorBuilder: (_, _, _) => const ColoredBox(
+                                      color: Color(0xFFDDF7EB),
+                                      child: Icon(Icons.person_outline_rounded),
+                                    ),
                                   ),
                                 ),
                               ),

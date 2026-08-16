@@ -1,4 +1,13 @@
-# CricXii v1.6.2+26 — Private Avatar Rendering & Saved Avatar Picker
+# CricXii Changelog
+
+## 1.6.3+27
+
+- Preserve custom avatar image bytes at original quality instead of resizing to a 128 px thumbnail.
+- Keep the owner-supplied avatar URL private while sharing only authenticated image-byte chunks.
+- Add long-press full-screen avatar preview with pinch-to-zoom across the app and saved avatar picker.
+- Include exact custom avatars in Singles, Team and Today Performance PDFs.
+
+## 1.6.2+26
 
 - Keeps owner-supplied custom avatar URLs private in account state and removes them from shared Singles/Team participant snapshots.
 - Generates a compact 128px rendered avatar thumbnail on the owner device when a custom URL is saved; only that rendered image is synced to the public player profile so other players can see the photo without receiving the original URL.

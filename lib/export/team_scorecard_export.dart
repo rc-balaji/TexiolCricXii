@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
+import '../services/avatar_image_repository.dart';
 import '../domain/enums.dart';
 import '../domain/player.dart';
 import '../domain/team_match.dart';
@@ -701,20 +700,15 @@ class TeamScorecardExport {
   );
 
   static Future<pw.MemoryImage?> _avatarFor(Player player) async {
-    final encoded = player.avatarImageBase64;
-    if (player.avatarSource == AvatarSource.customUrl &&
-        encoded != null &&
-        encoded.isNotEmpty) {
-      try {
-        return pw.MemoryImage(base64Decode(encoded));
-      } on FormatException {
-        // Fall through to the private URL (owner device) or preset avatar.
+    if (player.avatarSource == AvatarSource.customUrl) {
+      final exact = await AvatarImageRepository.loadCustomBytes(player);
+      if (exact != null && exact.isNotEmpty) {
+        try {
+          return pw.MemoryImage(exact);
+        } on Object {
+          // Unsupported image encodings fall back to the preset in PDFs.
+        }
       }
-    }
-    final url = player.resolvedAvatarUrl;
-    if (url != null && Uri.tryParse(url)?.isScheme('https') == true) {
-      final remote = await _downloadImage(url);
-      if (remote != null) return pw.MemoryImage(remote);
     }
     try {
       final preset = player.avatarPreset.clamp(1, 5);
@@ -722,26 +716,6 @@ class TeamScorecardExport {
       return pw.MemoryImage(data.buffer.asUint8List());
     } on Object {
       return null;
-    }
-  }
-
-  static Future<Uint8List?> _downloadImage(String url) async {
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 3);
-    try {
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) return null;
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-        if (bytes.length > 4 * 1024 * 1024) return null;
-      }
-      return Uint8List.fromList(bytes);
-    } on Object {
-      return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
