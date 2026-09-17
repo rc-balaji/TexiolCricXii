@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cricxii_ground_ar:
+    path: packages/cricxii_ground_ar
   cloud_firestore: ^6.7.1
   crypto: ^3.0.6
   firebase_auth: ^6.5.6

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../domain/enums.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
+import 'ground_setup_page.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -295,6 +296,14 @@ class _AuthScreenState extends State<AuthScreen> {
                           : 'Sign in',
                     ),
                   ),
+                ),
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: _busy ? null : () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const GroundSetupPage()),
+                  ),
+                  icon: const Icon(Icons.view_in_ar_outlined),
+                  label: const Text('Set up a ground · no sign-in needed'),
                 ),
               ],
             ),

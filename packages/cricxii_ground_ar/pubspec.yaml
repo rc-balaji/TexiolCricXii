@@ -1,0 +1,19 @@
+name: cricxii_ground_ar
+description: Optional native ARCore ground placement for CricXii on Android.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.7.0 <4.0.0'
+  flutter: '>=3.29.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.texiol.crixx.groundar
+        pluginClass: GroundArPlugin

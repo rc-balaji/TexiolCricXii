@@ -2,6 +2,14 @@
 
 CricXii is Texiol's Android-first local cricket scorer. Version `1.6.3+27` keeps the hardened live Team/Super Over and mixed daily-report flow, adds player avatars to cricket-style scorecards across mobile/PDF, and simplifies Home around match creation, unfinished matches and recent results while keeping performance reporting in Profile.
 
+## Ground AR
+
+The **Ground** tab adds an editable pitch plan and optional native Android AR. Use the top-view plan on any supported app device, or open AR on an [ARCore-supported phone](https://developers.google.com/ar/devices), scan the ground, place the batting end, choose direction, and walk to confirm the bowling end. AR uses real camera tracking, detected planes and two local anchors.
+
+Choose a standard **22-yard / 20.1168 m** pitch or a custom **4–40 m** length. Move, rotate, nudge, lock and undo changes; configure stumps, creases, custom wide guides and the bowling-end run-up. Saved layout preferences stay on this phone. Every new AR session needs a fresh scan; saved settings do not restore physical anchors. AR is a visual aid: verify pitch length and crease positions with a tape before marking.
+
+AR requires camera permission and Google Play Services for AR, governed by the [Google Privacy Policy](https://policies.google.com/privacy). Unsupported phones and denied camera permission retain the top-view planner. Native build verification is pending and no physical AR phone was available during implementation; see [Ground AR setup, build and device checks](docs/GROUND_AR.md) for the validation matrix.
+
 ## v1.6.3 avatar privacy
 
 - Custom avatar source URLs stay in private account data and are not published to public player documents or shared match participant snapshots.

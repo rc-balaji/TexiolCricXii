@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'friends_page.dart';
 import 'gang_page.dart';
 import 'home_page.dart';
+import 'ground_setup_page.dart';
 import 'profile_page.dart';
 
 class HomeShell extends StatefulWidget {
@@ -17,6 +18,7 @@ class _HomeShellState extends State<HomeShell> {
 
   static const _pages = <Widget>[
     HomePage(),
+    GroundSetupPage(),
     GangPage(),
     FriendsPage(),
     ProfilePage(),
@@ -33,6 +35,11 @@ class _HomeShellState extends State<HomeShell> {
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home_rounded),
           label: 'Home',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.view_in_ar_outlined),
+          selectedIcon: Icon(Icons.view_in_ar_rounded),
+          label: 'Ground',
         ),
         NavigationDestination(
           icon: Icon(Icons.groups_outlined),

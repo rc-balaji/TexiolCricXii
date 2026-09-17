@@ -28,6 +28,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.41.6'
           channel: stable
           cache: true
 
@@ -47,6 +48,10 @@ jobs:
 
       - name: Run tests
         run: flutter test
+
+      - name: Test native ground geometry and settings
+        working-directory: android
+        run: ./gradlew :cricxii_ground_ar:testDebugUnitTest --console=plain
 
       - name: Build release APK
         run: |
