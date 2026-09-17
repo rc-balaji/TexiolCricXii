@@ -551,8 +551,9 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             yaw(near), sideways, forward, vertical, degrees)
         val target = yawPose(adjusted.x, adjusted.y, adjusted.z, adjusted.yaw)
         remember()
-        placement = if (placement.near != null) {
-            val nearOffset = placement.near.pose.inverse().compose(target)
+        val nearAnchor = placement.near
+        placement = if (nearAnchor != null) {
+            val nearOffset = nearAnchor.pose.inverse().compose(target)
             if (translationLength(nearOffset) > 1f) {
                 hint("For a larger adjustment, use Move and scan the new position.")
                 return
