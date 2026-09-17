@@ -6,6 +6,7 @@ import android.opengl.Matrix
 import com.google.ar.core.Coordinates2d
 import com.google.ar.core.Frame
 import com.google.ar.core.LightEstimate
+import com.google.ar.core.PointCloud
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
 import kotlin.math.atan2
@@ -29,6 +30,7 @@ class GroundArRenderer {
 
     private var backgroundProgram = 0
     private var objectProgram = 0
+    private var pointProgram = 0
     private var backgroundPosition = -1
     private var backgroundUv = -1
     private var backgroundSampler = -1
@@ -44,6 +46,9 @@ class GroundArRenderer {
     private var objectStumpBands = -1
     private var objectAmbient = -1
     private var objectLight = -1
+    private var pointPosition = -1
+    private var pointMvp = -1
+    private var pointColor = -1
     private var uvReady = false
 
     private val screen = floatBuffer(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
@@ -77,6 +82,7 @@ class GroundArRenderer {
         try {
             backgroundProgram = createProgram(BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)
             objectProgram = createProgram(OBJECT_VERTEX, OBJECT_FRAGMENT)
+            pointProgram = createProgram(POINT_VERTEX, POINT_FRAGMENT)
             backgroundPosition = GLES20.glGetAttribLocation(backgroundProgram, "aPosition")
             backgroundUv = GLES20.glGetAttribLocation(backgroundProgram, "aUv")
             backgroundSampler = GLES20.glGetUniformLocation(backgroundProgram, "uCamera")
@@ -92,6 +98,9 @@ class GroundArRenderer {
             objectStumpBands = GLES20.glGetUniformLocation(objectProgram, "uStumpBands")
             objectAmbient = GLES20.glGetUniformLocation(objectProgram, "uAmbient")
             objectLight = GLES20.glGetUniformLocation(objectProgram, "uLight")
+            pointPosition = GLES20.glGetAttribLocation(pointProgram, "aPosition")
+            pointMvp = GLES20.glGetUniformLocation(pointProgram, "uMvp")
+            pointColor = GLES20.glGetUniformLocation(pointProgram, "uColor")
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
             cameraTextureId = textures[0]
@@ -141,6 +150,8 @@ class GroundArRenderer {
         else 1f
         GLES20.glUniform1f(objectAmbient, intensity)
 
+        drawPointCloud(frame)
+
         val validNear = poseMatrix(nearPose, nearMatrix)
         val validFar = poseMatrix(farPose, farMatrix)
         if (validNear && validFar) drawRoute(config)
@@ -181,6 +192,31 @@ class GroundArRenderer {
         GLES20.glDisableVertexAttribArray(backgroundUv)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
         GLES20.glDepthMask(true)
+    }
+
+    private fun drawPointCloud(frame: Frame) {
+        val pointCloud: PointCloud = frame.acquirePointCloud()
+        try {
+            val points = pointCloud.points
+            val count = points.limit() / 4
+            if (count == 0) return
+            points.position(0)
+            GLES20.glUseProgram(pointProgram)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthMask(false)
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            GLES20.glUniformMatrix4fv(pointMvp, 1, false, viewProjection, 0)
+            GLES20.glUniform4fv(pointColor, 1, POINT_COLOR, 0)
+            GLES20.glVertexAttribPointer(pointPosition, 3, GLES20.GL_FLOAT, false, 16, points)
+            GLES20.glEnableVertexAttribArray(pointPosition)
+            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, count)
+            GLES20.glDisableVertexAttribArray(pointPosition)
+            GLES20.glDepthMask(true)
+            GLES20.glUseProgram(objectProgram)
+        } finally {
+            pointCloud.release()
+        }
     }
 
     private fun drawEnd(base: FloatArray, config: GroundRenderConfig, bowlingEnd: Boolean) {
@@ -349,9 +385,11 @@ class GroundArRenderer {
     fun release() {
         if (backgroundProgram != 0) GLES20.glDeleteProgram(backgroundProgram)
         if (objectProgram != 0) GLES20.glDeleteProgram(objectProgram)
+        if (pointProgram != 0) GLES20.glDeleteProgram(pointProgram)
         if (cameraTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(cameraTextureId), 0)
         backgroundProgram = 0
         objectProgram = 0
+        pointProgram = 0
         cameraTextureId = 0
         uvReady = false
     }
@@ -369,6 +407,7 @@ class GroundArRenderer {
 
     companion object {
         private val WHITE = floatArrayOf(0.98f, 0.99f, 1f, 1f)
+        private val POINT_COLOR = floatArrayOf(1f, 1f, 1f, 0.9f)
         private val LINE_HALO = floatArrayOf(0.015f, 0.06f, 0.05f, 0.82f)
         private val TEAL = floatArrayOf(0.1f, 0.94f, 0.74f, 0.95f)
         private val LOCKED = floatArrayOf(0.13f, 0.87f, 0.52f, 0.75f)
@@ -393,6 +432,23 @@ class GroundArRenderer {
             uniform samplerExternalOES uCamera;
             varying mediump vec2 vUv;
             void main() { gl_FragColor = texture2D(uCamera, vUv); }
+        """
+        private const val POINT_VERTEX = """
+            uniform mat4 uMvp;
+            attribute vec3 aPosition;
+            void main() {
+                gl_Position = uMvp * vec4(aPosition, 1.0);
+                gl_PointSize = 5.0;
+            }
+        """
+        private const val POINT_FRAGMENT = """
+            precision mediump float;
+            uniform vec4 uColor;
+            void main() {
+                vec2 centered = gl_PointCoord - vec2(0.5);
+                if (dot(centered, centered) > 0.25) discard;
+                gl_FragColor = uColor;
+            }
         """
         private const val OBJECT_VERTEX = """
             uniform mat4 uMvp;

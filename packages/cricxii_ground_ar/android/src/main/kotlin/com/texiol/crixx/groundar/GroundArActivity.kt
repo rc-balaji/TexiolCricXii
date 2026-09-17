@@ -632,7 +632,7 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             hasNear && !nearTracked -> "Batting-end tracking is paused. Look around the area you scanned."
             hasFar && !farTracked -> "Bowling-end tracking is paused. Rescan its surroundings."
             moveArmed -> "Tap detected ground to reposition the batting end and choose direction again."
-            !hasNear -> if (hit == null) "Scan textured ground slowly until the aim marker appears."
+            !hasNear -> if (hit == null) "Scan the ground slowly; white dots show the area being detected."
                 else "Ground found. Tap the marker or any detected ground to place the batting end."
             !directed -> "Tap ground at least 1 metre ahead to set the pitch direction."
             !hasFar -> {
