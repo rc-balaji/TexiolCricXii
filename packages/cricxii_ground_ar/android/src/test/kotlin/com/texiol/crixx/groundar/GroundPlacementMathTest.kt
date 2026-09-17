@@ -29,9 +29,9 @@ class GroundPlacementMathTest {
 
     @Test fun nudgeUsesPitchAxesRatherThanWorldAxes() {
         val moved = GroundPlacementMath.adjusted(1f, 2f, 3f,
-            Math.PI.toFloat() / 2f, .05f, .05f, 2f)
+            Math.PI.toFloat() / 2f, .05f, .05f, .07f, 2f)
         assertEquals(1.05f, moved.x, .00001f)
-        assertEquals(2f, moved.y, 0f)
+        assertEquals(2.07f, moved.y, .00001f)
         assertEquals(2.95f, moved.z, .00001f)
         assertEquals(Math.toRadians(92.0).toFloat(), moved.yaw, .00001f)
     }

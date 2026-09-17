@@ -26,11 +26,11 @@ internal object GroundPlacementMath {
     }
 
     fun adjusted(x: Float, y: Float, z: Float, yaw: Float,
-                 sideways: Float, forward: Float, degrees: Float): Target {
-        require(listOf(x, y, z, yaw, sideways, forward, degrees).all { it.isFinite() })
+                 sideways: Float, forward: Float, vertical: Float, degrees: Float): Target {
+        require(listOf(x, y, z, yaw, sideways, forward, vertical, degrees).all { it.isFinite() })
         return Target(
             x + cos(yaw) * sideways + sin(yaw) * forward,
-            y,
+            y + vertical,
             z - sin(yaw) * sideways + cos(yaw) * forward,
             yaw + Math.toRadians(degrees.toDouble()).toFloat(),
         )
