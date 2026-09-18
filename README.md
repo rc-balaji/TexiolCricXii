@@ -8,7 +8,7 @@ The **Ground** tab adds an editable pitch plan and optional native Android AR. U
 
 Choose a standard **22-yard / 20.1168 m** pitch or a custom **4–40 m** length. Move, rotate, nudge, lock and undo changes; configure stumps, creases, custom wide guides and the bowling-end run-up. Saved layout preferences stay on this phone. Every new AR session needs a fresh scan; saved settings do not restore physical anchors. AR is a visual aid: verify pitch length and crease positions with a tape before marking.
 
-AR requires camera permission and Google Play Services for AR, governed by the [Google Privacy Policy](https://policies.google.com/privacy). Unsupported phones and denied camera permission retain the top-view planner. Native build verification is pending and no physical AR phone was available during implementation; see [Ground AR setup, build and device checks](docs/GROUND_AR.md) for the validation matrix.
+AR requires camera permission and Google Play Services for AR, governed by the [Google Privacy Policy](https://policies.google.com/privacy). Unsupported phones and denied camera permission retain the top-view planner. Detected ground is shown as a translucent surface with a grid and boundary; placement requires a steady target on that surface. See [Ground AR setup, build and device checks](docs/GROUND_AR.md) for validation results and remaining physical-device checks.
 
 ## v1.6.3 avatar privacy
 

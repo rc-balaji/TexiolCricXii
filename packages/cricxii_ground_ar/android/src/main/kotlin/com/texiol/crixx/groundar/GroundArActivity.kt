@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -24,6 +25,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
@@ -64,6 +66,9 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
     private lateinit var placeButton: Button
     private lateinit var lockButton: Button
     private lateinit var moveButton: Button
+    private lateinit var adjustButton: Button
+    private lateinit var fineControls: View
+    private lateinit var targetView: GroundTargetView
     private val renderer = GroundArRenderer()
     @Volatile private var session: Session? = null
     @Volatile private var layout = GroundLayout()
@@ -85,6 +90,8 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
     private val viewMatrix = FloatArray(16)
     private val projectionMatrix = FloatArray(16)
     private val taps = ConcurrentLinkedQueue<Tap>()
+    private val targetReadiness = GroundTargetReadiness()
+    @Volatile private var resetReadinessRequested = true
 
     // These structures are owned only by the GL thread. Undo keeps anchors alive
     // rather than recreating far-away anchors from saved coordinates.
@@ -97,16 +104,14 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
     private data class Placement(
         val near: Anchor? = null,
         val far: Anchor? = null,
-        val virtualNear: Pose? = null,
-        val virtualFar: Pose? = null,
         val nearOffset: Pose = Pose.IDENTITY,
         val farOffset: Pose = Pose.IDENTITY,
         val directionChosen: Boolean = false,
     ) {
-        fun nearPose(): Pose? = virtualNear ?: near?.pose?.compose(nearOffset)
-        fun farPose(): Pose? = virtualFar ?: far?.pose?.compose(farOffset)
-        fun hasNear() = virtualNear != null || near != null
-        fun hasFar() = virtualFar != null || far != null
+        fun nearPose(): Pose? = near?.pose?.compose(nearOffset)
+        fun farPose(): Pose? = far?.pose?.compose(farOffset)
+        fun hasNear() = near != null
+        fun hasFar() = far != null
     }
     private data class SceneState(val placement: Placement, val layout: GroundLayout)
 
@@ -137,6 +142,8 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         }
         root.addView(surface, FrameLayout.LayoutParams(-1, -1))
+        targetView = GroundTargetView(this)
+        root.addView(targetView, FrameLayout.LayoutParams(-1, -1))
         var downX = 0f
         var downY = 0f
         surface.setOnTouchListener { _, event ->
@@ -158,22 +165,19 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             background = rounded(0xDD0B171F.toInt(), 20f)
         }
         val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val back = control("‹", 36) { saveAndFinish() }
+        val back = control("‹", 48) { saveAndFinish() }
         back.contentDescription = "Return to ground preview and save settings"
         heading.addView(back)
         heading.addView(label("GROUND AR", 17, true), LinearLayout.LayoutParams(0, -2, 1f))
         heading.addView(control("Save", 65) { saveAndFinish() })
         top.addView(heading)
-        stage = label("01  /  PLACE 3D PITCH", 11, true).apply {
+        stage = label("01  /  SCAN THE GROUND", 11, true).apply {
             setTextColor(0xFF78E7BA.toInt())
             setPadding(0, dp(6), 0, dp(5))
         }
-        status = label("Tap Place to create the pitch. Scan is optional for refinement.", 13)
+        status = label("Scan textured ground. Hold the centre target steady before placing.", 13)
         top.addView(stage)
         top.addView(status)
-        top.addView(label("Visual guide • verify distances on the ground", 10).apply {
-            setTextColor(0xFFB4C5CC.toInt()); setPadding(0, dp(7), 0, 0)
-        })
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply {
             setMargins(dp(12), dp(12), dp(12), 0)
         })
@@ -187,69 +191,48 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         placeButton = control("Place batting end", 0) { taps.offer(Tap(width / 2f, height / 2f)) }
         placeButton.setTextColor(0xFF092B21.toInt())
         placeButton.background = rounded(0xFF78E7BA.toInt(), 12f)
-        primary.addView(placeButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+        primary.addView(placeButton, LinearLayout.LayoutParams(0, -2, 1f).apply {
             marginEnd = dp(8)
         })
         lockButton = control("Lock", 76) { onGl {
-            if (!placement.hasFar()) { hint("Place the pitch before locking."); return@onGl }
-            if (!tracking) { hint("Wait for tracking to recover."); return@onGl }
+            if (!placement.hasFar()) { hint("Walk to the bowling-end target and anchor it before locking."); return@onGl }
+            if (!layout.locked && (!tracking || !anchorsTracked())) { hint("Wait for both anchors to track before locking."); return@onGl }
             layout = layout.copy(locked = !layout.locked)
             moveArmed = false
+            targetReadiness.reset()
         } }
         primary.addView(lockButton)
         bottom.addView(primary)
 
         val actions = LinearLayout(this)
         moveButton = control("Move", 74) { onGl {
-            if (!editable()) return@onGl
+            if (layout.locked || !tracking || !placement.hasNear()) return@onGl
             moveArmed = !moveArmed
+            targetReadiness.reset()
             hint(if (moveArmed) "Tap scanned ground for the new batting end." else "Move cancelled.")
         } }
-        actions.addView(moveButton)
-        actions.addView(control("Undo", 74) { onGl {
-            if (layout.locked) { hint("Unlock before undoing a change."); return@onGl }
-            val previous = history.pollLast()
-            if (previous == null) { hint("No change to undo."); return@onGl }
-            future.addLast(SceneState(placement, layout))
-            placement = previous.placement
-            layout = previous.layout.copy(locked = false)
-            moveArmed = false
-            cleanupAnchors()
-        } })
-        actions.addView(control("Redo", 74) { onGl {
-            if (layout.locked) { hint("Unlock before redoing a change."); return@onGl }
-            val next = future.pollLast()
-            if (next == null) { hint("No change to redo."); return@onGl }
-            history.addLast(SceneState(placement, layout))
-            placement = next.placement
-            layout = next.layout.copy(locked = false)
-            moveArmed = false
-            cleanupAnchors()
-        } })
-        actions.addView(control("Settings", 94) { showSettings() })
-        actions.addView(control("Remove", 90) { onGl {
-            if (layout.locked) { hint("Unlock before removing the pitch."); return@onGl }
-            remember(); placement = Placement(); moveArmed = false; cleanupAnchors()
-        } })
-        actions.addView(control("Reset", 80) {
-            if (layout.locked) { hint("Unlock before resetting the ground."); return@control }
-            AlertDialog.Builder(this).setTitle("Reset this ground?")
-                .setMessage("Remove both ends and return to the standard 22-yard layout. You can undo this within this session.")
-                .setNegativeButton("Keep", null)
-                .setPositiveButton("Reset") { _, _ -> onGl {
-                    remember(); placement = Placement(); layout = GroundLayout()
-                    moveArmed = false; cleanupAnchors()
-                } }.show()
-        })
-        bottom.addView(horizontal(actions))
+        fun addAction(button: Button) = actions.addView(button,
+            LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(3), dp(4), dp(3), dp(4)) })
+        addAction(moveButton)
+        adjustButton = control("Adjust", 0) {
+            fineControls.visibility = if (fineControls.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            adjustButton.text = if (fineControls.visibility == View.VISIBLE) "Done" else "Adjust"
+        }
+        addAction(adjustButton)
+        addAction(control("Layout", 0) { showSettings() })
+        lateinit var more: Button
+        more = control("More", 0) { showMore(more) }
+        addAction(more)
+        bottom.addView(actions)
         val fine = LinearLayout(this)
         fine.addView(control("↶ 2°", 66) { onGl { adjust(0f, 0f, 0f, -2f) } })
         fine.addView(control("↷ 2°", 66) { onGl { adjust(0f, 0f, 0f, 2f) } })
         fine.addView(control("← 5cm", 80) { onGl { adjust(-.05f, 0f, 0f, 0f) } })
         fine.addView(control("5cm →", 80) { onGl { adjust(.05f, 0f, 0f, 0f) } })
-        fine.addView(control("↑ 5cm", 80) { onGl { adjust(0f, 0f, .05f, 0f) } })
-        fine.addView(control("↓ 5cm", 80) { onGl { adjust(0f, 0f, -.05f, 0f) } })
-        bottom.addView(horizontal(fine))
+        fine.addView(control("↑ 5cm", 80) { onGl { adjust(0f, .05f, 0f, 0f) } })
+        fine.addView(control("↓ 5cm", 80) { onGl { adjust(0f, -.05f, 0f, 0f) } })
+        fineControls = horizontal(fine).apply { visibility = View.GONE }
+        bottom.addView(fineControls)
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
             setMargins(dp(12), 0, dp(12), dp(12))
         })
@@ -261,9 +244,63 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         setContentView(root)
     }
 
+    private fun showMore(anchor: View) {
+        val menu = PopupMenu(this, anchor)
+        listOf("Undo", "Redo", "Remove", "Reset", "How to place").forEachIndexed { index, title ->
+            menu.menu.add(0, index, index, title)
+        }
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                0 -> onGl {
+            if (layout.locked) { hint("Unlock before undoing a change."); return@onGl }
+            val previous = history.pollLast()
+            if (previous == null) { hint("No change to undo."); return@onGl }
+            future.addLast(SceneState(placement, layout))
+            placement = previous.placement
+            layout = previous.layout.copy(locked = false)
+            moveArmed = false
+            targetReadiness.reset()
+            cleanupAnchors()
+                }
+                1 -> onGl {
+            if (layout.locked) { hint("Unlock before redoing a change."); return@onGl }
+            val next = future.pollLast()
+            if (next == null) { hint("No change to redo."); return@onGl }
+            history.addLast(SceneState(placement, layout))
+            placement = next.placement
+            layout = next.layout.copy(locked = false)
+            moveArmed = false
+            targetReadiness.reset()
+            cleanupAnchors()
+                }
+                2 -> onGl {
+            if (layout.locked) { hint("Unlock before removing the pitch."); return@onGl }
+            remember(); placement = Placement(); moveArmed = false; cleanupAnchors()
+                }
+                3 -> {
+            if (layout.locked) { hint("Unlock before resetting the ground."); return@setOnMenuItemClickListener true }
+            AlertDialog.Builder(this).setTitle("Reset this ground?")
+                .setMessage("Remove both ends and return to the standard 22-yard layout. You can undo this within this session.")
+                .setNegativeButton("Keep", null)
+                .setPositiveButton("Reset") { _, _ -> onGl {
+                    if (layout.locked) return@onGl
+                    remember(); placement = Placement(); layout = GroundLayout()
+                    moveArmed = false; cleanupAnchors()
+                } }.show()
+                }
+                4 -> AlertDialog.Builder(this).setTitle("Place your ground")
+                    .setMessage("1. Scan textured ground until a surface appears.\n\n2. Hold the centre target steady and place the batting end.\n\n3. Aim at ground at least 1 metre ahead to set direction.\n\n4. Walk to the amber bowling marker, scan there and confirm it.\n\nUse Adjust for small ground movements, then Lock to prevent accidental edits. Lock does not stop tracking drift. Verify distances with a tape before marking.")
+                    .setPositiveButton("Got it", null).show()
+            }
+            true
+        }
+        menu.show()
+    }
+
     override fun onResume() {
         super.onResume()
         resumed = true
+        resetReadinessRequested = true
         startSession()
     }
 
@@ -317,7 +354,8 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             showFailure("The camera is in use or unavailable. Close other camera apps and try again.")
         } catch (_: SecurityException) {
             showFailure("Camera permission is needed for Ground AR. You can continue using the ground preview.")
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e("GroundAR", "Unable to start AR session", error)
             showFailure("Ground AR could not start on this phone. Return to the preview and try again.")
         }
     }
@@ -352,6 +390,9 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
 
     override fun onPause() {
         resumed = false
+        tracking = false
+        resetReadinessRequested = true
+        taps.clear()
         // Stop all frame updates before pausing the camera/session.
         if (::surface.isInitialized) surface.onPause()
         surfaceRunning = false
@@ -410,7 +451,8 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         try {
             renderer.initialize()
             textureSession = null
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e("GroundAR", "Unable to initialize AR renderer", error)
             renderingFailed = true
             runOnUiThread { showFailure("This phone could not create the AR graphics view. Use the ground preview.") }
         }
@@ -435,30 +477,42 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             val frame = current.update()
             val camera = frame.camera
             tracking = camera.trackingState == TrackingState.TRACKING
+            if (resetReadinessRequested) {
+                targetReadiness.reset()
+                taps.clear()
+                resetReadinessRequested = false
+            }
             camera.getViewMatrix(viewMatrix, 0)
             camera.getProjectionMatrix(projectionMatrix, 0, .1f, 80f)
             val centerHit = if (tracking) groundHit(frame, width / 2f, height / 2f) else null
-            var tap = taps.poll()
-            while (tap != null) {
+            targetReadiness.observe(SystemClock.uptimeMillis(), frame.timestamp, tracking, placementTarget(frame, centerHit))
+            val tap = taps.poll()
+            taps.clear()
+            if (tap != null) {
                 if (tracking) handleTap(frame, tap) else hint("Tracking is paused. Move slowly and scan the ground.")
-                tap = taps.poll()
             }
             val nearTracked = placement.near?.trackingState == TrackingState.TRACKING
             val farTracked = placement.far?.trackingState == TrackingState.TRACKING
-            val near = if (tracking && (nearTracked || placement.virtualNear != null)) placement.nearPose() else null
-            val far = if (tracking && (farTracked || placement.virtualFar != null)) placement.farPose() else null
-            // An unconfirmed end is only an aim marker, never a claimed anchor.
-            val aim = if (placement.directionChosen && !placement.hasFar() && near != null) {
-                predictedFar(near)
-            } else if (!layout.locked && (!placement.hasNear() || !placement.directionChosen || moveArmed)) {
-                centerHit?.hitPose
-            } else null
-            renderer.draw(frame, viewMatrix, projectionMatrix, near, far, renderConfig(), aim)
-            updateStatus(frame, centerHit, nearTracked, farTracked)
+            val near = if (tracking && nearTracked) placement.nearPose() else null
+            val far = if (tracking && farTracked) placement.farPose() else null
+            val candidate = placementTarget(frame, centerHit)
+            val targetReady = targetReadiness.readyFor(SystemClock.uptimeMillis(), tracking, candidate)
+            val aim = if (targetReady) centerHit?.hitPose else null
+            // Expected far position is a separately coloured target, not a ground hit
+            // or a second wicket. It follows the current near anchor every frame.
+            val expectedEnd = if (tracking && !moveArmed && placement.directionChosen &&
+                !placement.hasFar() && near != null) predictedFar(near) else null
+            renderer.draw(frame, viewMatrix, projectionMatrix, near, far, renderConfig(), aim,
+                planes = if (tracking) current.getAllTrackables(Plane::class.java) else emptyList(),
+                selectedPlane = centerHit?.trackable as? Plane,
+                showDetectedSurface = !layout.locked,
+                targetPose = expectedEnd)
+            updateStatus(frame, candidate != null, targetReady, nearTracked, farTracked)
         } catch (_: CameraNotAvailableException) {
             renderingFailed = true
             runOnUiThread { showFailure("The camera stopped. Return to the preview, close other camera apps and reopen AR.") }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e("GroundAR", "AR frame failed", error)
             tracking = false
             renderingFailed = true
             runOnUiThread { showFailure("Ground tracking stopped unexpectedly. Reopen AR and scan the ground again.") }
@@ -472,45 +526,63 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
                 plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING && plane.isPoseInPolygon(hit.hitPose)
         }
 
+    private fun anchorsTracked(): Boolean =
+        (placement.near == null || placement.near?.trackingState == TrackingState.TRACKING) &&
+            (placement.far == null || placement.far?.trackingState == TrackingState.TRACKING)
+
+    /** A valid detected surface for the current placement step, never a guessed pose. */
+    private fun placementTarget(frame: Frame, hit: HitResult?): GroundTargetReadiness.Candidate? {
+        if (!tracking || layout.locked || hit == null || (!moveArmed && !anchorsTracked())) return null
+        if (placement.hasFar() && !moveArmed) return null
+        val plane = hit.trackable as? Plane ?: return null
+        if (plane.trackingState != TrackingState.TRACKING || plane.subsumedBy != null ||
+            plane.type != Plane.Type.HORIZONTAL_UPWARD_FACING || !plane.isPoseInPolygon(hit.hitPose)) return null
+        val cameraDistance = distance(frame.camera.pose, hit.hitPose)
+        if (!cameraDistance.isFinite() || cameraDistance > 5f) return null
+        val near = placement.nearPose()
+        if (near != null && !moveArmed) {
+            if (abs(hit.hitPose.ty() - near.ty()) > .4f) return null
+            if (!placement.directionChosen) {
+                if (GroundPlacementMath.direction(hit.hitPose.tx() - near.tx(),
+                        hit.hitPose.tz() - near.tz()) == null) return null
+            } else {
+                val expected = predictedFar(near)
+                if (horizontalDistance(hit.hitPose, expected) > 1.5f) return null
+                val grounded = yawPose(expected.tx(), hit.hitPose.ty(), expected.tz(), yaw(expected))
+                if (!plane.isPoseInPolygon(grounded)) return null
+            }
+        }
+        return GroundTargetReadiness.Candidate(plane.hashCode(), hit.hitPose.tx(),
+            hit.hitPose.ty(), hit.hitPose.tz(), cameraDistance)
+    }
+
     private fun handleTap(frame: Frame, tap: Tap) {
         if (layout.locked) { hint("Unlock to adjust the ground."); return }
-        if (placement.near != null && placement.near?.trackingState != TrackingState.TRACKING && !moveArmed) {
-            hint("Wait for the batting-end anchor to track again, or use Move to place it on newly scanned ground."); return
+        if (!moveArmed && !anchorsTracked()) {
+            hint("Tracking needs to recover. Slowly look around the same area before placing or editing."); return
         }
         val hit = groundHit(frame, tap.x, tap.y)
-        if (hit == null && placement.hasNear() && !moveArmed) {
-            hint("The pitch is already placed. Use the adjustment controls to refine it."); return
+        val candidate = placementTarget(frame, hit)
+        if (hit == null || candidate == null ||
+            !targetReadiness.readyFor(SystemClock.uptimeMillis(), tracking, candidate)) {
+            hint("Aim the centre target at detected ground and hold steady until it is ready, then tap Place."); return
         }
         val near = placement.nearPose()
         when {
             near == null || moveArmed -> {
+                val newAnchor = hit.createAnchor()
                 remember()
-                val newNear = hit?.hitPose ?: virtualPlacementPose(frame.camera.pose)
-                val newAnchor = hit?.createAnchor()?.also { ownedAnchors.add(it) }
-                val facing = yawPose(newNear.tx(), newNear.ty(), newNear.tz(), cameraYaw(frame.camera.pose))
-                val nearPose = yawPose(newNear.tx(), newNear.ty(), newNear.tz(), yaw(facing))
-                placement = if (newAnchor != null) {
-                    Placement(
-                        near = newAnchor,
-                        nearOffset = newAnchor.pose.inverse().compose(nearPose),
-                        virtualFar = predictedFar(nearPose),
-                        directionChosen = true,
-                    )
-                } else {
-                    Placement(
-                        virtualNear = nearPose,
-                        virtualFar = predictedFar(nearPose),
-                        directionChosen = true,
-                    )
-                }
+                ownedAnchors.add(newAnchor)
+                val position = hit.hitPose
+                val cameraBack = frame.camera.pose.zAxis
+                val placed = yawPose(position.tx(), position.ty(), position.tz(), atan2(-cameraBack[0], -cameraBack[2]))
+                placement = Placement(near = newAnchor,
+                    nearOffset = newAnchor.pose.inverse().compose(placed))
                 moveArmed = false
                 cleanupAnchors()
-                hint("Pitch placed. Adjust rotation and height, then move the phone down to check the ground.")
+                hint("Batting end anchored. Aim at ground at least 1 metre ahead to choose the pitch direction.")
             }
             !placement.directionChosen -> {
-                if (hit == null) {
-                    hint("Tap Place again after pointing the phone toward the pitch direction."); return
-                }
                 val dx = hit.hitPose.tx() - near.tx()
                 val dz = hit.hitPose.tz() - near.tz()
                 val direction = GroundPlacementMath.direction(dx, dz)
@@ -524,10 +596,20 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
                 val facing = yawPose(near.tx(), near.ty(), near.tz(), direction)
                 placement = placement.copy(
                     nearOffset = placement.near!!.pose.inverse().compose(facing),
-                    virtualFar = predictedFar(facing),
                     directionChosen = true,
                 )
-                hint("Direction set. Bowling end was placed automatically.")
+                hint("Direction set. Walk to the expected bowling-end target and scan the ground there.")
+            }
+            !placement.hasFar() -> {
+                val expected = predictedFar(near)
+                val target = yawPose(expected.tx(), hit.hitPose.ty(), expected.tz(), yaw(expected))
+                val plane = hit.trackable as Plane
+                val newAnchor = plane.createAnchor(target)
+                remember()
+                ownedAnchors.add(newAnchor)
+                placement = placement.copy(far = newAnchor, farOffset = Pose.IDENTITY)
+                cleanupAnchors()
+                hint("Both ends anchored. Inspect the markings, refine if needed, then lock.")
             }
             else -> hint("Use Move, rotate or the 5 cm controls to adjust the pitch.")
         }
@@ -537,8 +619,7 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         if (layout.locked) { hint("Unlock before editing."); return false }
         if (!tracking) { hint("Wait for tracking to recover."); return false }
         if (!placement.hasNear()) { hint("Place the batting end first."); return false }
-        if (placement.near?.trackingState != TrackingState.TRACKING ||
-            (placement.far != null && placement.far?.trackingState != TrackingState.TRACKING)) {
+        if (!anchorsTracked()) {
             hint("Wait for both placed ends to track before making fine adjustments."); return false
         }
         return true
@@ -550,18 +631,14 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         val adjusted = GroundPlacementMath.adjusted(near.tx(), near.ty(), near.tz(),
             yaw(near), sideways, forward, vertical, degrees)
         val target = yawPose(adjusted.x, adjusted.y, adjusted.z, adjusted.yaw)
-        remember()
-        val nearAnchor = placement.near
-        placement = if (nearAnchor != null) {
-            val nearOffset = nearAnchor.pose.inverse().compose(target)
-            if (translationLength(nearOffset) > 1f) {
-                hint("For a larger adjustment, use Move and scan the new position.")
-                return
-            }
-            placement.copy(nearOffset = nearOffset, virtualFar = null)
-        } else {
-            placement.copy(virtualNear = target, virtualFar = null)
+        val nearAnchor = placement.near ?: return
+        val nearOffset = nearAnchor.pose.inverse().compose(target)
+        if (translationLength(nearOffset) > 1f) {
+            hint("For a larger adjustment, use Move and scan the new position.")
+            return
         }
+        remember()
+        placement = placement.copy(nearOffset = nearOffset)
         realignFar()
         cleanupAnchors()
     }
@@ -570,11 +647,7 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
     private fun realignFar() {
         val near = placement.nearPose() ?: return
         val expected = predictedFar(near)
-        val anchor = placement.far
-        if (anchor == null) {
-            placement = placement.copy(virtualFar = expected)
-            return
-        }
+        val anchor = placement.far ?: return
         // Fine controls are horizontal. Preserve the independently detected
         // bowling-end ground height instead of projecting it onto near-end Y.
         val groundHeight = placement.farPose()?.ty() ?: expected.ty()
@@ -595,20 +668,8 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         return yawPose(target.x, target.y, target.z, target.yaw)
     }
 
-    private fun virtualPlacementPose(camera: Pose): Pose {
-        val yaw = cameraYaw(camera)
-        val distance = 1.2f
-        return yawPose(
-            camera.tx() + sin(yaw) * distance,
-            camera.ty() - 1.2f,
-            camera.tz() + cos(yaw) * distance,
-            yaw,
-        )
-    }
-
-    private fun cameraYaw(camera: Pose): Float = atan2(camera.zAxis[0], camera.zAxis[2])
-
     private fun remember() {
+        targetReadiness.reset()
         future.clear()
         history.addLast(SceneState(placement, layout))
         while (history.size > 20) history.removeFirst()
@@ -625,7 +686,7 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
         old.forEach { it.detach(); ownedAnchors.remove(it) }
     }
 
-    private fun updateStatus(frame: Frame, hit: HitResult?, nearTracked: Boolean, farTracked: Boolean) {
+    private fun updateStatus(frame: Frame, candidatePresent: Boolean, targetReady: Boolean, nearTracked: Boolean, farTracked: Boolean) {
         val now = SystemClock.uptimeMillis()
         if (now - lastUiUpdate < 250) return
         lastUiUpdate = now
@@ -655,21 +716,25 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
                 TrackingFailureReason.CAMERA_UNAVAILABLE -> "The camera is unavailable. Close other camera apps."
                 else -> "Tracking paused. Move slowly and rescan the same surroundings."
             }
-            hasNear && placement.near != null && !nearTracked -> "Batting-end anchor tracking is paused. The visual pitch remains fixed."
-            hasFar && placement.far != null && !farTracked -> "Bowling-end anchor tracking is paused. The visual pitch remains fixed."
-            moveArmed -> "Tap detected ground to reposition the batting end and choose direction again."
-            !hasNear -> "Tap Place to create a stable 3D pitch. Scan is optional."
-            !directed -> "Point the phone in the pitch direction, then tap the ground."
-            !hasFar -> "Adjust the batting end; the bowling end will appear automatically."
+            hasNear && !nearTracked && !moveArmed -> "Recovering batting end. Slowly look around the area where you placed it."
+            hasFar && !farTracked && !moveArmed -> "Recovering bowling end. Slowly look around the area where you placed it."
+            targetReady -> "Ground target ready. Tap the button below to confirm."
+            candidatePresent -> "Ground found. Hold the centre target steady until it turns green."
+            moveArmed || !hasNear -> "Move slowly to scan textured ground. Aim the centre target at the surface."
+            !directed -> "Aim at ground at least 1 metre ahead of the batting end to set direction."
+            !hasFar -> bowlingTargetGuidance(frame.camera.displayOrientedPose, near)
             shifted -> "$spacing. Alignment shifted (${format(alignment!!.endpointOffset)} m / ${format(alignment.yawErrorDegrees)}°). Recheck the ends before marking."
             locked -> "$spacing • locked. Walk around to inspect. Verify with a tape before marking."
             else -> "$spacing. Adjust, inspect, then lock."
         }
+        val trackingNow = tracking
+        val moving = moveArmed
+        val canEdit = trackingNow && hasNear && nearTracked && (!hasFar || farTracked) && !locked
         runOnUiThread {
             if (finishingScene || failureDialog) return@runOnUiThread
             stage.text = when {
-                !tracking -> "TRACKING PAUSED"
-                !hasNear -> "01  /  PLACE 3D PITCH"
+                !trackingNow || (!moving && ((hasNear && !nearTracked) || (hasFar && !farTracked))) -> "RECOVERING TRACKING"
+                moving || !hasNear -> "01  /  SCAN & PLACE BATTING END"
                 !directed -> "02  /  CHOOSE DIRECTION"
                 !hasFar -> "03  /  SET BOWLING END"
                 shifted -> "CHECK ALIGNMENT  /  TRACKING SHIFT"
@@ -678,19 +743,40 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
             }
             status.text = summary
             placeButton.text = when {
-                moveArmed -> "Place new batting end"
-                !hasNear -> "Place pitch"
+                moving -> "Place batting end"
+                !hasNear -> "Place batting end"
                 !directed -> "Set direction"
-                !hasFar -> "Place bowling end"
-                else -> "Both ends placed"
+                !hasFar -> "Confirm bowling end"
+                else -> "Both ends anchored"
             }
-            placeButton.isEnabled = tracking && !locked && (!hasFar || moveArmed)
+            placeButton.isEnabled = trackingNow && targetReady && !locked && (!hasFar || moving)
             placeButton.alpha = if (placeButton.isEnabled) 1f else .55f
             lockButton.text = if (locked) "Unlock" else "Lock"
-            lockButton.isEnabled = tracking && hasFar && (nearTracked || placement.virtualNear != null) &&
-                (farTracked || placement.virtualFar != null)
-            moveButton.text = if (moveArmed) "Cancel" else "Move"
+            lockButton.isEnabled = locked || (trackingNow && hasFar && nearTracked && farTracked)
+            moveButton.text = if (moving) "Cancel" else "Move"
+            moveButton.isEnabled = trackingNow && hasNear && !locked
+            adjustButton.isEnabled = canEdit && !moving
+            if (!canEdit || moving) {
+                fineControls.visibility = View.GONE
+                adjustButton.text = "Adjust"
+            }
+            targetView.update(!locked && (!hasFar || moving), trackingNow, candidatePresent, targetReady)
         }
+    }
+
+    private fun bowlingTargetGuidance(camera: Pose, near: Pose?): String {
+        if (near == null) return "Look around the batting end to recover tracking."
+        val expected = predictedFar(near)
+        val metres = horizontalDistance(camera, expected)
+        if (metres < 2f) return "Scan ground around the amber marker, then aim there to confirm the bowling end."
+        val local = camera.inverse().compose(expected)
+        val direction = when {
+            local.tz() > 0f -> "Turn around"
+            local.tx() < -metres * .35f -> "Look left"
+            local.tx() > metres * .35f -> "Look right"
+            else -> "Ahead"
+        }
+        return "$direction · bowling marker about ${format(metres)} m away. Walk there and scan the ground."
     }
 
     private fun showSettings() {
@@ -733,6 +819,10 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
                 val showStumps = stumps.isChecked
                 val showWides = wides.isChecked
                 onGl {
+                    if (layout.locked) { hint("Unlock before changing the layout."); return@onGl }
+                    if (placement.hasNear() && (!tracking || !anchorsTracked())) {
+                        hint("Wait for tracking to recover before changing the layout."); return@onGl
+                    }
                     remember()
                     val lengthChanged = abs(layout.lengthMetres - metres) > .00001f
                     layout = layout.copy(lengthMetres = metres, showCreases = showCreases,
@@ -785,9 +875,10 @@ class GroundArActivity : Activity(), GLSurfaceView.Renderer {
     private fun control(text: String, width: Int, action: () -> Unit) = Button(this).apply {
         this.text = text; textSize = 12f; isAllCaps = false
         setTextColor(Color.WHITE); minWidth = 0; minimumWidth = 0
-        setPadding(dp(8), 0, dp(8), 0)
+        setPadding(dp(6), dp(10), dp(6), dp(10))
+        minimumHeight = dp(48)
         background = rounded(0xFF20343F.toInt(), 10f)
-        layoutParams = LinearLayout.LayoutParams(dp(width), dp(44)).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(width), -2).apply {
             setMargins(dp(3), dp(4), dp(3), dp(4))
         }
         setOnClickListener { action() }

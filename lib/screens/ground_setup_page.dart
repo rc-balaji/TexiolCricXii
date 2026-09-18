@@ -261,21 +261,31 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                 ),
                 const SizedBox(height: 18),
                 const Text(
-                  '1. Scan a clear patch of ground by moving the camera slowly.\n\n'
-                  '2. Place the batting stumps, then choose the bowling direction.\n\n'
-                  '3. Walk towards the preview at the other end. Scan that surface and confirm the bowling stumps.\n\n'
-                  '4. Check both ends, adjust, then lock. Use the guides to place physical stumps and mark creases.',
+                  '1. Move the camera slowly over textured ground until a ground target appears.\n\n'
+                  '2. Aim at the batting end and place the stumps.\n\n'
+                  '3. Point the pitch towards the bowling end and confirm the direction.\n\n'
+                  '4. Walk to the other end, scan that patch and confirm the bowling stumps.\n\n'
+                  '5. Check both ends, adjust if needed, then lock the layout.',
                 ),
                 const SizedBox(height: 20),
+                const Text(
+                  'No ground target?',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Blank or shiny floors can be hard to detect. Move slowly to a textured, well-lit patch and wait for the target before placing.',
+                ),
+                const SizedBox(height: 16),
                 const Text(
                   'Measurement and tracking',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'AR estimates position. Grass, glare and long walks can cause drift. Verify important distances with a tape. '
-                  'Tracking quality is not a measurement-accuracy guarantee. Top view is a planning diagram and does not measure distance. '
-                  'Saved setups keep dimensions; each new camera session needs a fresh scan.',
+                  'AR positions can drift as you walk. Check distances with a tape before placing physical stumps or marking creases. '
+                  'Lock keeps editing off; it does not prevent tracking drift. Top view is a planning diagram. '
+                  'Saved setups keep dimensions; each camera session needs a fresh scan.',
                 ),
                 const SizedBox(height: 16),
                 const Text(
@@ -342,18 +352,28 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       if (bytes == null) throw StateError('Could not capture the layout.');
       final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/cricxii_ground_${DateTime.now().millisecondsSinceEpoch}.png');
+      final file = File(
+        '${directory.path}/cricxii_ground_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       if (!mounted) return;
       final box = context.findRenderObject() as RenderBox?;
-      await SharePlus.instance.share(ShareParams(
-        files: [XFile(file.path, mimeType: 'image/png')],
-        text: 'CricXii ground plan · ${_controller.value.layout.lengthYards.toStringAsFixed(2)} yd. '
-            'Top-view diagram; verify physical distances on the ground.',
-        sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
-      ));
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'image/png')],
+          text:
+              'CricXii ground plan · ${_controller.value.layout.lengthYards.toStringAsFixed(2)} yd. '
+              'Top-view diagram; verify physical distances on the ground.',
+          sharePositionOrigin:
+              box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+        ),
+      );
     } catch (_) {
-      if (mounted) _message('Could not share the image. You can still copy the dimensions.');
+      if (mounted) {
+        _message(
+          'Could not share the image. You can still copy the dimensions.',
+        );
+      }
     } finally {
       image?.dispose();
       if (mounted) setState(() => _sharing = false);
@@ -424,15 +444,17 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                                     size: 19,
                                   ),
                                   SizedBox(width: 8),
-                                  Expanded(child: Text(
-                                    'CRICXII  /  GROUND AR',
-                                    style: TextStyle(
-                                      color: Color(0xFFA7DCC1),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.6,
+                                  Expanded(
+                                    child: Text(
+                                      'CRICXII  /  GROUND AR',
+                                      style: TextStyle(
+                                        color: Color(0xFFA7DCC1),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.6,
+                                      ),
                                     ),
-                                  )),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 14),
@@ -448,7 +470,7 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                               ),
                               const SizedBox(height: 10),
                               const Text(
-                                'Place the stumps. Align the pitch.\nMark every crease with confidence.',
+                                'Scan the ground. Place both ends.\nCheck the pitch, then lock the layout.',
                                 style: TextStyle(
                                   color: Color(0xFFB4C9BF),
                                   height: 1.5,
@@ -461,6 +483,8 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                                 style: FilledButton.styleFrom(
                                   backgroundColor: AppColors.green,
                                   foregroundColor: AppColors.ink,
+                                  disabledBackgroundColor: const Color(0xFF254438),
+                                  disabledForegroundColor: const Color(0xFFBDD2C6),
                                 ),
                                 onPressed: canAr && !_opening ? _openAr : null,
                                 icon:
@@ -552,7 +576,7 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                         ),
                         const SizedBox(height: 5),
                         const Text(
-                          'A movable plan. Use AR or a tape to mark it on the ground.',
+                          'A movable planning diagram. Measure with a tape before marking the ground.',
                           style: TextStyle(
                             color: AppColors.muted,
                             fontSize: 12,
@@ -593,7 +617,10 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                           ],
                         ),
                         const SizedBox(height: 14),
-                        RepaintBoundary(key: _previewKey, child: GroundPreview(controller: _controller)),
+                        RepaintBoundary(
+                          key: _previewKey,
+                          child: GroundPreview(controller: _controller),
+                        ),
                         const SizedBox(height: 8),
                         Wrap(
                           alignment: WrapAlignment.center,
@@ -755,12 +782,14 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                                     divisions: 20,
                                     label:
                                         '${layout.wideOffsetMetres.toStringAsFixed(2)} m',
-                                    onChangeStart: setup.locked
-                                        ? null
-                                        : (_) => _controller.beginGesture(),
-                                    onChangeEnd: setup.locked
-                                        ? null
-                                        : (_) => _controller.endGesture(),
+                                    onChangeStart:
+                                        setup.locked
+                                            ? null
+                                            : (_) => _controller.beginGesture(),
+                                    onChangeEnd:
+                                        setup.locked
+                                            ? null
+                                            : (_) => _controller.endGesture(),
                                     onChanged:
                                         setup.locked
                                             ? null
@@ -790,12 +819,14 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                                   divisions: 40,
                                   label:
                                       '${layout.runUpMetres.toStringAsFixed(1)} m',
-                                  onChangeStart: setup.locked
-                                      ? null
-                                      : (_) => _controller.beginGesture(),
-                                  onChangeEnd: setup.locked
-                                      ? null
-                                      : (_) => _controller.endGesture(),
+                                  onChangeStart:
+                                      setup.locked
+                                          ? null
+                                          : (_) => _controller.beginGesture(),
+                                  onChangeEnd:
+                                      setup.locked
+                                          ? null
+                                          : (_) => _controller.endGesture(),
                                   onChanged:
                                       setup.locked
                                           ? null
@@ -856,7 +887,11 @@ class _GroundSetupPageState extends State<GroundSetupPage> {
                         TextButton.icon(
                           onPressed: _sharing ? null : _sharePicture,
                           icon: const Icon(Icons.ios_share, size: 18),
-                          label: Text(_sharing ? 'Preparing image…' : 'Share layout image'),
+                          label: Text(
+                            _sharing
+                                ? 'Preparing image…'
+                                : 'Share layout image',
+                          ),
                         ),
                         TextButton(
                           onPressed: setup.locked ? null : _reset,

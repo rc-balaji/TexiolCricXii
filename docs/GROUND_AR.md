@@ -27,12 +27,12 @@ Use **Save** to retain the diagram and preferences locally. Returning normally f
 ## Placing a real ground in AR
 
 1. Open AR from Ground. Allow camera access and complete the Google Play Services for AR installation/update prompt if shown.
-2. Move the phone slowly over a well-lit, textured, roughly level surface until a ground aim marker appears.
-3. Tap detected ground, or use **Place batting end** at the centre marker. The phone must be within 5 m of that hit.
+2. Move the phone slowly over a well-lit, textured, roughly level surface. A translucent grid and boundary show the actual detected surface. A blank or shiny floor may need a different viewing angle or a more textured area. Empty space is never treated as detected ground.
+3. Aim the centre marker at the surface and hold it steady until placement becomes available, then use **Place batting end**. The phone must be within 5 m of the hit. Scanning and a real local anchor are required; the app does not guess floor height from the camera.
 4. Tap another detected ground point at least 1 m ahead to choose direction. This point sets direction, not the pitch length.
 5. Walk to the expected bowling-end marker. Scan ground around it, then tap nearby ground or use **Confirm bowling end**. Confirmation requires a nearby detected surface containing the expected endpoint, a ground hit within 1.5 m of the target, and the phone within 5 m of the hit. Until confirmation, this end is an aim marker rather than an anchored wicket.
-6. Inspect both ends, use **Move**, **2° rotation** and **5 cm nudge** controls if needed, then **Lock**. A larger relocation or length adjustment can require confirming the bowling end again.
-7. Use **Save** or system Back to return. **Undo** restores earlier edits in the current session. **Remove** clears placement; **Reset** returns to the default pitch and clears placement, with an in-session undo available.
+6. Inspect both ends, use **Move** or open **Adjust** for **2° rotation** and **5 cm ground nudges**, then **Lock**. Lock prevents accidental edits; it does not improve sensor accuracy. A larger relocation or length adjustment can require confirming the bowling end again.
+7. Use **Save** or system Back to return. **More** contains **Undo**, **Redo**, **Remove** and **Reset**. Undo restores earlier edits in the current session. Remove clears placement; Reset returns to the default pitch and clears placement, with an in-session undo available.
 
 Keep the walking route clear and look up while moving between ends. Camera permission, installation or tracking failures offer a route back to the planner.
 
@@ -45,6 +45,12 @@ The AR status reports the **tracked horizontal endpoint spacing** alongside the 
 Each wicket and its nearby creases use their own anchor. The route between them and any run-up markers are visual guides. Long-distance tracking still needs physical testing. Google notes that independently anchored objects may shift relative to each other as the world estimate changes; see [Working with Anchors](https://developers.google.com/ar/develop/anchors).
 
 Tracking pauses produce visible guidance; untracked endpoint geometry is hidden and fine edits are blocked until tracking recovers. This implementation uses horizontal plane hit tests and ambient lighting. It does not enable depth occlusion, Cloud Anchors, Geospatial anchors or persistent maps. Real objects can therefore appear behind rendered virtual objects even when they are physically in front.
+
+The scan overlay draws only tracked upward-facing plane polygons, not raw point-cloud dots. The grid is a surface-detection aid, not a measurement ruler. It is hidden when the layout is locked. The amber bowling-end target is an estimate calculated from the current batting anchor every frame; it becomes a wicket only after local ground confirmation. Neither endpoint is saved as a fixed world-coordinate pose across frames.
+
+### September 18 video review
+
+The supplied 44-second recording shows placement being accepted before a visible ground target, an empty camera view immediately afterward, wickets appearing off to the side later, and insufficient-feature tracking pauses on a glossy floor. Reviewing the current `c51a38b` source identified an unanchored, guessed-height placement path pointing along the camera's backward axis, plus a cached unanchored bowling endpoint. The correction requires scanned ground, uses the camera's forward direction, and restores local anchors at both ends. The recording documents the prior behavior; it does not validate the corrected build's physical stability.
 
 ## Device support and privacy
 
@@ -96,12 +102,13 @@ Session lifecycle follows [Google's Session API](https://developers.google.com/a
 
 ## Validation status and device matrix
 
-**Implementation status:** source and native JVM tests are present. Native Android compilation/test execution is pending verification. No physical AR phone was available during implementation. Do not describe tracking accuracy, visual quality on hardware or device compatibility as validated until the checks below are recorded. Update this section with actual build/test output when available.
+**Validation on September 18, 2026:** all 82 Flutter tests and all 21 native JVM tests passed. Native debug compilation and full debug APK packaging passed. The Ground page tests and screenshot harness also passed after the final contrast adjustment. Flutter analysis completed with only the pre-existing `prefer_initializing_formals` info at `lib/domain/team_match.dart:98`. The supplied recording was reviewed to diagnose the previous build; no connected physical AR phone was available to validate the corrected build's tracking or graphics.
 
 | Check | Required evidence | Current status |
 | --- | --- | --- |
-| Flutter analysis and tests | Record command result and relevant Ground tests | Pending final verification |
-| Native compile and JVM tests | Debug APK plus `:cricxii_ground_ar:testDebugUnitTest` results | Pending |
+| Flutter analysis and tests | `flutter analyze --no-pub --no-fatal-infos`; `flutter test --no-pub --reporter expanded` | Passed: 82 tests; one existing style info |
+| Native compile and JVM tests | `:cricxii_ground_ar:testDebugUnitTest` | Passed: debug Kotlin compilation; 21 tests, zero failures/errors |
+| APK packaging | `flutter build apk --debug --no-pub --dart-define=FIREBASE_ENABLED=false` | Passed; `build/app/outputs/flutter-apk/app-debug.apk` |
 | Supported physical phone | Device model, Android version, AR service version; real camera, both placements and tracking | Not run; phone unavailable |
 | Unsupported Android phone | Planner remains usable, AR unavailable message, no crash/permission loop | Not run |
 | AR service missing/outdated | Install/update success and cancellation return to planner | Not run |
@@ -113,3 +120,5 @@ Session lifecycle follows [Google's Session API](https://developers.google.com/a
 | Lifecycle and saving | Background/resume, rapid Apply→Save, system Back on old/new Android, reopen/restart requiring scan | Not run on hardware |
 
 Minimum physical acceptance requires **one supported AR phone, one unsupported Android device, and a tape-measured 22-yard placement**. Record measured deviations instead of assuming that matching the configured value proves physical accuracy. Hardware results determine whether any additional device restrictions or tracking refinements are needed.
+
+The local debug APK is an **AR test build without Firebase configuration**. From the sign-in screen choose **Set up a ground · no sign-in needed**. It is not a production account/sync build. Initial packaging attempts hit dependency-host DNS and connection failures; the final local build used copies of the missing Flutter/Firebase artifacts downloaded from their official repositories and verified against official content hashes/checksums. This cache and its generated Android-shell configuration are local only; the versioned CI dependency declarations remain unchanged. Kotlin incremental compilation was disabled in the generated Windows shell to avoid its cross-drive cache error between the C: Pub cache and D: checkout.

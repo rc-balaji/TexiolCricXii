@@ -28,23 +28,43 @@ class _PreviewDevice extends GroundArGateway {
 }
 
 void main() {
-  testWidgets('capture actual Flutter Ground screens without simulating AR', (tester) async {
+  testWidgets('capture actual Flutter Ground screens without simulating AR', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final font = Platform.environment['GROUND_PREVIEW_FONT'];
     if (font != null) {
-      final loader = FontLoader('Roboto')..addFont(File(font).readAsBytes().then((bytes) => ByteData.sublistView(bytes)));
-      await loader.load();
+      await tester.runAsync(() async {
+        final bytes = ByteData.sublistView(await File(font).readAsBytes());
+        await (FontLoader('Roboto')..addFont(Future.value(bytes))).load();
+        // Some unstyled Canvas labels retain the widget test's Ahem placeholder;
+        // this capture checks layout, not physical-device typography or AR graphics.
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+        await icons.load();
+      });
     }
     final key = GlobalKey();
-    await tester.pumpWidget(RepaintBoundary(key: key, child: MaterialApp(
-      theme: buildAppTheme(), home: GroundSetupPage(repository: _Memory(), arGateway: _PreviewDevice()),
-    )));
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: key,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(),
+          home: GroundSetupPage(
+            repository: _Memory(),
+            arGateway: _PreviewDevice(),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     Future<void> capture(String path) async {
-      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final boundary =
+          key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       await tester.runAsync(() async {
         final image = await boundary.toImage(pixelRatio: 2);
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -53,8 +73,12 @@ void main() {
         image.dispose();
       });
     }
+
     await capture('build/ground-overview.png');
-    await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -540));
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -540),
+    );
     await tester.pumpAndSettle();
     await capture('build/ground-editor.png');
     expect(tester.takeException(), isNull);

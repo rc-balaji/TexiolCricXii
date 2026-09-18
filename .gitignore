@@ -12,6 +12,8 @@ build/
 /android/
 android/.gradle/
 android/local.properties
+/packages/cricxii_ground_ar/android/.gradle/
+/packages/cricxii_ground_ar/android/.settings/
 
 # Firebase client configuration is injected by CI
 firebase/google-services.json
