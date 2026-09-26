@@ -315,6 +315,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         ),
       ),
       body: ListView(
+        key: const ValueKey('team-match-setup-scroll'),
+        cacheExtent: 10000,
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
         children: [
           Text(

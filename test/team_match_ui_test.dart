@@ -146,12 +146,24 @@ Future<void> _visible(
   Finder finder, {
   bool sheet = false,
 }) async {
-  await tester.scrollUntilVisible(
-    finder,
-    240,
-    scrollable:
-        sheet ? find.byType(Scrollable).last : find.byType(Scrollable).first,
-  );
+  if (finder.evaluate().isNotEmpty)
+    await tester.ensureVisible(finder);
+  else {
+    final list = find.byKey(const ValueKey('team-match-setup-scroll'));
+    for (var attempt = 0; attempt < 6 && finder.evaluate().isEmpty; attempt++) {
+      await tester.drag(list, const Offset(0, 240));
+      await tester.pumpAndSettle();
+    }
+    for (
+      var attempt = 0;
+      attempt < 12 && finder.evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.drag(list, const Offset(0, -240));
+      await tester.pumpAndSettle();
+    }
+    if (finder.evaluate().isNotEmpty) await tester.ensureVisible(finder);
+  }
   await tester.pumpAndSettle();
 }
 
