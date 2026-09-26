@@ -85,18 +85,24 @@ class _TrackerScreenState extends State<TrackerScreen> {
     }
   }
 
-  Future<void> _wicket(CricketMatch match, List<Player> fielders) async {
+  Future<void> _wicket(
+    CricketMatch match,
+    List<Player> fielders,
+    String? effectiveBowlerId,
+  ) async {
     final batterId = ScoringEngine.currentBatterId(match);
     if (batterId == null) return;
     final details = await showModalBottomSheet<_DismissalDetails>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) =>
-          _WicketSheet(players: fielders, initialBowlerId: _bowlerId),
+      builder:
+          (context) => _WicketSheet(
+            players: fielders,
+            initialBowlerId: effectiveBowlerId,
+          ),
     );
     if (details == null || !mounted) return;
-    _bowlerId = details.bowlerId;
     await _record(
       batRuns: details.runs,
       isOut: true,
@@ -120,46 +126,55 @@ class _TrackerScreenState extends State<TrackerScreen> {
     final accepted = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Replace bowler from the next ball?',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Balls already recorded keep the old bowler. No delivery is replayed. Use this for injury or a ground-side change.',
-                  style: TextStyle(color: AppColors.muted, height: 1.35),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: alsoNext,
-                  onChanged: (value) => setSheetState(() => alsoNext = value),
-                  title: const Text(
-                    'Use the same replacement for the next over too',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+      builder:
+          (context) => StatefulBuilder(
+            builder:
+                (context, setSheetState) => SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Replace bowler from the next ball?',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Balls already recorded keep the old bowler. No delivery is replayed. Use this for injury or a ground-side change.',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            height: 1.35,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: alsoNext,
+                          onChanged:
+                              (value) => setSheetState(() => alsoNext = value),
+                          title: const Text(
+                            'Use the same replacement for the next over too',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: const Text(
+                            'Applied only when the same batter has another bowling block.',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Confirm replacement'),
+                        ),
+                      ],
+                    ),
                   ),
-                  subtitle: const Text(
-                    'Applied only when the same batter has another bowling block.',
-                  ),
                 ),
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Confirm replacement'),
-                ),
-              ],
-            ),
           ),
-        ),
-      ),
     );
     if (accepted != true || !mounted) return;
     try {
@@ -190,22 +205,23 @@ class _TrackerScreenState extends State<TrackerScreen> {
   Future<void> _resetTurn() async {
     final accepted = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Reset this player’s turn?'),
-        content: const Text(
-          'Every tracked ball for the current batter will be removed.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Reset this player’s turn?'),
+            content: const Text(
+              'Every tracked ball for the current batter will be removed.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Reset turn'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Reset turn'),
-          ),
-        ],
-      ),
     );
     if (accepted == true && mounted) {
       await AppScope.read(context).resetCurrentTurn(widget.matchId);
@@ -231,7 +247,8 @@ class _TrackerScreenState extends State<TrackerScreen> {
     if (match == null) {
       return const Scaffold(body: Center(child: Text('Match not found')));
     }
-    if (!store.canControlMatch(match) && match.status != MatchStatus.completed) {
+    if (!store.canControlMatch(match) &&
+        match.status != MatchStatus.completed) {
       return ParticipantMatchWatchScreen(matchId: match.id);
     }
     final hostControls = store.canHostMatch(match);
@@ -240,13 +257,10 @@ class _TrackerScreenState extends State<TrackerScreen> {
     if (batter == null) {
       return MatchSummaryScreen(matchId: match.id);
     }
-    final players = match.participantIds
-        .map(store.playerById)
-        .whereType<Player>()
-        .toList();
-    final possibleBowlers = players
-        .where((player) => player.id != batter.id)
-        .toList();
+    final players =
+        match.participantIds.map(store.playerById).whereType<Player>().toList();
+    final possibleBowlers =
+        players.where((player) => player.id != batter.id).toList();
     final turn = ScoringEngine.rebuildTurns(match)[batter.id]!;
     final currentStats = ScoringEngine.calculateStats(match)[batter.id]!;
     final plannedBowler = BowlingScheduler.plannedBowlerId(
@@ -254,23 +268,21 @@ class _TrackerScreenState extends State<TrackerScreen> {
       batter.id,
       turn.legalBalls,
     );
-    final effectiveBowler = possibleBowlers.any(
-      (player) => player.id == _bowlerId,
-    )
-        ? _bowlerId
-        : possibleBowlers.any((player) => player.id == plannedBowler)
-        ? plannedBowler
-        : possibleBowlers.isEmpty
-        ? null
-        : possibleBowlers.first.id;
+    final effectiveBowler =
+        possibleBowlers.any((player) => player.id == _bowlerId)
+            ? _bowlerId
+            : possibleBowlers.any((player) => player.id == plannedBowler)
+            ? plannedBowler
+            : possibleBowlers.isEmpty
+            ? null
+            : possibleBowlers.first.id;
     final currentBlock = BowlingScheduler.blockFor(
       match,
       batter.id,
       turn.legalBalls,
     );
-    final turnEvents = match.events
-        .where((event) => event.batterId == batter.id)
-        .toList();
+    final turnEvents =
+        match.events.where((event) => event.batterId == batter.id).toList();
     final playerIndex = match.battingOrder.indexOf(batter.id) + 1;
 
     return Scaffold(
@@ -295,11 +307,12 @@ class _TrackerScreenState extends State<TrackerScreen> {
           MatchSyncIndicator(matchId: match.id),
           IconButton(
             tooltip: 'Live ranking & match controls',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => LiveMatchScreen(matchId: match.id),
-              ),
-            ),
+            onPressed:
+                () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LiveMatchScreen(matchId: match.id),
+                  ),
+                ),
             icon: const Icon(Icons.leaderboard_rounded),
           ),
           IconButton(
@@ -312,17 +325,18 @@ class _TrackerScreenState extends State<TrackerScreen> {
               if (value == 'reset') _resetTurn();
               if (value == 'next' && hostControls) _sendNextPlayer();
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'reset',
-                child: Text('Reset current turn'),
-              ),
-              PopupMenuItem(
-                value: 'next',
-                enabled: hostControls,
-                child: const Text('Send next player first'),
-              ),
-            ],
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'reset',
+                    child: Text('Reset current turn'),
+                  ),
+                  PopupMenuItem(
+                    value: 'next',
+                    enabled: hostControls,
+                    child: const Text('Send next player first'),
+                  ),
+                ],
           ),
         ],
       ),
@@ -335,66 +349,66 @@ class _TrackerScreenState extends State<TrackerScreen> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
                 child: Row(
-                children: [
-                  PlayerAvatar(player: batter, radius: 31),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    PlayerAvatar(player: batter, radius: 31),
+                    const SizedBox(width: 13),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'BATTER $playerIndex OF ${match.battingOrder.length}',
+                            style: const TextStyle(
+                              color: AppColors.green,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.3,
+                            ),
+                          ),
+                          Text(
+                            batter.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'BATTER $playerIndex OF ${match.battingOrder.length}',
+                          '${turn.runs}',
                           style: const TextStyle(
-                            color: AppColors.green,
-                            fontSize: 9,
+                            color: Colors.white,
+                            fontSize: 42,
+                            height: .95,
                             fontWeight: FontWeight.w900,
-                            letterSpacing: 1.3,
                           ),
                         ),
                         Text(
-                          batter.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          '${OversFormat.progressLabel(turn.legalBalls)} • target ${OversFormat.setupOversLabel(match.ballLimit)}',
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
+                            color: Color(0xFF9DB4A9),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${currentStats.points} PTS • ${currentStats.wickets} WKTS',
+                          style: const TextStyle(
+                            color: AppColors.green,
+                            fontSize: 12,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '${turn.runs}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 42,
-                          height: .95,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        '${OversFormat.progressLabel(turn.legalBalls)} • target ${OversFormat.setupOversLabel(match.ballLimit)}',
-                        style: const TextStyle(
-                          color: Color(0xFF9DB4A9),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '${currentStats.points} PTS • ${currentStats.wickets} WKTS',
-                        style: const TextStyle(
-                          color: AppColors.green,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
                   ],
                 ),
               ),
@@ -419,33 +433,36 @@ class _TrackerScreenState extends State<TrackerScreen> {
                             ),
                             initialValue: effectiveBowler,
                             decoration: InputDecoration(
-                              labelText: currentBlock == null
-                                  ? 'Current bowler'
-                                  : currentBlock.legalBalls == 6
-                                  ? 'Over ${currentBlock.blockIndex + 1} bowler'
-                                  : 'Final ${currentBlock.legalBalls}-ball bowler',
+                              labelText:
+                                  currentBlock == null
+                                      ? 'Current bowler'
+                                      : currentBlock.legalBalls == 6
+                                      ? 'Over ${currentBlock.blockIndex + 1} bowler'
+                                      : 'Final ${currentBlock.legalBalls}-ball bowler',
                               prefixIcon: const Icon(
                                 Icons.sports_baseball_rounded,
                               ),
                             ),
-                            items: possibleBowlers
-                                .map(
-                                  (player) => DropdownMenuItem(
-                                    value: player.id,
-                                    child: Text(player.name),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: _busy || effectiveBowler == null
-                                ? null
-                                : (value) {
-                                    if (value == null) return;
-                                    _changeBowler(
-                                      match: match,
-                                      newBowlerId: value,
-                                      currentBowlerId: effectiveBowler,
-                                    );
-                                  },
+                            items:
+                                possibleBowlers
+                                    .map(
+                                      (player) => DropdownMenuItem(
+                                        value: player.id,
+                                        child: Text(player.name),
+                                      ),
+                                    )
+                                    .toList(),
+                            onChanged:
+                                _busy || effectiveBowler == null
+                                    ? null
+                                    : (value) {
+                                      if (value == null) return;
+                                      _changeBowler(
+                                        match: match,
+                                        newBowlerId: value,
+                                        currentBowlerId: effectiveBowler,
+                                      );
+                                    },
                           ),
                           if (match.autoBowlingPlan && currentBlock != null)
                             Padding(
@@ -483,19 +500,25 @@ class _TrackerScreenState extends State<TrackerScreen> {
                           _ScoreButton(
                             label: '$run',
                             accent: run == 4 || run == 6,
-                            onTap: _busy
-                                ? null
-                                : () => _record(
-                                    batRuns: run,
-                                    bowlerId: effectiveBowler,
-                                  ),
+                            onTap:
+                                _busy
+                                    ? null
+                                    : () => _record(
+                                      batRuns: run,
+                                      bowlerId: effectiveBowler,
+                                    ),
                           ),
                         _ScoreButton(
                           label: 'OUT',
                           danger: true,
-                          onTap: _busy
-                              ? null
-                              : () => _wicket(match, possibleBowlers),
+                          onTap:
+                              _busy
+                                  ? null
+                                  : () => _wicket(
+                                    match,
+                                    possibleBowlers,
+                                    effectiveBowler,
+                                  ),
                         ),
                       ],
                     ),
@@ -504,30 +527,32 @@ class _TrackerScreenState extends State<TrackerScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _record(
-                                    batRuns: 0,
-                                    extraRuns: 1,
-                                    extraType: ExtraType.wide,
-                                    legalBall: false,
-                                    bowlerId: effectiveBowler,
-                                  ),
+                            onPressed:
+                                _busy
+                                    ? null
+                                    : () => _record(
+                                      batRuns: 0,
+                                      extraRuns: 1,
+                                      extraType: ExtraType.wide,
+                                      legalBall: false,
+                                      bowlerId: effectiveBowler,
+                                    ),
                             child: const Text('Wide +1'),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _record(
-                                    batRuns: 0,
-                                    extraRuns: 1,
-                                    extraType: ExtraType.noBall,
-                                    legalBall: false,
-                                    bowlerId: effectiveBowler,
-                                  ),
+                            onPressed:
+                                _busy
+                                    ? null
+                                    : () => _record(
+                                      batRuns: 0,
+                                      extraRuns: 1,
+                                      extraType: ExtraType.noBall,
+                                      legalBall: false,
+                                      bowlerId: effectiveBowler,
+                                    ),
                             child: const Text('No ball +1'),
                           ),
                         ),
@@ -566,34 +591,37 @@ class _TrackerScreenState extends State<TrackerScreen> {
                       Wrap(
                         spacing: 7,
                         runSpacing: 7,
-                        children: turnEvents.asMap().entries.map((entry) {
-                          final event = entry.value;
-                          return Container(
-                            width: 42,
-                            height: 42,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: event.isOut
-                                  ? const Color(0xFFFFE5E7)
-                                  : event.extraType != ExtraType.none
-                                  ? const Color(0xFFFFF1D4)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(13),
-                              border: Border.all(
-                                color: const Color(0xFFDCE6E0),
-                              ),
-                            ),
-                            child: Text(
-                              _eventLabel(event),
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: event.isOut
-                                    ? AppColors.danger
-                                    : AppColors.ink,
-                              ),
-                            ),
-                          );
-                        }).toList(),
+                        children:
+                            turnEvents.asMap().entries.map((entry) {
+                              final event = entry.value;
+                              return Container(
+                                width: 42,
+                                height: 42,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color:
+                                      event.isOut
+                                          ? const Color(0xFFFFE5E7)
+                                          : event.extraType != ExtraType.none
+                                          ? const Color(0xFFFFF1D4)
+                                          : Colors.white,
+                                  borderRadius: BorderRadius.circular(13),
+                                  border: Border.all(
+                                    color: const Color(0xFFDCE6E0),
+                                  ),
+                                ),
+                                child: Text(
+                                  _eventLabel(event),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color:
+                                        event.isOut
+                                            ? AppColors.danger
+                                            : AppColors.ink,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                       ),
                   ],
                 ),
@@ -628,11 +656,12 @@ class _ScoreButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: danger
-        ? AppColors.danger
-        : accent
-        ? AppColors.green
-        : Colors.white,
+    color:
+        danger
+            ? AppColors.danger
+            : accent
+            ? AppColors.green
+            : Colors.white,
     borderRadius: BorderRadius.circular(17),
     child: InkWell(
       onTap: onTap,
@@ -642,9 +671,8 @@ class _ScoreButton extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(17),
           border: Border.all(
-            color: danger || accent
-                ? Colors.transparent
-                : const Color(0xFFD8E3DD),
+            color:
+                danger || accent ? Colors.transparent : const Color(0xFFD8E3DD),
           ),
         ),
         child: Text(
@@ -731,18 +759,22 @@ class _WicketSheetState extends State<_WicketSheet> {
             decoration: const InputDecoration(
               labelText: 'How was the player out?',
             ),
-            items: DismissalType.values
-                .where((value) => value != DismissalType.none)
-                .map(
-                  (value) =>
-                      DropdownMenuItem(value: value, child: Text(value.label)),
-                )
-                .toList(),
-            onChanged: (value) => setState(() {
-              _type = value ?? DismissalType.bowled;
-              _fielderOne = null;
-              _fielderTwo = null;
-            }),
+            items:
+                DismissalType.values
+                    .where((value) => value != DismissalType.none)
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text(value.label),
+                      ),
+                    )
+                    .toList(),
+            onChanged:
+                (value) => setState(() {
+                  _type = value ?? DismissalType.bowled;
+                  _fielderOne = null;
+                  _fielderTwo = null;
+                }),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
@@ -768,18 +800,20 @@ class _WicketSheetState extends State<_WicketSheet> {
               key: ValueKey('${_type.name}-fielder-one'),
               initialValue: _fielderOne,
               decoration: InputDecoration(
-                labelText: _type == DismissalType.stumped
-                    ? 'Wicketkeeper'
-                    : 'Fielder 1',
+                labelText:
+                    _type == DismissalType.stumped
+                        ? 'Wicketkeeper'
+                        : 'Fielder 1',
               ),
-              items: widget.players
-                  .map(
-                    (player) => DropdownMenuItem(
-                      value: player.id,
-                      child: Text(player.name),
-                    ),
-                  )
-                  .toList(),
+              items:
+                  widget.players
+                      .map(
+                        (player) => DropdownMenuItem(
+                          value: player.id,
+                          child: Text(player.name),
+                        ),
+                      )
+                      .toList(),
               onChanged: (value) => setState(() => _fielderOne = value),
             ),
           ],
@@ -789,15 +823,16 @@ class _WicketSheetState extends State<_WicketSheet> {
               key: ValueKey('${_type.name}-$_fielderOne-fielder-two'),
               initialValue: _fielderTwo,
               decoration: const InputDecoration(labelText: 'Fielder 2'),
-              items: widget.players
-                  .where((player) => player.id != _fielderOne)
-                  .map(
-                    (player) => DropdownMenuItem(
-                      value: player.id,
-                      child: Text(player.name),
-                    ),
-                  )
-                  .toList(),
+              items:
+                  widget.players
+                      .where((player) => player.id != _fielderOne)
+                      .map(
+                        (player) => DropdownMenuItem(
+                          value: player.id,
+                          child: Text(player.name),
+                        ),
+                      )
+                      .toList(),
               onChanged: (value) => setState(() => _fielderTwo = value),
             ),
           ],
@@ -817,36 +852,36 @@ class _WicketSheetState extends State<_WicketSheet> {
                 ButtonSegment(value: 3, label: Text('3')),
               ],
               selected: {_runs},
-              onSelectionChanged: (value) =>
-                  setState(() => _runs = value.single),
+              onSelectionChanged:
+                  (value) => setState(() => _runs = value.single),
             ),
           ],
           const SizedBox(height: 20),
           FilledButton.icon(
             onPressed:
                 (_type.creditsBowler && _bowlerId == null) ||
-                    (_needsOneFielder && _fielderOne == null) ||
-                    (_needsTwoFielders &&
-                        (_fielderOne == null || _fielderTwo == null))
-                ? null
-                : () {
-                    final fielders = <String>[
-                      if (_type == DismissalType.caughtAndBowled &&
-                          _bowlerId != null)
-                        _bowlerId!,
-                      if (_fielderOne != null) _fielderOne!,
-                      if (_fielderTwo != null) _fielderTwo!,
-                    ];
-                    Navigator.pop(
-                      context,
-                      _DismissalDetails(
-                        type: _type,
-                        runs: _runs,
-                        bowlerId: _bowlerId,
-                        fielderIds: fielders,
-                      ),
-                    );
-                  },
+                        (_needsOneFielder && _fielderOne == null) ||
+                        (_needsTwoFielders &&
+                            (_fielderOne == null || _fielderTwo == null))
+                    ? null
+                    : () {
+                      final fielders = <String>[
+                        if (_type == DismissalType.caughtAndBowled &&
+                            _bowlerId != null)
+                          _bowlerId!,
+                        if (_fielderOne != null) _fielderOne!,
+                        if (_fielderTwo != null) _fielderTwo!,
+                      ];
+                      Navigator.pop(
+                        context,
+                        _DismissalDetails(
+                          type: _type,
+                          runs: _runs,
+                          bowlerId: _bowlerId,
+                          fielderIds: fielders,
+                        ),
+                      );
+                    },
             icon: const Icon(Icons.sports_cricket_rounded),
             label: const Text('Confirm wicket'),
           ),

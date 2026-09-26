@@ -24,7 +24,9 @@ class TeamMatchRules {
     this.wideCountsAsLegal = false,
     this.noBallCountsAsLegal = false,
     this.askLastPlayerStanding = true,
-    this.allowConsecutiveOvers = false,
+    this.allowConsecutiveOvers = true,
+    this.maxOversPerBowler,
+    this.extraOverBowlerCount = 0,
     this.pointRules = const PointRules(),
   });
 
@@ -42,6 +44,12 @@ class TeamMatchRules {
   final bool noBallCountsAsLegal;
   final bool askLastPlayerStanding;
   final bool allowConsecutiveOvers;
+
+  /// Optional common cap. Empty legacy quotas and no cap means anyone may bowl.
+  final int? maxOversPerBowler;
+
+  /// This many bowlers may each exceed the common cap by one over, chosen live.
+  final int extraOverBowlerCount;
   final PointRules pointRules;
 
   Map<String, Object?> toJson() => {
@@ -59,6 +67,8 @@ class TeamMatchRules {
     'noBallCountsAsLegal': noBallCountsAsLegal,
     'askLastPlayerStanding': askLastPlayerStanding,
     'allowConsecutiveOvers': allowConsecutiveOvers,
+    'maxOversPerBowler': maxOversPerBowler,
+    'extraOverBowlerCount': extraOverBowlerCount,
     'pointRules': pointRules.toJson(),
   };
 
@@ -75,10 +85,10 @@ class TeamMatchRules {
     noBallValue: json['noBallValue'] as int? ?? 1,
     wideCountsAsLegal: json['wideCountsAsLegal'] as bool? ?? false,
     noBallCountsAsLegal: json['noBallCountsAsLegal'] as bool? ?? false,
-    askLastPlayerStanding:
-        json['askLastPlayerStanding'] as bool? ?? true,
-    allowConsecutiveOvers:
-        json['allowConsecutiveOvers'] as bool? ?? false,
+    askLastPlayerStanding: json['askLastPlayerStanding'] as bool? ?? true,
+    allowConsecutiveOvers: json['allowConsecutiveOvers'] as bool? ?? false,
+    maxOversPerBowler: json['maxOversPerBowler'] as int?,
+    extraOverBowlerCount: json['extraOverBowlerCount'] as int? ?? 0,
     pointRules: PointRules.fromJson(
       Map<String, dynamic>.from(json['pointRules'] as Map? ?? const {}),
     ),
@@ -90,13 +100,12 @@ class TeamSide {
     required this.id,
     required this.name,
     required this.colorValue,
-    required List<String> playerIds,
+    required this.playerIds,
     List<String>? battingOrder,
     Map<String, int>? bowlingQuotaBalls,
     this.captainPlayerId,
     this.wicketkeeperPlayerId,
-  }) : playerIds = playerIds,
-       battingOrder = battingOrder ?? List<String>.from(playerIds),
+  }) : battingOrder = battingOrder ?? List<String>.from(playerIds),
        bowlingQuotaBalls = bowlingQuotaBalls ?? <String, int>{};
 
   final String id;
@@ -178,16 +187,19 @@ class TeamToss {
     ),
     tosserTeamId: json['tosserTeamId'] as String?,
     callerTeamId: json['callerTeamId'] as String?,
-    call: json['call'] == null
-        ? null
-        : TeamTossCall.values.byName(json['call'] as String),
-    result: json['result'] == null
-        ? null
-        : TeamTossCall.values.byName(json['result'] as String),
+    call:
+        json['call'] == null
+            ? null
+            : TeamTossCall.values.byName(json['call'] as String),
+    result:
+        json['result'] == null
+            ? null
+            : TeamTossCall.values.byName(json['result'] as String),
     winnerTeamId: json['winnerTeamId'] as String?,
-    decision: json['decision'] == null
-        ? null
-        : TeamTossDecision.values.byName(json['decision'] as String),
+    decision:
+        json['decision'] == null
+            ? null
+            : TeamTossDecision.values.byName(json['decision'] as String),
     firstBattingTeamId: json['firstBattingTeamId'] as String?,
   );
 }
@@ -267,9 +279,7 @@ class TeamDeliveryEvent {
           json['dismissalType'] as String? ?? DismissalType.none.name,
         ),
         dismissedPlayerId: json['dismissedPlayerId'] as String?,
-        fielderIds: List<String>.from(
-          json['fielderIds'] as List? ?? const [],
-        ),
+        fielderIds: List<String>.from(json['fielderIds'] as List? ?? const []),
       );
 }
 
@@ -281,6 +291,8 @@ class TeamInnings {
     required this.strikerId,
     required this.startedAt,
     this.nonStrikerId,
+    String? openingStrikerId,
+    String? openingNonStrikerId,
     this.target,
     this.ballLimitOverride,
     this.wicketLimitOverride,
@@ -299,7 +311,17 @@ class TeamInnings {
     this.completed = false,
     this.completionReason,
     this.completedAt,
-  }) : events = events ?? <TeamDeliveryEvent>[],
+  }) : openingStrikerId =
+           openingStrikerId ??
+           (events != null && events.isNotEmpty
+               ? events.first.strikerId
+               : strikerId),
+       openingNonStrikerId =
+           openingNonStrikerId ??
+           (events != null && events.isNotEmpty
+               ? events.first.nonStrikerId
+               : nonStrikerId),
+       events = events ?? <TeamDeliveryEvent>[],
        dismissedPlayerIds = dismissedPlayerIds ?? <String>[],
        bowlerByOver = bowlerByOver ?? <int, String>{},
        nextBatterByWicketSequence =
@@ -309,6 +331,8 @@ class TeamInnings {
   final String battingTeamId;
   final String bowlingTeamId;
   final DateTime startedAt;
+  final String openingStrikerId;
+  final String? openingNonStrikerId;
   final int? target;
   final int? ballLimitOverride;
   final int? wicketLimitOverride;
@@ -344,6 +368,8 @@ class TeamInnings {
     'bowlingTeamId': bowlingTeamId,
     'strikerId': strikerId,
     'nonStrikerId': nonStrikerId,
+    'openingStrikerId': openingStrikerId,
+    'openingNonStrikerId': openingNonStrikerId,
     'startedAt': startedAt.toIso8601String(),
     'target': target,
     'ballLimitOverride': ballLimitOverride,
@@ -375,19 +401,22 @@ class TeamInnings {
     bowlingTeamId: json['bowlingTeamId'] as String,
     strikerId: json['strikerId'] as String,
     nonStrikerId: json['nonStrikerId'] as String?,
+    openingStrikerId: json['openingStrikerId'] as String?,
+    openingNonStrikerId: json['openingNonStrikerId'] as String?,
     startedAt: DateTime.parse(json['startedAt'] as String),
     target: json['target'] as int?,
     ballLimitOverride: json['ballLimitOverride'] as int?,
     wicketLimitOverride: json['wicketLimitOverride'] as int?,
     isSuperOver: json['isSuperOver'] as bool? ?? false,
     superOverNumber: json['superOverNumber'] as int?,
-    events: (json['events'] as List? ?? const [])
-        .map(
-          (value) => TeamDeliveryEvent.fromJson(
-            Map<String, dynamic>.from(value as Map),
-          ),
-        )
-        .toList(),
+    events:
+        (json['events'] as List? ?? const [])
+            .map(
+              (value) => TeamDeliveryEvent.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ),
+            )
+            .toList(),
     dismissedPlayerIds: List<String>.from(
       json['dismissedPlayerIds'] as List? ?? const [],
     ),
@@ -401,15 +430,15 @@ class TeamInnings {
     pendingNextBatterWicketSequence:
         json['pendingNextBatterWicketSequence'] as int?,
     swapAfterNextBatter: json['swapAfterNextBatter'] as bool? ?? false,
-    awaitingSoloDecision:
-        json['awaitingSoloDecision'] as bool? ?? false,
+    awaitingSoloDecision: json['awaitingSoloDecision'] as bool? ?? false,
     soloMode: json['soloMode'] as bool? ?? false,
     soloDeclined: json['soloDeclined'] as bool? ?? false,
     completed: json['completed'] as bool? ?? false,
     completionReason: json['completionReason'] as String?,
-    completedAt: json['completedAt'] == null
-        ? null
-        : DateTime.tryParse(json['completedAt'].toString()),
+    completedAt:
+        json['completedAt'] == null
+            ? null
+            : DateTime.tryParse(json['completedAt'].toString()),
   );
 }
 
@@ -519,12 +548,8 @@ class TeamMatch {
     seriesMatchNumber: json['seriesMatchNumber'] as int? ?? 1,
     title: json['title'] as String,
     creatorPlayerId: json['creatorPlayerId'] as String,
-    teamA: TeamSide.fromJson(
-      Map<String, dynamic>.from(json['teamA'] as Map),
-    ),
-    teamB: TeamSide.fromJson(
-      Map<String, dynamic>.from(json['teamB'] as Map),
-    ),
+    teamA: TeamSide.fromJson(Map<String, dynamic>.from(json['teamA'] as Map)),
+    teamB: TeamSide.fromJson(Map<String, dynamic>.from(json['teamB'] as Map)),
     rules: TeamMatchRules.fromJson(
       Map<String, dynamic>.from(json['rules'] as Map),
     ),
@@ -534,36 +559,39 @@ class TeamMatch {
     status: TeamMatchStatus.values.byName(
       json['status'] as String? ?? TeamMatchStatus.toss.name,
     ),
-    toss: json['toss'] == null
-        ? null
-        : TeamToss.fromJson(
-            Map<String, dynamic>.from(json['toss'] as Map),
-          ),
-    innings: (json['innings'] as List? ?? const [])
-        .map(
-          (value) => TeamInnings.fromJson(
-            Map<String, dynamic>.from(value as Map),
-          ),
-        )
-        .toList(),
-    auditTrail: (json['auditTrail'] as List? ?? const [])
-        .map(
-          (value) => MatchAuditEntry.fromJson(
-            Map<String, dynamic>.from(value as Map),
-          ),
-        )
-        .toList(),
-    startedAt: json['startedAt'] == null
-        ? null
-        : DateTime.tryParse(json['startedAt'].toString()),
-    completedAt: json['completedAt'] == null
-        ? null
-        : DateTime.tryParse(json['completedAt'].toString()),
+    toss:
+        json['toss'] == null
+            ? null
+            : TeamToss.fromJson(Map<String, dynamic>.from(json['toss'] as Map)),
+    innings:
+        (json['innings'] as List? ?? const [])
+            .map(
+              (value) =>
+                  TeamInnings.fromJson(Map<String, dynamic>.from(value as Map)),
+            )
+            .toList(),
+    auditTrail:
+        (json['auditTrail'] as List? ?? const [])
+            .map(
+              (value) => MatchAuditEntry.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ),
+            )
+            .toList(),
+    startedAt:
+        json['startedAt'] == null
+            ? null
+            : DateTime.tryParse(json['startedAt'].toString()),
+    completedAt:
+        json['completedAt'] == null
+            ? null
+            : DateTime.tryParse(json['completedAt'].toString()),
     controllerUid: json['controllerUid'] as String?,
     controllerPlayerId: json['controllerPlayerId'] as String?,
-    controllerLeaseUntil: json['controllerLeaseUntil'] == null
-        ? null
-        : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
+    controllerLeaseUntil:
+        json['controllerLeaseUntil'] == null
+            ? null
+            : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
     revision: json['revision'] as int? ?? 0,
     statsApplied: json['statsApplied'] as bool? ?? false,
   );

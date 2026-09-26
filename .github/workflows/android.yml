@@ -49,10 +49,6 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Test native ground geometry and settings
-        working-directory: android
-        run: ./gradlew :cricxii_ground_ar:testDebugUnitTest --console=plain
-
       - name: Build release APK
         run: |
           flutter build apk --release \

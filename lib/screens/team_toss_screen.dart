@@ -6,7 +6,7 @@ import '../domain/team_match.dart';
 import '../domain/team_scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
-import '../widgets/player_avatar.dart';
+import '../widgets/team_opening_selection.dart';
 import '../widgets/team_match_sync_indicator.dart';
 import 'team_live_match_screen.dart';
 
@@ -30,6 +30,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
   TeamTossCall? _hiddenResult;
   TeamTossDecision _decision = TeamTossDecision.bat;
   String? _openingBowlerId;
+  String? _openingStrikerId;
+  String? _openingNonStrikerId;
   bool _callMissed = false;
   bool _revealed = false;
   bool _starting = false;
@@ -62,6 +64,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
         _revealed = true;
       }
       _openingBowlerId = null;
+      _openingStrikerId = null;
+      _openingNonStrikerId = null;
     });
   }
 
@@ -72,12 +76,11 @@ class _TeamTossScreenState extends State<TeamTossScreen>
     _callMissed = false;
     _revealed = false;
     _openingBowlerId = null;
+    _openingStrikerId = null;
+    _openingNonStrikerId = null;
   }
 
-  void _selectMode(
-    TeamTossMode mode, {
-    String? previousWinnerTeamId,
-  }) {
+  void _selectMode(TeamTossMode mode, {String? previousWinnerTeamId}) {
     if (_tossTimer.isAnimating) return;
     setState(() {
       _clearOutcome();
@@ -103,12 +106,13 @@ class _TeamTossScreenState extends State<TeamTossScreen>
     }
     setState(() {
       _call = null;
-      _hiddenResult = Random.secure().nextBool()
-          ? TeamTossCall.heads
-          : TeamTossCall.tails;
+      _hiddenResult =
+          Random.secure().nextBool() ? TeamTossCall.heads : TeamTossCall.tails;
       _callMissed = false;
       _revealed = false;
       _openingBowlerId = null;
+      _openingStrikerId = null;
+      _openingNonStrikerId = null;
     });
     _tossTimer.forward(from: 0);
   }
@@ -164,22 +168,6 @@ class _TeamTossScreenState extends State<TeamTossScreen>
         : match.otherSide(winnerId).id;
   }
 
-  List<String> _availableOpeningBowlers(TeamMatch match) {
-    final battingId = _resolvedFirstBattingTeamId(match);
-    if (battingId == null) return const [];
-    final batting = match.side(battingId);
-    final bowling = match.otherSide(batting.id);
-    final openingBatters = batting.battingOrder.take(2).toSet();
-    final required = min(match.rules.ballsPerOver, match.rules.ballLimit);
-    return bowling.playerIds
-        .where(
-          (id) =>
-              !openingBatters.contains(id) &&
-              (bowling.bowlingQuotaBalls[id] ?? 0) >= required,
-        )
-        .toList(growable: false);
-  }
-
   Future<void> _start(TeamMatch match) async {
     final mode = _mode;
     final firstBattingTeamId = _resolvedFirstBattingTeamId(match);
@@ -187,22 +175,21 @@ class _TeamTossScreenState extends State<TeamTossScreen>
     if (mode == null ||
         firstBattingTeamId == null ||
         bowler == null ||
+        _openingStrikerId == null ||
+        _openingNonStrikerId == null ||
         _starting) {
       return;
     }
     final winnerId = _winnerId(match);
-    final callerId = _tosserTeamId == null
-        ? null
-        : match.otherSide(_tosserTeamId!).id;
+    final callerId =
+        _tosserTeamId == null ? null : match.otherSide(_tosserTeamId!).id;
     setState(() => _starting = true);
     try {
       await AppScope.read(context).startTeamMatchAfterToss(
         match.id,
         toss: TeamToss(
           mode: mode,
-          tosserTeamId: mode == TeamTossMode.inApp
-              ? _tosserTeamId
-              : null,
+          tosserTeamId: mode == TeamTossMode.inApp ? _tosserTeamId : null,
           callerTeamId: mode == TeamTossMode.inApp ? callerId : null,
           call: mode == TeamTossMode.inApp ? _call : null,
           result: mode == TeamTossMode.inApp ? _hiddenResult : null,
@@ -212,6 +199,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
           createdAt: DateTime.now(),
         ),
         openingBowlerId: bowler,
+        openingStrikerId: _openingStrikerId,
+        openingNonStrikerId: _openingNonStrikerId,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -241,19 +230,17 @@ class _TeamTossScreenState extends State<TeamTossScreen>
       return TeamLiveMatchScreen(matchId: match.id);
     }
 
-    final previous = match.previousMatchId == null
-        ? null
-        : store.teamMatchById(match.previousMatchId!);
-    final previousWinnerId = previous == null
-        ? null
-        : TeamScoringEngine.result(previous).winnerTeamId;
+    final previous =
+        match.previousMatchId == null
+            ? null
+            : store.teamMatchById(match.previousMatchId!);
+    final previousWinnerId =
+        previous == null
+            ? null
+            : TeamScoringEngine.result(previous).winnerTeamId;
     final firstBattingId = _resolvedFirstBattingTeamId(match);
     final batting = firstBattingId == null ? null : match.side(firstBattingId);
     final bowling = batting == null ? null : match.otherSide(batting.id);
-    final bowlers = _availableOpeningBowlers(match);
-    if (_openingBowlerId != null && !bowlers.contains(_openingBowlerId)) {
-      _openingBowlerId = null;
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -265,9 +252,9 @@ class _TeamTossScreenState extends State<TeamTossScreen>
         children: [
           Text(
             match.title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 4),
           Text(
@@ -278,9 +265,9 @@ class _TeamTossScreenState extends State<TeamTossScreen>
           const SizedBox(height: 20),
           Text(
             'How should this match start?',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w900,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 4),
           const Text(
@@ -293,7 +280,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
             enabled: !_tossTimer.isAnimating,
             icon: Icons.casino_rounded,
             title: 'In-app timed toss',
-            subtitle: 'Choose the flipping team. The other team calls during a 3-second spin.',
+            subtitle:
+                'Choose the flipping team. The other team calls during a 3-second spin.',
             onTap: () => _selectMode(TeamTossMode.inApp),
           ),
           _StartModeTile(
@@ -320,10 +308,11 @@ class _TeamTossScreenState extends State<TeamTossScreen>
               title: 'Previous winner decides',
               subtitle:
                   '${previous!.side(previousWinnerId).name} won the last match and can choose Bat or Bowl.',
-              onTap: () => _selectMode(
-                TeamTossMode.previousWinnerChoice,
-                previousWinnerTeamId: previousWinnerId,
-              ),
+              onTap:
+                  () => _selectMode(
+                    TeamTossMode.previousWinnerChoice,
+                    previousWinnerTeamId: previousWinnerId,
+                  ),
             ),
           if (_mode == TeamTossMode.inApp) ...[
             const SizedBox(height: 18),
@@ -367,60 +356,48 @@ class _TeamTossScreenState extends State<TeamTossScreen>
                       style: const TextStyle(color: AppColors.muted),
                     ),
                     const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(
-                        'opening-${bowling.id}-${_openingBowlerId ?? 'none'}',
-                      ),
-                      initialValue: _openingBowlerId,
-                      decoration: InputDecoration(
-                        labelText: '${bowling.name} opening bowler',
-                        helperText:
-                            'Quota and Joker self-bowling rules are applied.',
-                      ),
-                      items: bowlers.map((id) {
-                        final player = store.playerById(id);
-                        final quota = bowling.bowlingQuotaBalls[id] ?? 0;
-                        return DropdownMenuItem(
-                          value: id,
-                          child: Row(
-                            children: [
-                              if (player != null)
-                                PlayerAvatar(player: player, radius: 14),
-                              if (player != null) const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  '${player?.name ?? id} • '
-                                  '${quota ~/ match.rules.ballsPerOver} ov',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) =>
-                          setState(() => _openingBowlerId = value),
+                    TeamOpeningSelection(
+                      match: match,
+                      battingTeamId: batting.id,
+                      strikerId: _openingStrikerId,
+                      nonStrikerId: _openingNonStrikerId,
+                      bowlerId: _openingBowlerId,
+                      enabled: !_starting,
+                      onStrikerChanged:
+                          (value) => setState(() {
+                            _openingStrikerId = value;
+                            if (_openingNonStrikerId == value)
+                              _openingNonStrikerId = null;
+                            _openingBowlerId = null;
+                          }),
+                      onNonStrikerChanged:
+                          (value) => setState(() {
+                            _openingNonStrikerId = value;
+                            _openingBowlerId = null;
+                          }),
+                      onBowlerChanged:
+                          (value) => setState(() => _openingBowlerId = value),
                     ),
-                    if (bowlers.isEmpty) ...[
-                      const SizedBox(height: 10),
-                      const Text(
-                        'No eligible opening bowler. Check quota or Joker batting position.',
-                        style: TextStyle(color: AppColors.danger),
-                      ),
-                    ],
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _openingBowlerId == null || _starting
-                            ? null
-                            : () => _start(match),
-                        icon: _starting
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.play_arrow_rounded),
+                        onPressed:
+                            _openingBowlerId == null ||
+                                    _openingStrikerId == null ||
+                                    _openingNonStrikerId == null ||
+                                    _starting
+                                ? null
+                                : () => _start(match),
+                        icon:
+                            _starting
+                                ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                : const Icon(Icons.play_arrow_rounded),
                         label: Text('Start • ${batting.name} batting'),
                       ),
                     ),
@@ -435,9 +412,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
   }
 
   Widget _buildInAppToss(TeamMatch match) {
-    final caller = _tosserTeamId == null
-        ? null
-        : match.otherSide(_tosserTeamId!);
+    final caller =
+        _tosserTeamId == null ? null : match.otherSide(_tosserTeamId!);
     final winnerId = _inAppWinnerId(match);
     final winner = winnerId == null ? null : match.side(winnerId);
     return Card(
@@ -457,20 +433,22 @@ class _TeamTossScreenState extends State<TeamTossScreen>
               decoration: const InputDecoration(
                 labelText: 'Team flipping the coin',
               ),
-              items: [match.teamA, match.teamB]
-                  .map(
-                    (side) => DropdownMenuItem(
-                      value: side.id,
-                      child: Text(side.name),
-                    ),
-                  )
-                  .toList(),
-              onChanged: _tossTimer.isAnimating
-                  ? null
-                  : (value) => setState(() {
-                      _clearOutcome();
-                      _tosserTeamId = value;
-                    }),
+              items:
+                  [match.teamA, match.teamB]
+                      .map(
+                        (side) => DropdownMenuItem(
+                          value: side.id,
+                          child: Text(side.name),
+                        ),
+                      )
+                      .toList(),
+              onChanged:
+                  _tossTimer.isAnimating
+                      ? null
+                      : (value) => setState(() {
+                        _clearOutcome();
+                        _tosserTeamId = value;
+                      }),
             ),
             if (caller != null) ...[
               const SizedBox(height: 8),
@@ -488,10 +466,7 @@ class _TeamTossScreenState extends State<TeamTossScreen>
             AnimatedBuilder(
               animation: _tossTimer,
               builder: (context, _) {
-                final remaining = max(
-                  0,
-                  (3 * (1 - _tossTimer.value)).ceil(),
-                );
+                final remaining = max(0, (3 * (1 - _tossTimer.value)).ceil());
                 return Column(
                   children: [
                     if (_tossTimer.isAnimating)
@@ -521,10 +496,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
                           child: _CallButton(
                             label: 'HEADS',
                             selected: _call == TeamTossCall.heads,
-                            enabled:
-                                _tossTimer.isAnimating && _call == null,
-                            onPressed: () =>
-                                _selectCall(TeamTossCall.heads),
+                            enabled: _tossTimer.isAnimating && _call == null,
+                            onPressed: () => _selectCall(TeamTossCall.heads),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -532,10 +505,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
                           child: _CallButton(
                             label: 'TAILS',
                             selected: _call == TeamTossCall.tails,
-                            enabled:
-                                _tossTimer.isAnimating && _call == null,
-                            onPressed: () =>
-                                _selectCall(TeamTossCall.tails),
+                            enabled: _tossTimer.isAnimating && _call == null,
+                            onPressed: () => _selectCall(TeamTossCall.tails),
                           ),
                         ),
                       ],
@@ -547,9 +518,7 @@ class _TeamTossScreenState extends State<TeamTossScreen>
             const SizedBox(height: 14),
             if (!_tossTimer.isAnimating && !_revealed && !_callMissed)
               FilledButton.icon(
-                onPressed: _tosserTeamId == null
-                    ? null
-                    : _startToss,
+                onPressed: _tosserTeamId == null ? null : _startToss,
                 icon: const Icon(Icons.casino_rounded),
                 label: const Text('Start 3-second toss'),
               ),
@@ -637,16 +606,18 @@ class _TeamTossScreenState extends State<TeamTossScreen>
     builder: (context, _) {
       final started = _hiddenResult != null;
       final halfTurns = 18 + (_hiddenResult == TeamTossCall.tails ? 1 : 0);
-      final angle = started
-          ? Curves.easeOutCubic.transform(_tossTimer.value) * halfTurns * pi
-          : 0.0;
+      final angle =
+          started
+              ? Curves.easeOutCubic.transform(_tossTimer.value) * halfTurns * pi
+              : 0.0;
       final showingHeads = cos(angle) >= 0;
       final hideFace = _callMissed && !_tossTimer.isAnimating;
       return Transform(
         alignment: Alignment.center,
-        transform: Matrix4.identity()
-          ..setEntry(3, 2, .002)
-          ..rotateY(angle),
+        transform:
+            Matrix4.identity()
+              ..setEntry(3, 2, .002)
+              ..rotateY(angle),
         child: Container(
           width: 150,
           height: 150,
@@ -655,11 +626,7 @@ class _TeamTossScreenState extends State<TeamTossScreen>
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFFFE49A),
-                AppColors.gold,
-                Color(0xFFC77B00),
-              ],
+              colors: [Color(0xFFFFE49A), AppColors.gold, Color(0xFFC77B00)],
             ),
             border: Border.all(color: const Color(0xFFFFF1C8), width: 7),
             boxShadow: const [
@@ -681,10 +648,10 @@ class _TeamTossScreenState extends State<TeamTossScreen>
                   hideFace
                       ? Icons.question_mark_rounded
                       : !started
-                          ? Icons.casino_rounded
-                          : showingHeads
-                              ? Icons.sports_cricket_rounded
-                              : Icons.emoji_events_rounded,
+                      ? Icons.casino_rounded
+                      : showingHeads
+                      ? Icons.sports_cricket_rounded
+                      : Icons.emoji_events_rounded,
                   size: 46,
                   color: AppColors.ink,
                 ),
@@ -692,10 +659,10 @@ class _TeamTossScreenState extends State<TeamTossScreen>
                   hideFace
                       ? 'CALL MISSED'
                       : !started
-                          ? 'READY'
-                          : showingHeads
-                              ? 'HEADS'
-                              : 'TAILS',
+                      ? 'READY'
+                      : showingHeads
+                      ? 'HEADS'
+                      : 'TAILS',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w900,
@@ -731,18 +698,22 @@ class _TeamTossScreenState extends State<TeamTossScreen>
             key: ValueKey('winner-${_manualWinnerTeamId ?? 'none'}'),
             initialValue: _manualWinnerTeamId,
             decoration: const InputDecoration(labelText: 'Toss winner'),
-            items: [match.teamA, match.teamB]
-                .map(
-                  (side) => DropdownMenuItem(
-                    value: side.id,
-                    child: Text(side.name),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) => setState(() {
-              _manualWinnerTeamId = value;
-              _openingBowlerId = null;
-            }),
+            items:
+                [match.teamA, match.teamB]
+                    .map(
+                      (side) => DropdownMenuItem(
+                        value: side.id,
+                        child: Text(side.name),
+                      ),
+                    )
+                    .toList(),
+            onChanged:
+                (value) => setState(() {
+                  _manualWinnerTeamId = value;
+                  _openingBowlerId = null;
+                  _openingStrikerId = null;
+                  _openingNonStrikerId = null;
+                }),
           ),
           const SizedBox(height: 14),
           _decisionSelector(),
@@ -800,26 +771,28 @@ class _TeamTossScreenState extends State<TeamTossScreen>
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
-            key: ValueKey(
-              'first-batting-${_firstBattingTeamId ?? 'none'}',
-            ),
+            key: ValueKey('first-batting-${_firstBattingTeamId ?? 'none'}'),
             initialValue: _firstBattingTeamId,
             decoration: const InputDecoration(
               labelText: 'First batting team',
               hintText: 'Choose a team',
             ),
-            items: [match.teamA, match.teamB]
-                .map(
-                  (side) => DropdownMenuItem(
-                    value: side.id,
-                    child: Text(side.name),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) => setState(() {
-              _firstBattingTeamId = value;
-              _openingBowlerId = null;
-            }),
+            items:
+                [match.teamA, match.teamB]
+                    .map(
+                      (side) => DropdownMenuItem(
+                        value: side.id,
+                        child: Text(side.name),
+                      ),
+                    )
+                    .toList(),
+            onChanged:
+                (value) => setState(() {
+                  _firstBattingTeamId = value;
+                  _openingBowlerId = null;
+                  _openingStrikerId = null;
+                  _openingNonStrikerId = null;
+                }),
           ),
         ],
       ),
@@ -840,10 +813,13 @@ class _TeamTossScreenState extends State<TeamTossScreen>
       ),
     ],
     selected: {_decision},
-    onSelectionChanged: (value) => setState(() {
-      _decision = value.single;
-      _openingBowlerId = null;
-    }),
+    onSelectionChanged:
+        (value) => setState(() {
+          _decision = value.single;
+          _openingBowlerId = null;
+          _openingStrikerId = null;
+          _openingNonStrikerId = null;
+        }),
   );
 }
 
@@ -903,14 +879,15 @@ class _CallButton extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => selected
-      ? FilledButton.icon(
-          onPressed: null,
-          icon: const Icon(Icons.lock_rounded),
-          label: Text('$label LOCKED'),
-        )
-      : OutlinedButton(
-          onPressed: enabled ? onPressed : null,
-          child: Text(label),
-        );
+  Widget build(BuildContext context) =>
+      selected
+          ? FilledButton.icon(
+            onPressed: null,
+            icon: const Icon(Icons.lock_rounded),
+            label: Text('$label LOCKED'),
+          )
+          : OutlinedButton(
+            onPressed: enabled ? onPressed : null,
+            child: Text(label),
+          );
 }

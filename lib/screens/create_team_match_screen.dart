@@ -26,16 +26,14 @@ class CreateTeamMatchScreen extends StatefulWidget {
 
 class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   final _title = TextEditingController();
-  final _playerSearch = TextEditingController();
+  final _search = TextEditingController();
   final _overs = TextEditingController(text: '5');
+  final _limitOvers = TextEditingController(text: '2');
+  final _extraBowlers = TextEditingController(text: '1');
   final _teamAName = TextEditingController(text: 'Team A');
   final _teamBName = TextEditingController(text: 'Team B');
   final _teamA = <String>[];
   final _teamB = <String>[];
-  final _quotaA = <String, int>{};
-  final _quotaB = <String, int>{};
-  final _selectedPlayerIds = <String>{};
-  int _step = 0;
   bool _seeded = false;
   bool _saving = false;
   bool _wide = true;
@@ -44,7 +42,9 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   bool _legBye = true;
   bool _penalty = true;
   bool _freeHit = false;
-  bool _allowConsecutiveOvers = false;
+  bool _allowConsecutiveOvers = true;
+  bool _limitEnabled = false;
+  bool _extraOverEnabled = false;
   bool _jokerEnabled = false;
   PointRules _pointRules = const PointRules();
   String? _jokerId;
@@ -54,13 +54,27 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   String? _keeperB;
   String? _trackerId;
 
+  Set<String> get _selectedIds => {..._teamA, ..._teamB};
+  int? get _oversValue => int.tryParse(_overs.text.trim());
+  int? get _limitValue => int.tryParse(_limitOvers.text.trim());
+  int get _extraCount =>
+      _limitEnabled && _extraOverEnabled
+          ? int.tryParse(_extraBowlers.text.trim()) ?? 0
+          : 0;
+
   @override
   void dispose() {
-    _title.dispose();
-    _playerSearch.dispose();
-    _overs.dispose();
-    _teamAName.dispose();
-    _teamBName.dispose();
+    for (final controller in [
+      _title,
+      _search,
+      _overs,
+      _limitOvers,
+      _extraBowlers,
+      _teamAName,
+      _teamBName,
+    ]) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -72,22 +86,17 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     final store = AppScope.read(context);
     _title.text = store.suggestTeamMatchTitle();
     _pointRules = store.defaultPointPreset.rules;
-    final templateId = widget.templateMatchId;
-    final template = templateId == null ? null : store.teamMatchById(templateId);
+    final template =
+        widget.templateMatchId == null
+            ? null
+            : store.teamMatchById(widget.templateMatchId!);
     if (template == null) return;
-
     final rules = template.rules;
     _overs.text = '${rules.ballLimit ~/ rules.ballsPerOver}';
     _teamAName.text = template.teamA.name;
     _teamBName.text = template.teamB.name;
-    _selectedPlayerIds.addAll({
-      ...template.teamA.playerIds,
-      ...template.teamB.playerIds,
-    });
     _teamA.addAll(template.teamA.playerIds);
     _teamB.addAll(template.teamB.playerIds);
-    _quotaA.addAll(template.teamA.bowlingQuotaBalls);
-    _quotaB.addAll(template.teamB.bowlingQuotaBalls);
     _wide = rules.wideEnabled;
     _noBall = rules.noBallEnabled;
     _bye = rules.byeEnabled;
@@ -95,6 +104,10 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     _penalty = rules.penaltyExtrasEnabled;
     _freeHit = rules.freeHitEnabled;
     _allowConsecutiveOvers = rules.allowConsecutiveOvers;
+    _limitEnabled = rules.maxOversPerBowler != null;
+    _limitOvers.text = '${rules.maxOversPerBowler ?? 2}';
+    _extraOverEnabled = rules.extraOverBowlerCount > 0;
+    _extraBowlers.text = '${max(1, rules.extraOverBowlerCount)}';
     _pointRules = rules.pointRules;
     _jokerId = template.commonJokerPlayerId;
     _jokerEnabled = _jokerId != null;
@@ -103,208 +116,107 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     _keeperA = template.teamA.wicketkeeperPlayerId;
     _keeperB = template.teamB.wicketkeeperPlayerId;
     _trackerId = template.trackerPlayerId;
-    if (widget.quickRematch) _step = 4;
   }
 
-  int? get _oversValue => int.tryParse(_overs.text.trim());
-
-  int get _ballLimit => (_oversValue ?? 0) * 6;
-
-  void _togglePlayer(Player player, bool selected) {
+  void _assign(String playerId, String? assignment) {
     setState(() {
-      if (selected) {
-        _selectedPlayerIds.add(player.id);
-      } else {
-        _selectedPlayerIds.remove(player.id);
-        _teamA.remove(player.id);
-        _teamB.remove(player.id);
-        _quotaA.remove(player.id);
-        _quotaB.remove(player.id);
-        if (_jokerId == player.id) {
-          _jokerId = null;
-          _jokerEnabled = false;
-        }
-        if (_trackerId == player.id) _trackerId = null;
+      final formerJoker = _jokerId;
+      _teamA.remove(playerId);
+      _teamB.remove(playerId);
+      if (_jokerId == playerId) _jokerId = null;
+      if (assignment == 'J' && formerJoker != null && formerJoker != playerId) {
+        _teamA.remove(formerJoker);
+        _teamB.remove(formerJoker);
+        (_teamA.length <= _teamB.length ? _teamA : _teamB).add(formerJoker);
       }
-      _captainA = _validOrFirst(_captainA, _teamA);
-      _captainB = _validOrFirst(_captainB, _teamB);
-      _keeperA = _validOrFirst(_keeperA, _teamA);
-      _keeperB = _validOrFirst(_keeperB, _teamB);
-      _seedQuotas(overwrite: true);
+      if (assignment == 'A' || assignment == 'J') _teamA.add(playerId);
+      if (assignment == 'B' || assignment == 'J') _teamB.add(playerId);
+      if (assignment == 'J') _jokerId = playerId;
+      _repairRoles();
     });
   }
 
-  void _autoAssignUnassigned() {
-    for (final id in _selectedPlayerIds) {
-      if (_teamA.contains(id) || _teamB.contains(id)) continue;
-      (_teamA.length <= _teamB.length ? _teamA : _teamB).add(id);
-    }
-    _captainA = _validOrFirst(_captainA, _teamA);
-    _captainB = _validOrFirst(_captainB, _teamB);
-    _keeperA = _validOrFirst(_keeperA, _teamA);
-    _keeperB = _validOrFirst(_keeperB, _teamB);
-    _seedQuotas(overwrite: true);
+  void _repairRoles() {
+    if (!_teamA.contains(_captainA)) _captainA = null;
+    if (!_teamB.contains(_captainB)) _captainB = null;
+    if (!_teamA.contains(_keeperA)) _keeperA = null;
+    if (!_teamB.contains(_keeperB)) _keeperB = null;
+    if (!_selectedIds.contains(_trackerId)) _trackerId = null;
   }
 
-  void _setJokerEnabled(bool enabled) {
+  void _setJoker(bool enabled) {
     setState(() {
       _jokerEnabled = enabled;
       if (!enabled && _jokerId != null) {
-        final previousJoker = _jokerId!;
+        final former = _jokerId!;
+        _teamA.remove(former);
+        _teamB.remove(former);
+        (_teamA.length <= _teamB.length ? _teamA : _teamB).add(former);
         _jokerId = null;
-        _placeFormerJoker(previousJoker);
+        _repairRoles();
       }
-      _seedQuotas(overwrite: true);
     });
   }
 
-  void _placeFormerJoker(String playerId) {
-    _teamA.remove(playerId);
-    _teamB.remove(playerId);
-    (_teamA.length <= _teamB.length ? _teamA : _teamB).add(playerId);
-  }
+  String? _assignment(String id) =>
+      _jokerId == id
+          ? 'J'
+          : _teamA.contains(id)
+          ? 'A'
+          : _teamB.contains(id)
+          ? 'B'
+          : null;
 
-  void _assign(Player player, String assignment) {
-    setState(() {
-      if (!_selectedPlayerIds.contains(player.id)) return;
-      final previousJoker = _jokerId;
-      _teamA.remove(player.id);
-      _teamB.remove(player.id);
-      if (_jokerId == player.id) _jokerId = null;
-      if (assignment == 'J' &&
-          _jokerEnabled &&
-          previousJoker != null &&
-          previousJoker != player.id) {
-        _placeFormerJoker(previousJoker);
-      }
-      switch (assignment) {
-        case 'A':
-          _teamA.add(player.id);
-          break;
-        case 'B':
-          _teamB.add(player.id);
-          break;
-        case 'J' when _jokerEnabled:
-          _teamA.add(player.id);
-          _teamB.add(player.id);
-          _jokerId = player.id;
-          break;
-      }
-      _captainA = _validOrFirst(_captainA, _teamA);
-      _captainB = _validOrFirst(_captainB, _teamB);
-      _keeperA = _validOrFirst(_keeperA, _teamA);
-      _keeperB = _validOrFirst(_keeperB, _teamB);
-      _seedQuotas(overwrite: true);
-    });
-  }
-
-  String? _validOrFirst(String? selected, List<String> ids) {
-    if (selected != null && ids.contains(selected)) return selected;
-    return ids.isEmpty ? null : ids.first;
-  }
-
-  String _assignment(String playerId) {
-    if (_jokerId == playerId) return 'J';
-    if (_teamA.contains(playerId)) return 'A';
-    if (_teamB.contains(playerId)) return 'B';
-    return 'N';
-  }
-
-  void _seedQuotas({bool overwrite = false}) {
-    void seed(List<String> ids, Map<String, int> quota) {
-      quota.removeWhere((key, _) => !ids.contains(key));
-      if (_ballLimit <= 0 || ids.isEmpty) return;
-      final totalOvers = _oversValue ?? 0;
-      final base = totalOvers ~/ ids.length;
-      final remainder = totalOvers % ids.length;
-      for (var index = 0; index < ids.length; index++) {
-        final suggested = (base + (index < remainder ? 1 : 0)) * 6;
-        if (overwrite) {
-          quota[ids[index]] = suggested;
-        } else {
-          quota.putIfAbsent(ids[index], () => suggested);
-        }
-      }
+  String? _validate() {
+    if (_teamA.length < 2 || _teamB.length < 2)
+      return 'Add at least two players to each team. A shared Joker can play for both.';
+    if (_teamAName.text.trim().isEmpty || _teamBName.text.trim().isEmpty)
+      return 'Enter both team names.';
+    if (_oversValue == null || _oversValue! < 1 || _oversValue! > 100)
+      return 'Enter match overs from 1 to 100.';
+    if (_jokerEnabled && _jokerId == null)
+      return 'Choose the shared Joker, or turn off the Joker option.';
+    if (_limitEnabled &&
+        (_limitValue == null || _limitValue! < 1 || _limitValue! > 100))
+      return 'Enter a bowler limit from 1 to 100 overs.';
+    if (_limitEnabled &&
+        _extraOverEnabled &&
+        (_extraCount < 1 || _extraCount > min(_teamA.length, _teamB.length))) {
+      return 'Extra-over bowlers must be between 1 and ${min(_teamA.length, _teamB.length)} for each team.';
     }
-
-    seed(_teamA, _quotaA);
-    seed(_teamB, _quotaB);
-  }
-
-  String? _validateStep(int step) {
-    if (step == 0) {
-      if (_selectedPlayerIds.length < 3) {
-        return 'Select at least three available players.';
-      }
-    }
-    if (step == 1) {
-      final assigned = <String>{..._teamA, ..._teamB};
-      if (assigned.length != _selectedPlayerIds.length ||
-          !assigned.containsAll(_selectedPlayerIds)) {
-        return 'Assign every selected player to a team.';
-      }
-      if (_teamA.length < 2 || _teamB.length < 2) {
-        return 'Each team needs at least two players. Add a player or use a Joker.';
-      }
-      if (_jokerEnabled && _jokerId == null) {
-        return 'Select one shared Joker or turn the Joker option off.';
-      }
-    }
-    if (step == 2) {
-      final overs = _oversValue;
-      if (overs == null || overs < 1 || overs > 100) {
-        return 'Enter match overs from 1 to 100.';
-      }
-      if (_teamAName.text.trim().isEmpty || _teamBName.text.trim().isEmpty) {
-        return 'Enter both team names.';
-      }
-    }
-    if (step >= 4) {
-      final coverageA = _quotaA.values.fold<int>(
-        0,
-        (total, value) => total + value,
-      );
-      final coverageB = _quotaB.values.fold<int>(
-        0,
-        (total, value) => total + value,
-      );
-      if (coverageA < _ballLimit || coverageB < _ballLimit) {
-        return 'Each team bowling quota must cover all $_ballLimit legal balls.';
+    if (_limitEnabled) {
+      for (final entry in [
+        (_teamAName.text, _teamA),
+        (_teamBName.text, _teamB),
+      ]) {
+        final capacity =
+            entry.$2.length * _limitValue! + min(_extraCount, entry.$2.length);
+        if (capacity < _oversValue!)
+          return '${entry.$1} can bowl only $capacity overs with these limits. Add players or increase the limit.';
       }
     }
     return null;
   }
 
-  void _continue() {
-    FocusScope.of(context).unfocus();
-    _seedQuotas();
-    final error = _validateStep(_step);
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-      return;
-    }
-    if (_step == 0) _autoAssignUnassigned();
-    if (_step < 4) {
-      setState(() => _step++);
-    } else {
-      _create();
-    }
-  }
-
   Future<void> _create() async {
     if (_saving) return;
+    FocusScope.of(context).unfocus();
+    final error = _validate();
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
     setState(() => _saving = true);
-    final store = AppScope.read(context);
     try {
-      final match = await store.createTeamMatch(
+      final match = await AppScope.read(context).createTeamMatch(
         title: _title.text,
         teamA: TeamSide(
           id: 'A',
           name: _teamAName.text.trim(),
           colorValue: 0xFF19C37D,
-          playerIds: List<String>.from(_teamA),
-          battingOrder: List<String>.from(_teamA),
-          bowlingQuotaBalls: Map<String, int>.from(_quotaA),
+          playerIds: List.from(_teamA),
           captainPlayerId: _captainA,
           wicketkeeperPlayerId: _keeperA,
         ),
@@ -312,22 +224,22 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
           id: 'B',
           name: _teamBName.text.trim(),
           colorValue: 0xFF7C5CFC,
-          playerIds: List<String>.from(_teamB),
-          battingOrder: List<String>.from(_teamB),
-          bowlingQuotaBalls: Map<String, int>.from(_quotaB),
+          playerIds: List.from(_teamB),
           captainPlayerId: _captainB,
           wicketkeeperPlayerId: _keeperB,
         ),
         rules: TeamMatchRules(
-          ballLimit: _ballLimit,
+          ballLimit: _oversValue! * 6,
           wideEnabled: _wide,
           noBallEnabled: _noBall,
           byeEnabled: _bye,
           legByeEnabled: _legBye,
           penaltyExtrasEnabled: _penalty,
-          freeHitEnabled: _freeHit,
+          freeHitEnabled: _noBall && _freeHit,
           askLastPlayerStanding: true,
           allowConsecutiveOvers: _allowConsecutiveOvers,
+          maxOversPerBowler: _limitEnabled ? _limitValue : null,
+          extraOverBowlerCount: _extraCount,
           pointRules: _pointRules,
         ),
         commonJokerPlayerId: _jokerEnabled ? _jokerId : null,
@@ -339,11 +251,10 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         MaterialPageRoute(builder: (_) => TeamTossScreen(matchId: match.id)),
       );
     } on Object catch (error) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$error'.replaceFirst('Bad state: ', ''))),
         );
-      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -353,486 +264,530 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
     final players = <Player>[...store.visiblePlayers];
-    for (final id in _selectedPlayerIds) {
+    for (final id in _selectedIds) {
       final player = store.playerById(id);
-      if (player != null && !players.any((value) => value.id == id)) {
+      if (player != null && !players.any((item) => item.id == id))
         players.add(player);
-      }
     }
-    final query = _playerSearch.text.trim().toLowerCase();
-    final rosterPlayers = players
-        .where(
-          (player) => query.isEmpty ||
-              player.name.toLowerCase().contains(query) ||
-              player.id.toLowerCase().contains(query),
-        )
-        .toList(growable: false);
-    final selectedPlayers = players
-        .where((player) => _selectedPlayerIds.contains(player.id))
-        .toList(growable: false);
+    final query = _search.text.trim().toLowerCase();
+    final filtered =
+        players
+            .where(
+              (player) =>
+                  query.isEmpty ||
+                  player.name.toLowerCase().contains(query) ||
+                  player.id.toLowerCase().contains(query),
+            )
+            .toList();
+    final selectedPlayers =
+        players.where((player) => _selectedIds.contains(player.id)).toList();
     return Scaffold(
       appBar: AppBar(
         title: Text(
           widget.templateMatchId == null
               ? 'Create Team Match'
-              : 'Create Next Team Match',
+              : 'Next Team Match',
         ),
       ),
-      body: Stepper(
-        currentStep: _step,
-        onStepTapped: (value) {
-          if (value <= _step) setState(() => _step = value);
-        },
-        onStepContinue: _saving ? null : _continue,
-        onStepCancel: _step == 0 ? null : () => setState(() => _step--),
-        controlsBuilder: (context, details) => Padding(
-          padding: const EdgeInsets.only(top: 18),
-          child: Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : details.onStepContinue,
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(_step == 4 ? Icons.sports_cricket : Icons.arrow_forward),
-                  label: Text(_step == 4 ? 'Create & choose start' : 'Continue'),
-                ),
-              ),
-              if (_step > 0) ...[
-                const SizedBox(width: 8),
-                TextButton(onPressed: details.onStepCancel, child: const Text('Back')),
-              ],
-            ],
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: const Border(top: BorderSide(color: Color(0xFFE3EAE6))),
+          ),
+          child: FilledButton.icon(
+            onPressed: _saving ? null : _create,
+            icon:
+                _saving
+                    ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                    : const Icon(Icons.sports_cricket_rounded),
+            label: Text(
+              _saving
+                  ? 'Creating match…'
+                  : 'Continue to toss • ${_teamA.length} vs ${_teamB.length}',
+            ),
           ),
         ),
-        steps: [
-          Step(
-            title: const Text('Choose today’s players'),
-            subtitle: Text('${_selectedPlayerIds.length} selected'),
-            isActive: _step >= 0,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Card(
-                  color: Color(0xFFE7F8F0),
-                  child: ListTile(
-                    leading: Icon(Icons.how_to_reg_rounded, color: AppColors.greenDark),
-                    title: Text('Players first'),
-                    subtitle: Text(
-                      'Select only the friends playing now. Team assignment and the optional Joker come next, so a large friend list stays clean.',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _playerSearch,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+        children: [
+          Text(
+            'Your match, all in one place',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Build both teams below. Choose the opening batters after the toss.',
+            style: TextStyle(color: AppColors.muted),
+          ),
+          const SizedBox(height: 18),
+          TextField(
+            controller: _title,
+            decoration: const InputDecoration(labelText: 'Match title'),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _overs,
+                  keyboardType: TextInputType.number,
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
-                    labelText: 'Search players',
-                    hintText: 'Name or Player ID',
-                    prefixIcon: Icon(Icons.search_rounded),
+                    labelText: 'Overs per innings',
+                    suffixText: 'ov',
                   ),
                 ),
-                const SizedBox(height: 8),
-                if (rosterPlayers.isEmpty)
-                  const Card(
-                    child: ListTile(
-                      leading: Icon(Icons.person_search_rounded),
-                      title: Text('No players found'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${_selectedIds.length} players selected\n${_jokerId == null ? 'Two teams' : 'Shared Joker active'}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.greenDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cards = [
+                _teamPreview('A', _teamAName, _teamA, const Color(0xFF19C37D)),
+                _teamPreview('B', _teamBName, _teamB, const Color(0xFF7C5CFC)),
+              ];
+              if (constraints.maxWidth < 360)
+                return Column(
+                  children: [cards[0], const SizedBox(height: 10), cards[1]],
+                );
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: cards[0]),
+                  const SizedBox(width: 10),
+                  Expanded(child: cards[1]),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          _sectionTitle(
+            'Choose players',
+            '${_teamA.length} in A · ${_teamB.length} in B',
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Tap A or B to add or move a player. Tap the selected team again to remove.',
+            style: TextStyle(color: AppColors.muted),
+          ),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Shared Joker',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: const Text('Optional player who plays for both teams'),
+            value: _jokerEnabled,
+            onChanged: _setJoker,
+          ),
+          TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Search players',
+              prefixIcon: Icon(Icons.search_rounded),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (filtered.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(18),
+              child: Text(
+                'No players found. Try another search, or add a player from your Gang.',
+              ),
+            )
+          else
+            ListView.builder(
+              primary: false,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: filtered.length,
+              itemBuilder: (context, index) {
+                final player = filtered[index];
+                final assignment = _assignment(player.id);
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
                     ),
-                  )
-                else
-                  SizedBox(
-                    height: min(
-                      440.0,
-                      max(84.0, rosterPlayers.length * 76.0),
-                    ),
-                    child: Scrollbar(
-                      child: ListView.builder(
-                        primary: false,
-                        itemCount: rosterPlayers.length,
-                        itemBuilder: (context, index) {
-                          final player = rosterPlayers[index];
-                          final selected =
-                              _selectedPlayerIds.contains(player.id);
-                          return Card(
-                            child: ListTile(
-                              leading: PlayerAvatar(player: player, radius: 22),
-                              title: Text(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            PlayerAvatar(player: player, radius: 16),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Text(
                                 player.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              subtitle: Text(player.id),
-                              trailing: Checkbox(
-                                value: selected,
-                                onChanged: (value) =>
-                                    _togglePlayer(player, value ?? false),
-                              ),
-                              onTap: () => _togglePlayer(player, !selected),
                             ),
-                          );
-                        },
-                      ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 5,
+                          children: [
+                            for (final team in [
+                              'A',
+                              'B',
+                              if (_jokerEnabled) 'J',
+                            ])
+                              ChoiceChip(
+                                key: ValueKey('assign-${player.id}-$team'),
+                                label: Text(team == 'J' ? 'Joker' : team),
+                                showCheckmark: false,
+                                selected: assignment == team,
+                                onSelected:
+                                    (selected) => _assign(
+                                      player.id,
+                                      selected ? team : null,
+                                    ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-              ],
+                );
+              },
             ),
-          ),
-          Step(
-            title: const Text('Build teams'),
-            subtitle: Text(
-              '${_teamA.length} vs ${_teamB.length}'
-              '${_jokerId == null ? '' : ' • Joker active'}',
-            ),
-            isActive: _step >= 1,
-            content: Column(
+          const SizedBox(height: 20),
+          _bowlingRules(),
+          const SizedBox(height: 12),
+          Card(
+            child: ExpansionTile(
+              title: const Text(
+                'Extras & match rules',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                '${_wide ? 'Wides' : 'No wides'} · ${_noBall ? 'No-balls' : 'No no-balls'}',
+              ),
+              childrenPadding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
-                Card(
-                  child: SwitchListTile(
-                    secondary: const Icon(Icons.style_rounded),
-                    title: const Text(
-                      'Use one shared Joker',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    subtitle: const Text(
-                      'Optional. Turn this on only when one player must play for both teams.',
-                    ),
-                    value: _jokerEnabled,
-                    onChanged: _setJokerEnabled,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...selectedPlayers.map(
-                  (player) => Card(
-                    child: ListTile(
-                      leading: PlayerAvatar(player: player, radius: 22),
-                      title: Text(
-                        player.name,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      subtitle: Text(player.id),
-                      trailing: DropdownButton<String>(
-                        value: _assignment(player.id),
-                        onChanged: (value) => _assign(player, value ?? 'N'),
-                        items: [
-                          const DropdownMenuItem(value: 'N', child: Text('Choose')),
-                          const DropdownMenuItem(value: 'A', child: Text('Team A')),
-                          const DropdownMenuItem(value: 'B', child: Text('Team B')),
-                          if (_jokerEnabled)
-                            const DropdownMenuItem(value: 'J', child: Text('🃏 Joker')),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Step(
-            title: const Text('Match details & rules'),
-            subtitle: Text(_title.text.isEmpty ? 'Name, overs and extras' : _title.text),
-            isActive: _step >= 2,
-            content: Column(
-              children: [
-                TextField(
-                  controller: _title,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Match title',
-                    helperText: 'Automatic name is ready. Change it only if needed.',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _overs,
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) => setState(
-                    () => _seedQuotas(overwrite: true),
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'Overs per innings',
-                    suffixText: 'overs',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _teamAName,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(labelText: 'Team A'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _teamBName,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(labelText: 'Team B'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _RuleSwitch(label: 'Wide', value: _wide, onChanged: (v) => setState(() => _wide = v)),
-                _RuleSwitch(label: 'No-ball', value: _noBall, onChanged: (v) => setState(() => _noBall = v)),
-                _RuleSwitch(label: 'Bye', value: _bye, onChanged: (v) => setState(() => _bye = v)),
-                _RuleSwitch(label: 'Leg bye', value: _legBye, onChanged: (v) => setState(() => _legBye = v)),
-                _RuleSwitch(label: 'Manual penalty extras', value: _penalty, onChanged: (v) => setState(() => _penalty = v)),
+                _rule('Wide', _wide, (v) => _wide = v),
+                _rule('No-ball', _noBall, (v) => _noBall = v),
                 if (_noBall)
-                  _RuleSwitch(label: 'Free hit after no-ball', value: _freeHit, onChanged: (v) => setState(() => _freeHit = v)),
-                _RuleSwitch(
-                  label: 'Allow same bowler in consecutive overs',
-                  value: _allowConsecutiveOvers,
-                  onChanged: (v) => setState(() => _allowConsecutiveOvers = v),
-                ),
-                const Card(
-                  child: ListTile(
-                    leading: Icon(Icons.bolt_rounded, color: AppColors.greenDark),
-                    title: Text('Team Match points are enabled'),
-                    subtitle: Text(
-                      'Runs, wickets, bowled bonus, catches, run-outs, stumpings and not-outs decide Match, Today and Series awards.',
-                    ),
+                  _rule(
+                    'Free hit after no-ball',
+                    _freeHit,
+                    (v) => _freeHit = v,
                   ),
-                ),
-                const Card(
-                  child: ListTile(
-                    leading: Icon(Icons.person_rounded, color: AppColors.greenDark),
-                    title: Text('Last Player Standing prompt'),
-                    subtitle: Text(
-                      'When one batter remains, choose Continue solo or End innings. The solo batter stays on strike.',
-                    ),
+                _rule('Bye', _bye, (v) => _bye = v),
+                _rule('Leg bye', _legBye, (v) => _legBye = v),
+                _rule('Manual penalty extras', _penalty, (v) => _penalty = v),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'Points and awards are enabled. When one batter remains, choose to continue solo or end the innings.',
+                    style: TextStyle(color: AppColors.muted),
                   ),
                 ),
               ],
             ),
           ),
-          Step(
-            title: const Text('Roles & scorer'),
-            subtitle: const Text('Captain, keeper and live batting choices'),
-            isActive: _step >= 3,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Card(
+            child: ExpansionTile(
+              title: const Text(
+                'Roles & scorer',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: const Text('Optional captain, keeper and scorer'),
+              childrenPadding: const EdgeInsets.all(16),
               children: [
-                const Card(
-                  color: Color(0xFFE7F8F0),
-                  child: ListTile(
-                    leading: Icon(Icons.swap_vert_rounded, color: AppColors.greenDark),
-                    title: Text('Batting order stays flexible'),
-                    subtitle: Text(
-                      'No full batting order is required before the match. The roster order supplies the default opening pair, then every wicket asks the scorer to choose the next batter live.',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _RoleSelectors(
-                  title: _teamAName.text,
-                  ids: _teamA,
-                  captain: _captainA,
-                  keeper: _keeperA,
-                  players: selectedPlayers,
-                  onCaptain: (value) => setState(() => _captainA = value),
-                  onKeeper: (value) => setState(() => _keeperA = value),
+                _roleSelectors(
+                  _teamAName.text,
+                  _teamA,
+                  _captainA,
+                  _keeperA,
+                  (v) => _captainA = v,
+                  (v) => _keeperA = v,
                 ),
                 const SizedBox(height: 18),
-                _RoleSelectors(
-                  title: _teamBName.text,
-                  ids: _teamB,
-                  captain: _captainB,
-                  keeper: _keeperB,
-                  players: selectedPlayers,
-                  onCaptain: (value) => setState(() => _captainB = value),
-                  onKeeper: (value) => setState(() => _keeperB = value),
+                _roleSelectors(
+                  _teamBName.text,
+                  _teamB,
+                  _captainB,
+                  _keeperB,
+                  (v) => _captainB = v,
+                  (v) => _keeperB = v,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
                 DropdownButtonFormField<String>(
-                  value: _trackerId ?? '',
-                  decoration: const InputDecoration(labelText: 'Scorer / tracker'),
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('Host scores')),
-                    ...selectedPlayers.map(
-                      (player) => DropdownMenuItem(value: player.id, child: Text(player.name)),
-                    ),
-                  ],
-                  onChanged: (value) => setState(() => _trackerId = value?.isEmpty == true ? null : value),
-                ),
-              ],
-            ),
-          ),
-          Step(
-            title: const Text('Bowling limits'),
-            subtitle: const Text('Individual quota and final review'),
-            isActive: _step >= 4,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _QuotaEditor(
-                  title: '${_teamAName.text} bowling limits',
-                  ids: _teamA,
-                  quota: _quotaA,
-                  players: selectedPlayers,
-                  maxOvers: max(1, _oversValue ?? 1),
-                  onChanged: () => setState(() {}),
-                ),
-                const SizedBox(height: 18),
-                _QuotaEditor(
-                  title: '${_teamBName.text} bowling limits',
-                  ids: _teamB,
-                  quota: _quotaB,
-                  players: selectedPlayers,
-                  maxOvers: max(1, _oversValue ?? 1),
-                  onChanged: () => setState(() {}),
-                ),
-                const SizedBox(height: 14),
-                Card(
-                  color: const Color(0xFFE7F8F0),
-                  child: ListTile(
-                    leading: const Icon(Icons.fact_check_outlined, color: AppColors.greenDark),
-                    title: Text('${_teamA.length} vs ${_teamB.length} • ${_oversValue ?? 0} overs'),
-                    subtitle: Text(
-                      '${!_jokerEnabled || _jokerId == null ? 'No Joker' : 'Joker enabled'} • '
-                      '${[_wide ? 'Wide' : null, _noBall ? 'No-ball' : null, _bye ? 'Bye' : null, _legBye ? 'Leg bye' : null].whereType<String>().join(', ')}',
-                    ),
+                  key: ValueKey('scorer-$_trackerId-${_selectedIds.join(',')}'),
+                  initialValue: _trackerId ?? '',
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Scorer / tracker',
                   ),
-                ),
-                if (widget.templateMatchId != null)
-                  const Card(
-                    child: ListTile(
-                      leading: Icon(Icons.replay_rounded),
-                      title: Text('Linked next match'),
-                      subtitle: Text(
-                        'This match stays in the same series, so Series points and awards continue automatically.',
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('Host scores'),
+                    ),
+                    ...selectedPlayers.map(
+                      (player) => DropdownMenuItem(
+                        value: player.id,
+                        child: Text(
+                          player.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
+                  onChanged:
+                      (v) => setState(() => _trackerId = v == '' ? null : v),
+                ),
               ],
             ),
           ),
+          if (widget.templateMatchId != null)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                'This match continues the same series and its awards.',
+                style: TextStyle(color: AppColors.greenDark),
+              ),
+            ),
         ],
       ),
     );
   }
-}
 
-class _RuleSwitch extends StatelessWidget {
-  const _RuleSwitch({required this.label, required this.value, required this.onChanged});
-
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) => SwitchListTile(
-    contentPadding: EdgeInsets.zero,
-    title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-    value: value,
-    onChanged: onChanged,
-  );
-}
-
-class _RoleSelectors extends StatelessWidget {
-  const _RoleSelectors({
-    required this.title,
-    required this.ids,
-    required this.captain,
-    required this.keeper,
-    required this.players,
-    required this.onCaptain,
-    required this.onKeeper,
-  });
-
-  final String title;
-  final List<String> ids;
-  final String? captain;
-  final String? keeper;
-  final List<Player> players;
-  final ValueChanged<String?> onCaptain;
-  final ValueChanged<String?> onKeeper;
-
-  String name(String id) => players.firstWhere((player) => player.id == id).name;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _sectionTitle(String title, String detail) => Wrap(
+    alignment: WrapAlignment.spaceBetween,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    spacing: 14,
     children: [
-      Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
-      const SizedBox(height: 8),
-      Row(
+      Text(
+        title,
+        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+      ),
+      Text(detail, style: const TextStyle(color: AppColors.muted)),
+    ],
+  );
+
+  Widget _teamPreview(
+    String team,
+    TextEditingController name,
+    List<String> ids,
+    Color color,
+  ) {
+    final store = AppScope.read(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .07),
+        border: Border.all(color: color.withValues(alpha: .35)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: captain,
-              decoration: const InputDecoration(labelText: 'Captain'),
-              items: ids.map((id) => DropdownMenuItem(value: id, child: Text(name(id)))).toList(),
-              onChanged: onCaptain,
+          TextField(
+            controller: name,
+            onChanged: (_) => setState(() {}),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+            decoration: InputDecoration(
+              labelText: 'Team $team name',
+              isDense: true,
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: keeper,
-              decoration: const InputDecoration(labelText: 'Keeper'),
-              items: ids.map((id) => DropdownMenuItem(value: id, child: Text(name(id)))).toList(),
-              onChanged: onKeeper,
+          const SizedBox(height: 10),
+          Text(
+            '${ids.length} players',
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          if (ids.isEmpty)
+            const Text(
+              'Add players below',
+              style: TextStyle(color: AppColors.muted),
             ),
+          for (final id in ids)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    id == _jokerId
+                        ? Icons.style_rounded
+                        : Icons.person_outline_rounded,
+                    size: 15,
+                    color: color,
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      store.playerById(id)?.name ?? id,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _rule(String label, bool value, ValueChanged<bool> onChanged) =>
+      SwitchListTile.adaptive(
+        contentPadding: EdgeInsets.zero,
+        title: Text(label),
+        value: value,
+        onChanged: (v) => setState(() => onChanged(v)),
+      );
+
+  Widget _bowlingRules() => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Bowling',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Choose any available bowler at the start of each over.',
+            style: TextStyle(color: AppColors.muted),
+          ),
+          _rule(
+            'Limit overs per bowler',
+            _limitEnabled,
+            (v) => _limitEnabled = v,
+          ),
+          if (!_limitEnabled)
+            const Text(
+              'No per-bowler limit',
+              style: TextStyle(color: AppColors.greenDark),
+            ),
+          if (_limitEnabled) ...[
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final value in [2, 3])
+                  ChoiceChip(
+                    label: Text('$value overs'),
+                    selected: _limitValue == value,
+                    onSelected:
+                        (_) => setState(() => _limitOvers.text = '$value'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _limitOvers,
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Maximum overs per bowler',
+                helperText: 'Use 2, 3 or your own limit',
+                suffixText: 'ov',
+              ),
+            ),
+            _rule(
+              'Allow an extra over',
+              _extraOverEnabled,
+              (v) => _extraOverEnabled = v,
+            ),
+            if (_extraOverEnabled) ...[
+              TextField(
+                controller: _extraBowlers,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'How many bowlers per team?',
+                  helperText: 'Each can bowl one over above the limit',
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Choose them during the match. Up to $_extraCount bowler${_extraCount == 1 ? '' : 's'} per team can bowl ${(_limitValue ?? 0) + 1} overs.',
+                style: const TextStyle(color: AppColors.greenDark),
+              ),
+            ],
+          ],
+          _rule(
+            'Allow consecutive overs',
+            _allowConsecutiveOvers,
+            (v) => _allowConsecutiveOvers = v,
           ),
         ],
       ),
-    ],
+    ),
   );
-}
 
-class _QuotaEditor extends StatelessWidget {
-  const _QuotaEditor({
-    required this.title,
-    required this.ids,
-    required this.quota,
-    required this.players,
-    required this.maxOvers,
-    required this.onChanged,
-  });
-
-  final String title;
-  final List<String> ids;
-  final Map<String, int> quota;
-  final List<Player> players;
-  final int maxOvers;
-  final VoidCallback onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final coverage =
-        quota.values.fold<int>(0, (total, value) => total + value) ~/ 6;
+  Widget _roleSelectors(
+    String title,
+    List<String> ids,
+    String? captain,
+    String? keeper,
+    ValueChanged<String?> onCaptain,
+    ValueChanged<String?> onKeeper,
+  ) {
+    final store = AppScope.read(context);
+    Widget selector(
+      String label,
+      String? value,
+      ValueChanged<String?> onChanged,
+    ) => DropdownButtonFormField<String>(
+      key: ValueKey('$title-$label-$value-${ids.join(',')}'),
+      initialValue: value ?? '',
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        const DropdownMenuItem(value: '', child: Text('Choose later')),
+        ...ids.map(
+          (id) => DropdownMenuItem(
+            value: id,
+            child: Text(
+              store.playerById(id)?.name ?? id,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+      onChanged: (v) => setState(() => onChanged(v == '' ? null : v)),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-        Text('Coverage: $coverage overs', style: const TextStyle(color: AppColors.greenDark)),
-        ...ids.map((id) {
-          final player = players.firstWhere((value) => value.id == id);
-          return ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: PlayerAvatar(player: player, radius: 20),
-            title: Text(player.name),
-            trailing: DropdownButton<int>(
-              value: (quota[id] ?? 0) ~/ 6,
-              items: List.generate(
-                maxOvers + 1,
-                (value) => DropdownMenuItem(value: value, child: Text('$value ov')),
-              ),
-              onChanged: (value) {
-                quota[id] = (value ?? 0) * 6;
-                onChanged();
-              },
-            ),
-          );
-        }),
+        const SizedBox(height: 9),
+        selector('Captain', captain, onCaptain),
+        const SizedBox(height: 10),
+        selector('Keeper', keeper, onKeeper),
       ],
     );
   }

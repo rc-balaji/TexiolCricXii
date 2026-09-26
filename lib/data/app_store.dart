@@ -42,6 +42,23 @@ class AppStore extends ChangeNotifier {
   AppStore({IdGenerator? ids, this.firebaseEnabled = false})
     : _ids = ids ?? IdGenerator();
 
+  @visibleForTesting
+  AppStore.forTesting({
+    required FirebaseAuth auth,
+    required FirebaseFirestore firestore,
+    required SharedPreferencesAsync preferences,
+    required String playerId,
+    Map<String, dynamic>? savedState,
+  }) : _ids = IdGenerator(),
+       firebaseEnabled = true {
+    _auth = auth;
+    _firestore = firestore;
+    _preferencesInstance = preferences;
+    if (savedState != null) _replaceState(savedState);
+    activePlayerId = playerId;
+    _accountSignedIn = true;
+  }
+
   static const _storageKey = 'texiol_local_cricket_state_v4';
   static const _accountPlayerIdKey = 'cricxii_account_player_id_v4';
   static const _accountEmailKey = 'cricxii_account_email_v4';
@@ -76,6 +93,10 @@ class AppStore extends ChangeNotifier {
   final Set<String> _sharedMatchIds = <String>{};
   final Set<String> _sharedTeamMatchIds = <String>{};
   final Set<String> _pendingSharedMatchDeletes = <String>{};
+  final Set<String> _pendingSharedTeamMatchDeletes = <String>{};
+  final Set<String> _publishingMatchIds = <String>{};
+  Future<void> _singlesPublishTail = Future<void>.value();
+  Future<void> _teamPublishTail = Future<void>.value();
   final Map<String, String> _lastSharedMatchPayloads = <String, String>{};
   final Map<String, String> _lastSharedTeamMatchPayloads = <String, String>{};
   String? _lastPublicProfileFingerprint;
@@ -119,11 +140,13 @@ class AppStore extends ChangeNotifier {
     final start = DateTime(now.year, now.month, now.day);
     final end = start.add(const Duration(days: 1));
     final creatorId = activePlayerId;
-    final number = matches.where((match) {
-      return match.creatorPlayerId == creatorId &&
-          !match.createdAt.isBefore(start) &&
-          match.createdAt.isBefore(end);
-    }).length + 1;
+    final number =
+        matches.where((match) {
+          return match.creatorPlayerId == creatorId &&
+              !match.createdAt.isBefore(start) &&
+              match.createdAt.isBefore(end);
+        }).length +
+        1;
     final period = switch (now.hour) {
       < 12 => 'Morning',
       < 17 => 'Afternoon',
@@ -135,16 +158,16 @@ class AppStore extends ChangeNotifier {
 
   String suggestTeamMatchTitle() {
     final creatorId = activePlayerId;
-    final number = teamMatches
+    final number =
+        teamMatches
             .where((match) => match.creatorPlayerId == creatorId)
             .length +
         1;
     return 'Team Match $number';
   }
 
-  List<Player> get visiblePlayers => players
-      .where((player) => !player.archived)
-      .toList(growable: false);
+  List<Player> get visiblePlayers =>
+      players.where((player) => !player.archived).toList(growable: false);
 
   List<FriendRequest> get incomingFriendRequests {
     final id = activePlayerId;
@@ -292,7 +315,8 @@ class AppStore extends ChangeNotifier {
       _teamLeaseAvailableOnThisDevice(match);
 
   bool canControlTeamMatch(TeamMatch match) {
-    if (match.status == TeamMatchStatus.completed) return isTeamMatchHost(match);
+    if (match.status == TeamMatchStatus.completed)
+      return isTeamMatchHost(match);
     if (match.status == TeamMatchStatus.toss) return canHostTeamMatch(match);
     return (isTeamMatchHost(match) || isTeamMatchTracker(match)) &&
         _teamLeaseAvailableOnThisDevice(match);
@@ -455,9 +479,9 @@ class AppStore extends ChangeNotifier {
     }
 
     final firestore = _firestore!;
-    final credentialRef = firestore.collection('loginCredentials').doc(
-      _emailKey(cleanEmail),
-    );
+    final credentialRef = firestore
+        .collection('loginCredentials')
+        .doc(_emailKey(cleanEmail));
     final salt = _newPasswordSalt();
     final verifier = _passwordVerifier(password, salt);
 
@@ -547,16 +571,19 @@ class AppStore extends ChangeNotifier {
       throw StateError('Firebase is unavailable.');
     }
     final cleanEmail = _normalizeEmail(email);
-    final credential = await firestore
-        .collection('loginCredentials')
-        .doc(_emailKey(cleanEmail))
-        .get();
+    final credential =
+        await firestore
+            .collection('loginCredentials')
+            .doc(_emailKey(cleanEmail))
+            .get();
     final data = credential.data();
     if (data == null) throw StateError('Email or password is incorrect.');
     final salt = data['passwordSalt']?.toString();
     final expected = data['passwordVerifier']?.toString();
     final playerId = data['playerId']?.toString();
-    if (salt == null || expected == null || playerId == null ||
+    if (salt == null ||
+        expected == null ||
+        playerId == null ||
         _passwordVerifier(password, salt) != expected) {
       throw StateError('Email or password is incorrect.');
     }
@@ -666,18 +693,22 @@ class AppStore extends ChangeNotifier {
     }
     // Cancel shared active matches first so participant Watch screens close
     // immediately. Do not put an unbounded number of matches in one batch.
-    for (final match in matches.where(
-      (value) =>
-          value.creatorPlayerId == player.id &&
-          value.status != MatchStatus.completed,
-    ).toList(growable: false)) {
+    for (final match in matches
+        .where(
+          (value) =>
+              value.creatorPlayerId == player.id &&
+              value.status != MatchStatus.completed,
+        )
+        .toList(growable: false)) {
       await firestore.collection('matches').doc(match.id).delete();
     }
-    for (final match in teamMatches.where(
-      (value) =>
-          value.creatorPlayerId == player.id &&
-          value.status != TeamMatchStatus.completed,
-    ).toList(growable: false)) {
+    for (final match in teamMatches
+        .where(
+          (value) =>
+              value.creatorPlayerId == player.id &&
+              value.status != TeamMatchStatus.completed,
+        )
+        .toList(growable: false)) {
       await firestore.collection('teamMatches').doc(match.id).delete();
     }
 
@@ -690,7 +721,9 @@ class AppStore extends ChangeNotifier {
     }
 
     final batch = firestore.batch();
-    batch.delete(firestore.collection('loginCredentials').doc(_emailKey(email)));
+    batch.delete(
+      firestore.collection('loginCredentials').doc(_emailKey(email)),
+    );
     batch.delete(firestore.collection('accountStates').doc(player.id));
     batch.delete(firestore.collection('players').doc(player.id));
     // Keep the session document alive while the batch deletes host-owned
@@ -820,8 +853,7 @@ class AppStore extends ChangeNotifier {
 
         final data = snapshot.data()!;
         final remoteController = data['controllerUid']?.toString();
-        final remoteControllerPlayer =
-            data['controllerPlayerId']?.toString();
+        final remoteControllerPlayer = data['controllerPlayerId']?.toString();
         final remoteRevision = data['revision'] as int? ?? 0;
         final rawLease = data['controllerLeaseUntil'];
         DateTime? remoteLease;
@@ -871,8 +903,7 @@ class AppStore extends ChangeNotifier {
         match
           ..controllerUid = uid
           ..controllerPlayerId = playerId
-          ..controllerLeaseUntil =
-              DateTime.now().add(_controlLeaseDuration);
+          ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] =
             'Offline - score is saved on this device and waiting to sync.';
@@ -892,11 +923,7 @@ class AppStore extends ChangeNotifier {
     await _refreshSharedMatches(migrateLegacy: false, resetPage: true);
     final latest = matchById(matchId);
     if (latest == null) throw StateError('Match no longer exists.');
-    await _ensureMatchControlLease(
-      latest,
-      scorerAllowed: true,
-      force: true,
-    );
+    await _ensureMatchControlLease(latest, scorerAllowed: true, force: true);
     _pendingMatchSyncIds.add(matchId);
     await _persistLocal();
     notifyListeners();
@@ -920,7 +947,8 @@ class AppStore extends ChangeNotifier {
     await _ensureTeamMatchControlLease(
       match,
       scorerAllowed: true,
-      force: match.status == TeamMatchStatus.completed && isTeamMatchHost(match),
+      force:
+          match.status == TeamMatchStatus.completed && isTeamMatchHost(match),
     );
   }
 
@@ -932,8 +960,8 @@ class AppStore extends ChangeNotifier {
     final playerId = activePlayerId;
     final uid = firebaseUser?.uid;
     if (playerId == null) throw StateError('Sign in first.');
-    final roleAllowed = isTeamMatchHost(match) ||
-        (scorerAllowed && isTeamMatchTracker(match));
+    final roleAllowed =
+        isTeamMatchHost(match) || (scorerAllowed && isTeamMatchTracker(match));
     if (!roleAllowed) throw StateError('You do not have control permission.');
 
     final firestore = _firestore;
@@ -976,9 +1004,10 @@ class AppStore extends ChangeNotifier {
         final remoteController = data['controllerUid']?.toString();
         final remoteRevision = data['revision'] as int? ?? 0;
         final rawLease = data['controllerLeaseUntil'];
-        final remoteLease = rawLease is Timestamp
-            ? rawLease.toDate()
-            : DateTime.tryParse(rawLease?.toString() ?? '');
+        final remoteLease =
+            rawLease is Timestamp
+                ? rawLease.toDate()
+                : DateTime.tryParse(rawLease?.toString() ?? '');
         final ours = remoteController == uid;
         final expired = remoteLease == null || !remoteLease.isAfter(now);
         if (!force && !ours && remoteRevision > match.revision) {
@@ -987,7 +1016,9 @@ class AppStore extends ChangeNotifier {
           );
         }
         if (!force && remoteController != null && !ours && !expired) {
-          throw StateError('Another device currently controls this Team Match.');
+          throw StateError(
+            'Another device currently controls this Team Match.',
+          );
         }
         transaction.update(ref, {
           'controllerUid': uid,
@@ -1099,7 +1130,9 @@ class AppStore extends ChangeNotifier {
     if (previousBlobId != null &&
         previousBlobId != player.avatarBlobId &&
         previousChunkCount > 0) {
-      unawaited(_deleteAvatarBlob(player.id, previousBlobId, previousChunkCount));
+      unawaited(
+        _deleteAvatarBlob(player.id, previousBlobId, previousChunkCount),
+      );
     }
   }
 
@@ -1146,22 +1179,15 @@ class AppStore extends ChangeNotifier {
           match.participantIds.contains(player.id) &&
           match.status != MatchStatus.completed,
     );
-    final hostedTeamMatches = teamMatches
-        .where(
-          (match) =>
-              match.creatorPlayerId == player.id &&
-              match.status != TeamMatchStatus.completed,
-        )
-        .toList(growable: false);
-    if (cloudConnected && _firestore != null) {
-      for (final match in hostedTeamMatches) {
-        try {
-          await _firestore!.collection('teamMatches').doc(match.id).delete();
-        } on FirebaseException {
-          // Account reset remains local-first; a later account delete retries.
-        }
-      }
-    }
+    _pendingSharedTeamMatchDeletes.addAll(
+      teamMatches
+          .where(
+            (match) =>
+                match.creatorPlayerId == player.id &&
+                match.status != TeamMatchStatus.completed,
+          )
+          .map((match) => match.id),
+    );
     teamMatches.removeWhere(
       (match) =>
           match.participantIds.contains(player.id) &&
@@ -1276,9 +1302,11 @@ class AppStore extends ChangeNotifier {
     final cached = playerById(normalized);
     if (cached != null && !forceRefresh) return cached;
     final firestore = _firestore;
-    if ((!cloudConnected && !bypassSignedInGate) || firestore == null) return cached;
+    if ((!cloudConnected && !bypassSignedInGate) || firestore == null)
+      return cached;
     try {
-      final snapshot = await firestore.collection('players').doc(normalized).get();
+      final snapshot =
+          await firestore.collection('players').doc(normalized).get();
       final data = snapshot.data();
       if (data == null) return cached;
       final player = Player.fromJson(<String, dynamic>{
@@ -1312,12 +1340,13 @@ class AppStore extends ChangeNotifier {
     try {
       for (final field in sensitiveProfileFields) {
         try {
-          final contact = await firestore
-              .collection('players')
-              .doc(normalized)
-              .collection('contactFields')
-              .doc(field)
-              .get();
+          final contact =
+              await firestore
+                  .collection('players')
+                  .doc(normalized)
+                  .collection('contactFields')
+                  .doc(field)
+                  .get();
           final contactData = contact.data();
           if (contactData == null) continue;
           _setContactValue(player, field, contactData['value'] as String?);
@@ -1326,8 +1355,9 @@ class AppStore extends ChangeNotifier {
               ProfileVisibility.values.any(
                 (value) => value.name == visibility,
               )) {
-            player.contactVisibility[field] =
-                ProfileVisibility.values.byName(visibility);
+            player.contactVisibility[field] = ProfileVisibility.values.byName(
+              visibility,
+            );
           }
           player.contactAudienceIds[field] = List<String>.from(
             contactData['audienceIds'] as List? ?? const [],
@@ -1349,7 +1379,8 @@ class AppStore extends ChangeNotifier {
     Player? knownPlayer,
   }) async {
     final player = activePlayer;
-    final friend = knownPlayer ?? await findPublicPlayer(friendId, forceRefresh: true);
+    final friend =
+        knownPlayer ?? await findPublicPlayer(friendId, forceRefresh: true);
     if (player == null || friend == null || player.id == friendId) {
       throw StateError('Choose another valid numeric Player ID.');
     }
@@ -1376,9 +1407,7 @@ class AppStore extends ChangeNotifier {
         .doc(player.id)
         .collection('friends')
         .doc(friendId);
-    final notificationRef = firestore
-        .collection('notifications')
-        .doc('request_$requestId');
+    final notificationRef = firestore.collection('notifications').doc();
     await firestore.runTransaction((transaction) async {
       final requestSnapshot = await transaction.get(requestRef);
       final friendshipSnapshot = await transaction.get(friendRef);
@@ -1393,6 +1422,7 @@ class AppStore extends ChangeNotifier {
         'fromPlayerId': player.id,
         'toPlayerId': friendId,
         'status': 'pending',
+        'notificationId': notificationRef.id,
         'createdAt': FieldValue.serverTimestamp(),
       });
       transaction.set(notificationRef, {
@@ -1440,10 +1470,9 @@ class AppStore extends ChangeNotifier {
     }
 
     final requestRef = firestore.collection('friendRequests').doc(requestId);
-    final incomingNotification = firestore
-        .collection('notifications')
-        .doc('request_$requestId');
-    await firestore.runTransaction((transaction) async {
+    final respondedNotificationId = await firestore.runTransaction<String>((
+      transaction,
+    ) async {
       final snapshot = await transaction.get(requestRef);
       final data = snapshot.data();
       if (!snapshot.exists || data?['status'] != 'pending') {
@@ -1452,16 +1481,17 @@ class AppStore extends ChangeNotifier {
       if (data?['toPlayerId']?.toString() != receiver.id) {
         throw StateError('Only the receiving player can respond.');
       }
+      // Older requests used one notification per pair; new attempts have their
+      // own ID so a sender never has to update the recipient's old notification.
+      final incomingNotification = firestore
+          .collection('notifications')
+          .doc(data?['notificationId']?.toString() ?? 'request_$requestId');
       transaction.delete(requestRef);
-      transaction.set(
-        incomingNotification,
-        {
-          'actionStatus': accept ? 'accepted' : 'rejected',
-          'read': true,
-          'readAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      transaction.set(incomingNotification, {
+        'actionStatus': accept ? 'accepted' : 'rejected',
+        'read': true,
+        'readAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
       if (accept) {
         transaction.set(
           firestore
@@ -1485,24 +1515,22 @@ class AppStore extends ChangeNotifier {
             'createdAt': FieldValue.serverTimestamp(),
           },
         );
-        transaction.set(
-          firestore.collection('notifications').doc('accepted_$requestId'),
-          {
-            'recipientPlayerId': request.fromPlayerId,
-            'fromPlayerId': request.toPlayerId,
-            'type': 'friendAccepted',
-            'requestId': requestId,
-            'actionStatus': 'accepted',
-            'read': false,
-            'createdAt': FieldValue.serverTimestamp(),
-          },
-        );
+        transaction.set(firestore.collection('notifications').doc(), {
+          'recipientPlayerId': request.fromPlayerId,
+          'fromPlayerId': request.toPlayerId,
+          'type': 'friendAccepted',
+          'requestId': requestId,
+          'actionStatus': 'accepted',
+          'read': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
+      return incomingNotification.id;
     });
 
     friendRequests.removeWhere((value) => value.id == requestId);
     for (final item in notifications) {
-      if (item.referenceId == requestId && item.playerId == receiver.id) {
+      if (item.id == respondedNotificationId && item.playerId == receiver.id) {
         item
           ..read = true
           ..actionStatus = accept ? 'accepted' : 'rejected';
@@ -1511,8 +1539,10 @@ class AppStore extends ChangeNotifier {
     if (accept) {
       final sender = await findPublicPlayer(request.fromPlayerId);
       if (sender != null) {
-        if (!sender.friendIds.contains(receiver.id)) sender.friendIds.add(receiver.id);
-        if (!receiver.friendIds.contains(sender.id)) receiver.friendIds.add(sender.id);
+        if (!sender.friendIds.contains(receiver.id))
+          sender.friendIds.add(receiver.id);
+        if (!receiver.friendIds.contains(sender.id))
+          receiver.friendIds.add(sender.id);
       }
     }
     await _persistLocal();
@@ -1528,10 +1558,18 @@ class AppStore extends ChangeNotifier {
     if (cloudConnected && firestore != null) {
       final batch = firestore.batch();
       batch.delete(
-        firestore.collection('players').doc(player.id).collection('friends').doc(friendPlayerId),
+        firestore
+            .collection('players')
+            .doc(player.id)
+            .collection('friends')
+            .doc(friendPlayerId),
       );
       batch.delete(
-        firestore.collection('players').doc(friendPlayerId).collection('friends').doc(player.id),
+        firestore
+            .collection('players')
+            .doc(friendPlayerId)
+            .collection('friends')
+            .doc(player.id),
       );
       await batch.commit();
     }
@@ -1596,7 +1634,10 @@ class AppStore extends ChangeNotifier {
     final firestore = _firestore;
     if (cloudConnected && firestore != null) {
       try {
-        await firestore.collection('notifications').doc(notificationId).delete();
+        await firestore
+            .collection('notifications')
+            .doc(notificationId)
+            .delete();
       } on FirebaseException {
         // Local deletion still keeps the UI responsive.
       }
@@ -1651,7 +1692,6 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-
   void _ensurePointPresets() {
     if (!pointPresets.any((preset) => preset.id == 'balanced')) {
       pointPresets.insert(
@@ -1682,9 +1722,10 @@ class AppStore extends ChangeNotifier {
       (preset) => preset.name.toLowerCase() == cleanName.toLowerCase(),
     );
     final preset = PointPreset(
-      id: existingIndex >= 0 && !pointPresets[existingIndex].builtIn
-          ? pointPresets[existingIndex].id
-          : 'preset_${DateTime.now().microsecondsSinceEpoch}',
+      id:
+          existingIndex >= 0 && !pointPresets[existingIndex].builtIn
+              ? pointPresets[existingIndex].id
+              : 'preset_${DateTime.now().microsecondsSinceEpoch}',
       name: cleanName,
       rules: rules,
     );
@@ -1724,9 +1765,13 @@ class AppStore extends ChangeNotifier {
       if (teamMatchById(id) != null) continue;
       if (!cloudConnected || firestore == null) return id;
       final matchRef = firestore.collection('teamMatches').doc(id);
-      final reservationRef = firestore.collection('teamMatchReservations').doc(id);
+      final reservationRef = firestore
+          .collection('teamMatchReservations')
+          .doc(id);
       try {
-        final reserved = await firestore.runTransaction<bool>((transaction) async {
+        final reserved = await firestore.runTransaction<bool>((
+          transaction,
+        ) async {
           final existingMatch = await transaction.get(matchRef);
           final existingReservation = await transaction.get(reservationRef);
           if (existingMatch.exists || existingReservation.exists) return false;
@@ -1757,14 +1802,15 @@ class AppStore extends ChangeNotifier {
   }) async {
     final creator = activePlayer;
     if (creator == null) throw StateError('Sign in first.');
-    final previous = previousMatchId == null
-        ? null
-        : teamMatchById(previousMatchId);
+    final previous =
+        previousMatchId == null ? null : teamMatchById(previousMatchId);
     if (previousMatchId != null && previous == null) {
       throw StateError('The previous Team Match could not be found.');
     }
     if (previous != null && previous.status != TeamMatchStatus.completed) {
-      throw StateError('Complete the previous Team Match before starting the next one.');
+      throw StateError(
+        'Complete the previous Team Match before starting the next one.',
+      );
     }
     if (previous != null && previous.creatorPlayerId != creator.id) {
       throw StateError('Only the Team Match host can continue its series.');
@@ -1794,9 +1840,8 @@ class AppStore extends ChangeNotifier {
         highestSeriesMatchNumber = value.seriesMatchNumber;
       }
     }
-    final seriesMatchNumber = previous == null
-        ? 1
-        : highestSeriesMatchNumber + 1;
+    final seriesMatchNumber =
+        previous == null ? 1 : highestSeriesMatchNumber + 1;
     final match = TeamMatch(
       id: id,
       originToken: originToken,
@@ -1818,7 +1863,8 @@ class AppStore extends ChangeNotifier {
     TeamScoringEngine.validateSetup(match);
     match.auditTrail.add(
       MatchAuditEntry(
-        type: previous == null ? 'team_match_created' : 'team_next_match_created',
+        type:
+            previous == null ? 'team_match_created' : 'team_next_match_created',
         createdAt: match.createdAt,
         note: previous?.id,
       ),
@@ -1832,6 +1878,8 @@ class AppStore extends ChangeNotifier {
     String matchId, {
     required TeamToss toss,
     required String openingBowlerId,
+    String? openingStrikerId,
+    String? openingNonStrikerId,
   }) async {
     final match = teamMatchById(matchId);
     if (match == null) throw StateError('Team Match not found.');
@@ -1844,6 +1892,8 @@ class AppStore extends ChangeNotifier {
       TeamScoringEngine.startFirstInnings(
         match,
         openingBowlerId: openingBowlerId,
+        openingStrikerId: openingStrikerId,
+        openingNonStrikerId: openingNonStrikerId,
       );
     } on Object {
       match.toss = null;
@@ -1855,8 +1905,7 @@ class AppStore extends ChangeNotifier {
           TeamTossMode.inApp => 'team_toss_completed',
           TeamTossMode.manual => 'team_manual_toss_recorded',
           TeamTossMode.skipped => 'team_toss_skipped',
-          TeamTossMode.previousWinnerChoice =>
-            'team_previous_winner_choice',
+          TeamTossMode.previousWinnerChoice => 'team_previous_winner_choice',
         },
         createdAt: toss.createdAt,
         note:
@@ -1869,6 +1918,8 @@ class AppStore extends ChangeNotifier {
   Future<void> startTeamSecondInnings(
     String matchId, {
     required String openingBowlerId,
+    String? openingStrikerId,
+    String? openingNonStrikerId,
   }) async {
     final match = teamMatchById(matchId);
     if (match == null) throw StateError('Team Match not found.');
@@ -1876,9 +1927,14 @@ class AppStore extends ChangeNotifier {
     TeamScoringEngine.startSecondInnings(
       match,
       openingBowlerId: openingBowlerId,
+      openingStrikerId: openingStrikerId,
+      openingNonStrikerId: openingNonStrikerId,
     );
     match.auditTrail.add(
-      MatchAuditEntry(type: 'second_innings_started', createdAt: DateTime.now()),
+      MatchAuditEntry(
+        type: 'second_innings_started',
+        createdAt: DateTime.now(),
+      ),
     );
     await _commit(waitForCloud: true);
   }
@@ -1887,6 +1943,8 @@ class AppStore extends ChangeNotifier {
     String matchId, {
     required String battingTeamId,
     required String openingBowlerId,
+    String? openingStrikerId,
+    String? openingNonStrikerId,
   }) async {
     final match = teamMatchById(matchId);
     if (match == null) throw StateError('Team Match not found.');
@@ -1895,12 +1953,15 @@ class AppStore extends ChangeNotifier {
       match,
       battingTeamId: battingTeamId,
       openingBowlerId: openingBowlerId,
+      openingStrikerId: openingStrikerId,
+      openingNonStrikerId: openingNonStrikerId,
     );
     match.auditTrail.add(
       MatchAuditEntry(
         type: 'super_over_started',
         createdAt: DateTime.now(),
-        note: '${TeamScoringEngine.superOverCount(match)}:$battingTeamId:$openingBowlerId',
+        note:
+            '${TeamScoringEngine.superOverCount(match)}:$battingTeamId:$openingBowlerId',
       ),
     );
     await _commit(waitForCloud: true);
@@ -1912,7 +1973,10 @@ class AppStore extends ChangeNotifier {
     await _requireTeamMatchHost(match);
     TeamScoringEngine.completeAsTie(match);
     match.auditTrail.add(
-      MatchAuditEntry(type: 'team_match_tie_accepted', createdAt: DateTime.now()),
+      MatchAuditEntry(
+        type: 'team_match_tie_accepted',
+        createdAt: DateTime.now(),
+      ),
     );
     _applyTeamStatsIfComplete(match);
     await _commit(waitForCloud: true);
@@ -2064,7 +2128,8 @@ class AppStore extends ChangeNotifier {
     match.auditTrail.add(
       MatchAuditEntry(type: 'team_innings_ended', createdAt: DateTime.now()),
     );
-    if (match.status == TeamMatchStatus.completed) _applyTeamStatsIfComplete(match);
+    if (match.status == TeamMatchStatus.completed)
+      _applyTeamStatsIfComplete(match);
     await _commit();
   }
 
@@ -2079,7 +2144,10 @@ class AppStore extends ChangeNotifier {
     final changed = TeamScoringEngine.undoLast(match);
     if (changed) {
       match.auditTrail.add(
-        MatchAuditEntry(type: 'team_delivery_undone', createdAt: DateTime.now()),
+        MatchAuditEntry(
+          type: 'team_delivery_undone',
+          createdAt: DateTime.now(),
+        ),
       );
     }
     await _commit();
@@ -2094,15 +2162,8 @@ class AppStore extends ChangeNotifier {
     if (match.status == TeamMatchStatus.completed) {
       throw StateError('Completed Team Matches stay in history.');
     }
+    _pendingSharedTeamMatchDeletes.add(match.id);
     teamMatches.removeAt(index);
-    final firestore = _firestore;
-    if (cloudConnected && firestore != null) {
-      try {
-        await firestore.collection('teamMatches').doc(match.id).delete();
-      } on FirebaseException {
-        _matchSyncErrors[match.id] = 'Could not remove the shared Team Match.';
-      }
-    }
     await _commit(waitForCloud: true);
   }
 
@@ -2135,34 +2196,37 @@ class AppStore extends ChangeNotifier {
     DateTime? before,
   }) {
     final participantSet = participantIds.toSet();
-    final candidates = matches.where((match) {
-      if (match.status != MatchStatus.completed) return false;
-      final ended = match.completedAt ?? match.createdAt;
-      if (before != null && !ended.isBefore(before)) return false;
-      return match.participantIds.where(participantSet.contains).length >= 2;
-    }).toList()
-      ..sort((a, b) {
-        final aDate = a.completedAt ?? a.createdAt;
-        final bDate = b.completedAt ?? b.createdAt;
-        return bDate.compareTo(aDate);
-      });
+    final candidates =
+        matches.where((match) {
+            if (match.status != MatchStatus.completed) return false;
+            final ended = match.completedAt ?? match.createdAt;
+            if (before != null && !ended.isBefore(before)) return false;
+            return match.participantIds.where(participantSet.contains).length >=
+                2;
+          }).toList()
+          ..sort((a, b) {
+            final aDate = a.completedAt ?? a.createdAt;
+            final bDate = b.completedAt ?? b.createdAt;
+            return bDate.compareTo(aDate);
+          });
 
     final order = <String>[];
     if (candidates.isNotEmpty) {
       for (final ranked in ScoringEngine.rankings(candidates.first)) {
-        if (participantSet.contains(ranked.playerId)) order.add(ranked.playerId);
+        if (participantSet.contains(ranked.playerId))
+          order.add(ranked.playerId);
       }
     }
     return order;
   }
 
   void _backfillTieBreakOrders() {
-    final ordered = matches.toList()
-      ..sort((a, b) {
-        final aDate = a.startedAt ?? a.createdAt;
-        final bDate = b.startedAt ?? b.createdAt;
-        return aDate.compareTo(bDate);
-      });
+    final ordered =
+        matches.toList()..sort((a, b) {
+          final aDate = a.startedAt ?? a.createdAt;
+          final bDate = b.startedAt ?? b.createdAt;
+          return aDate.compareTo(bDate);
+        });
     for (final match in ordered) {
       if (match.tieBreakOrder.isNotEmpty) continue;
       final before = match.startedAt ?? match.createdAt;
@@ -2189,7 +2253,9 @@ class AppStore extends ChangeNotifier {
       final matchRef = firestore.collection('matches').doc(id);
       final reservationRef = firestore.collection('matchReservations').doc(id);
       try {
-        final reserved = await firestore.runTransaction<bool>((transaction) async {
+        final reserved = await firestore.runTransaction<bool>((
+          transaction,
+        ) async {
           final existingMatch = await transaction.get(matchRef);
           final existingReservation = await transaction.get(reservationRef);
           if (existingMatch.exists || existingReservation.exists) return false;
@@ -2229,7 +2295,8 @@ class AppStore extends ChangeNotifier {
     if (uniqueParticipants.length < 2) {
       throw StateError('A singles match needs at least two players.');
     }
-    if (ballLimit < 1) throw StateError('Over limit must be at least one ball.');
+    if (ballLimit < 1)
+      throw StateError('Over limit must be at least one ball.');
     if (uniqueParticipants.any((id) => playerById(id) == null)) {
       throw StateError('Every participant needs a valid Player ID.');
     }
@@ -2341,16 +2408,16 @@ class AppStore extends ChangeNotifier {
   }
 
   List<DrawCard> availableDrawCards(CricketMatch match) {
-    final used = match.drawAssignments.values
-        .map((value) => value.card.id)
-        .toSet();
+    final used =
+        match.drawAssignments.values.map((value) => value.card.id).toSet();
     return match.drawPool.where((card) => !used.contains(card.id)).toList();
   }
 
   String? nextDrawPlayerId(CricketMatch match) {
-    final order = match.drawPlayerOrder.isEmpty
-        ? match.participantIds
-        : match.drawPlayerOrder;
+    final order =
+        match.drawPlayerOrder.isEmpty
+            ? match.participantIds
+            : match.drawPlayerOrder;
     for (final playerId in order) {
       if (!match.drawAssignments.containsKey(playerId)) return playerId;
     }
@@ -2377,9 +2444,10 @@ class AppStore extends ChangeNotifier {
     final assignment = DrawAssignment(playerId: playerId, card: card);
     match.drawAssignments[playerId] = assignment;
 
-    final remainingPlayers = match.drawPlayerOrder
-        .where((id) => !match.drawAssignments.containsKey(id))
-        .toList();
+    final remainingPlayers =
+        match.drawPlayerOrder
+            .where((id) => !match.drawAssignments.containsKey(id))
+            .toList();
     final remainingCards = availableDrawCards(match);
     if (remainingPlayers.length == 1 && remainingCards.length == 1) {
       match.drawAssignments[remainingPlayers.single] = DrawAssignment(
@@ -2505,7 +2573,10 @@ class AppStore extends ChangeNotifier {
         );
     }
     match.auditTrail.add(
-      MatchAuditEntry(type: 'bowling_plan_regenerated', createdAt: DateTime.now()),
+      MatchAuditEntry(
+        type: 'bowling_plan_regenerated',
+        createdAt: DateTime.now(),
+      ),
     );
     await _commit();
   }
@@ -2580,9 +2651,10 @@ class AppStore extends ChangeNotifier {
     final current = ScoringEngine.currentBatterId(match);
     if (current == null) throw StateError('Every turn is already complete.');
     final states = ScoringEngine.rebuildTurns(match);
-    final remaining = match.battingOrder
-        .where((id) => !(states[id]?.isComplete(match.ballLimit) ?? false))
-        .toList();
+    final remaining =
+        match.battingOrder
+            .where((id) => !(states[id]?.isComplete(match.ballLimit) ?? false))
+            .toList();
     if (remaining.length < 2) {
       throw StateError('There is no other remaining player to send next.');
     }
@@ -2613,7 +2685,8 @@ class AppStore extends ChangeNotifier {
     await _requireMatchScorer(match);
     final batterId = ScoringEngine.currentBatterId(match);
     if (batterId == null) throw StateError('No active batter.');
-    if (newBowlerId == batterId || !match.participantIds.contains(newBowlerId)) {
+    if (newBowlerId == batterId ||
+        !match.participantIds.contains(newBowlerId)) {
       throw StateError('Choose another player as bowler.');
     }
     final turn = ScoringEngine.rebuildTurns(match)[batterId]!;
@@ -2757,7 +2830,8 @@ class AppStore extends ChangeNotifier {
         }
       }
       for (final match in teamMatches) {
-        final roleCanPublish = match.creatorPlayerId == playerId ||
+        final roleCanPublish =
+            match.creatorPlayerId == playerId ||
             (match.trackerPlayerId == playerId &&
                 match.controllerUid == firebaseUser?.uid);
         if (!roleCanPublish) continue;
@@ -2779,8 +2853,8 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persistLocal([Map<String, Object?>? state]) => _preferences
-      .setString(_storageKey, jsonEncode(state ?? _stateData()));
+  Future<void> _persistLocal([Map<String, Object?>? state]) =>
+      _preferences.setString(_storageKey, jsonEncode(state ?? _stateData()));
 
   Map<String, Object?> _stateData() => {
     'activePlayerId': activePlayerId,
@@ -2793,6 +2867,7 @@ class AppStore extends ChangeNotifier {
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
     'defaultPointPresetId': defaultPointPresetId,
     'pendingSharedMatchDeletes': _pendingSharedMatchDeletes.toList(),
+    'pendingSharedTeamMatchDeletes': _pendingSharedTeamMatchDeletes.toList(),
     'schemaVersion': 10,
   };
 
@@ -2818,9 +2893,7 @@ class AppStore extends ChangeNotifier {
     );
     teamMatches.addAll(
       (json['teamMatches'] as List? ?? const []).map(
-        (value) => TeamMatch.fromJson(
-          Map<String, dynamic>.from(value as Map),
-        ),
+        (value) => TeamMatch.fromJson(Map<String, dynamic>.from(value as Map)),
       ),
     );
     friendRequests.addAll(
@@ -2837,9 +2910,8 @@ class AppStore extends ChangeNotifier {
     );
     pointPresets.addAll(
       (json['pointPresets'] as List? ?? const []).map(
-        (value) => PointPreset.fromJson(
-          Map<String, dynamic>.from(value as Map),
-        ),
+        (value) =>
+            PointPreset.fromJson(Map<String, dynamic>.from(value as Map)),
       ),
     );
     defaultPointPresetId =
@@ -2851,6 +2923,17 @@ class AppStore extends ChangeNotifier {
           json['pendingSharedMatchDeletes'] as List? ?? const <String>[],
         ),
       );
+    _pendingSharedTeamMatchDeletes.addAll(
+      List<String>.from(
+        json['pendingSharedTeamMatchDeletes'] as List? ?? const <String>[],
+      ),
+    );
+    matches.removeWhere(
+      (match) => _pendingSharedMatchDeletes.contains(match.id),
+    );
+    teamMatches.removeWhere(
+      (match) => _pendingSharedTeamMatchDeletes.contains(match.id),
+    );
     _ensurePointPresets();
   }
 
@@ -2866,6 +2949,7 @@ class AppStore extends ChangeNotifier {
     _sharedMatchIds.clear();
     _sharedTeamMatchIds.clear();
     _pendingSharedMatchDeletes.clear();
+    _pendingSharedTeamMatchDeletes.clear();
     _lastSharedMatchPayloads.clear();
     _lastSharedTeamMatchPayloads.clear();
     _pendingMatchSyncIds.clear();
@@ -2933,6 +3017,7 @@ class AppStore extends ChangeNotifier {
     }
 
     await _flushPendingSharedMatchDeletes();
+    await _flushPendingSharedTeamMatchDeletes();
     await _syncOwnedMatchesToShared();
     await _syncOwnedTeamMatchesToShared();
     await _syncActivePlayerPublicProfile();
@@ -2945,7 +3030,9 @@ class AppStore extends ChangeNotifier {
     if (player.avatarSource == AvatarSource.customUrl &&
         (player.avatarBlobId == null || player.avatarBlobChunkCount <= 0)) {
       final avatar = Uri.tryParse(player.avatarUrl ?? '');
-      if (avatar != null && avatar.scheme == 'https' && avatar.host.isNotEmpty) {
+      if (avatar != null &&
+          avatar.scheme == 'https' &&
+          avatar.host.isNotEmpty) {
         try {
           final source = await _downloadAvatarOriginal(avatar);
           final blobId = sha256.convert(source.bytes).toString();
@@ -2988,7 +3075,8 @@ class AppStore extends ChangeNotifier {
             'ownerPlayerId': player.id,
             'value': value,
             'visibility':
-                (player.contactVisibility[field] ?? ProfileVisibility.onlyMe).name,
+                (player.contactVisibility[field] ?? ProfileVisibility.onlyMe)
+                    .name,
             'audienceIds': player.contactAudienceIds[field] ?? const [],
             'updatedAt': FieldValue.serverTimestamp(),
           });
@@ -3050,7 +3138,8 @@ class AppStore extends ChangeNotifier {
     final snapshots = <String, Object?>{};
     for (final participantId in match.participantIds) {
       final player = playerById(participantId);
-      if (player != null) snapshots[participantId] = _participantSnapshot(player);
+      if (player != null)
+        snapshots[participantId] = _participantSnapshot(player);
     }
     return snapshots;
   }
@@ -3095,20 +3184,21 @@ class AppStore extends ChangeNotifier {
     'title': match.title,
     'createdAt': Timestamp.fromDate(match.createdAt),
     'activityAt': Timestamp.fromDate(_matchActivityAt(match)),
-    'startedAt': match.startedAt == null
-        ? null
-        : Timestamp.fromDate(match.startedAt!),
-    'completedAt': match.completedAt == null
-        ? null
-        : Timestamp.fromDate(match.completedAt!),
+    'startedAt':
+        match.startedAt == null ? null : Timestamp.fromDate(match.startedAt!),
+    'completedAt':
+        match.completedAt == null
+            ? null
+            : Timestamp.fromDate(match.completedAt!),
     'eventCount': match.events.length,
     'auditCount': match.auditTrail.length,
     'revision': match.revision,
     'controllerUid': match.controllerUid,
     'controllerPlayerId': match.controllerPlayerId,
-    'controllerLeaseUntil': match.controllerLeaseUntil == null
-        ? null
-        : Timestamp.fromDate(match.controllerLeaseUntil!),
+    'controllerLeaseUntil':
+        match.controllerLeaseUntil == null
+            ? null
+            : Timestamp.fromDate(match.controllerLeaseUntil!),
     'matchJson': _watchSafeMatchPayload(match),
     'schemaVersion': 3,
     'updatedAt': FieldValue.serverTimestamp(),
@@ -3132,7 +3222,8 @@ class AppStore extends ChangeNotifier {
 
       // Controller/lease fields are also top-level so a lightweight lease
       // transaction is immediately visible even before the next score payload.
-      match.controllerUid = data['controllerUid']?.toString() ?? match.controllerUid;
+      match.controllerUid =
+          data['controllerUid']?.toString() ?? match.controllerUid;
       match.controllerPlayerId =
           data['controllerPlayerId']?.toString() ?? match.controllerPlayerId;
       final rawLease = data['controllerLeaseUntil'];
@@ -3165,7 +3256,13 @@ class AppStore extends ChangeNotifier {
         match.participantIds.length;
   }
 
-  Future<void> _syncOwnedMatchesToShared() async {
+  Future<void> _syncOwnedMatchesToShared() {
+    final next = _singlesPublishTail.then((_) => _publishOwnedMatches());
+    _singlesPublishTail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _publishOwnedMatches() async {
     final firestore = _firestore;
     final playerId = activePlayerId;
     final uid = firebaseUser?.uid;
@@ -3176,15 +3273,19 @@ class AppStore extends ChangeNotifier {
       return;
     }
 
-    final publishable = matches.where((match) {
-      if (_pendingSharedMatchDeletes.contains(match.id)) return false;
-      return match.creatorPlayerId == playerId ||
-          (match.trackerPlayerId == playerId &&
-              match.controllerUid == uid);
-    });
+    final publishable = matches
+        .where((match) {
+          if (_pendingSharedMatchDeletes.contains(match.id)) return false;
+          return match.creatorPlayerId == playerId ||
+              (match.trackerPlayerId == playerId && match.controllerUid == uid);
+        })
+        .toList(growable: false);
 
     var localMetadataChanged = false;
     for (final match in publishable) {
+      if (_pendingSharedMatchDeletes.contains(match.id) ||
+          !identical(matchById(match.id), match))
+        continue;
       final payloadBefore = _watchSafeMatchPayload(match);
       if (_sharedMatchIds.contains(match.id) &&
           _lastSharedMatchPayloads[match.id] == payloadBefore) {
@@ -3193,9 +3294,17 @@ class AppStore extends ChangeNotifier {
       }
 
       _pendingMatchSyncIds.add(match.id);
+      _publishingMatchIds.add(match.id);
       final ref = firestore.collection('matches').doc(match.id);
+      // Keep the score being sent separate from the live mutable score. A ball
+      // can be entered while either the transaction read or commit is waiting.
+      final source =
+          jsonDecode(jsonEncode(match.toJson())) as Map<String, dynamic>;
       try {
-        await firestore.runTransaction((transaction) async {
+        final uploaded = await firestore.runTransaction<CricketMatch>((
+          transaction,
+        ) async {
+          final match = CricketMatch.fromJson(source);
           final remote = await transaction.get(ref);
           final remoteData = remote.data();
           if (remoteData != null) {
@@ -3243,22 +3352,40 @@ class AppStore extends ChangeNotifier {
           match
             ..controllerUid = uid
             ..controllerPlayerId = playerId
-            ..controllerLeaseUntil =
-                DateTime.now().add(_controlLeaseDuration);
+            ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
           transaction.set(
             ref,
             _sharedMatchDocument(match),
             SetOptions(merge: true),
           );
+          return match;
         });
-        final payload = _watchSafeMatchPayload(match);
+        final current = matchById(match.id);
+        if (current == null || _pendingSharedMatchDeletes.contains(match.id)) {
+          continue;
+        }
+        final payload = _watchSafeMatchPayload(uploaded);
         _sharedMatchIds.add(match.id);
         _lastSharedMatchPayloads[match.id] = payload;
-        _pendingMatchSyncIds.remove(match.id);
+        if (identical(current, match)) {
+          current
+            ..revision = uploaded.revision
+            ..controllerUid = uploaded.controllerUid
+            ..controllerPlayerId = uploaded.controllerPlayerId
+            ..controllerLeaseUntil = uploaded.controllerLeaseUntil;
+        }
+        if (_watchSafeMatchPayload(current) == payload) {
+          _pendingMatchSyncIds.remove(match.id);
+        } else {
+          _pendingMatchSyncIds.add(match.id);
+        }
         _matchSyncErrors.remove(match.id);
         localMetadataChanged = true;
         try {
-          await firestore.collection('matchReservations').doc(match.id).delete();
+          await firestore
+              .collection('matchReservations')
+              .doc(match.id)
+              .delete();
         } on FirebaseException {
           // A stale reservation only blocks this already-used random ID.
         }
@@ -3276,6 +3403,8 @@ class AppStore extends ChangeNotifier {
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] = '$error';
         // Keep local score intact; next refresh/commit can retry.
+      } finally {
+        _publishingMatchIds.remove(match.id);
       }
     }
 
@@ -3305,18 +3434,19 @@ class AppStore extends ChangeNotifier {
     'title': match.title,
     'createdAt': Timestamp.fromDate(match.createdAt),
     'activityAt': Timestamp.fromDate(_teamMatchActivityAt(match)),
-    'startedAt': match.startedAt == null
-        ? null
-        : Timestamp.fromDate(match.startedAt!),
-    'completedAt': match.completedAt == null
-        ? null
-        : Timestamp.fromDate(match.completedAt!),
+    'startedAt':
+        match.startedAt == null ? null : Timestamp.fromDate(match.startedAt!),
+    'completedAt':
+        match.completedAt == null
+            ? null
+            : Timestamp.fromDate(match.completedAt!),
     'revision': match.revision,
     'controllerUid': match.controllerUid,
     'controllerPlayerId': match.controllerPlayerId,
-    'controllerLeaseUntil': match.controllerLeaseUntil == null
-        ? null
-        : Timestamp.fromDate(match.controllerLeaseUntil!),
+    'controllerLeaseUntil':
+        match.controllerLeaseUntil == null
+            ? null
+            : Timestamp.fromDate(match.controllerLeaseUntil!),
     'teamMatchJson': jsonEncode(match.toJson()),
     'schemaVersion': 1,
     'updatedAt': FieldValue.serverTimestamp(),
@@ -3330,7 +3460,8 @@ class AppStore extends ChangeNotifier {
         Map<String, dynamic>.from(jsonDecode(raw) as Map),
       );
       match
-        ..controllerUid = data['controllerUid']?.toString() ?? match.controllerUid
+        ..controllerUid =
+            data['controllerUid']?.toString() ?? match.controllerUid
         ..controllerPlayerId =
             data['controllerPlayerId']?.toString() ?? match.controllerPlayerId
         ..revision = data['revision'] as int? ?? match.revision
@@ -3348,19 +3479,36 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _syncOwnedTeamMatchesToShared() async {
+  Future<void> _syncOwnedTeamMatchesToShared() {
+    final next = _teamPublishTail.then((_) => _publishOwnedTeamMatches());
+    _teamPublishTail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _publishOwnedTeamMatches() async {
     final firestore = _firestore;
     final playerId = activePlayerId;
     final uid = firebaseUser?.uid;
-    if (!cloudConnected || firestore == null || playerId == null || uid == null) {
+    if (!cloudConnected ||
+        firestore == null ||
+        playerId == null ||
+        uid == null) {
       return;
     }
-    final publishable = teamMatches.where(
-      (match) => match.creatorPlayerId == playerId ||
-          (match.trackerPlayerId == playerId && match.controllerUid == uid),
-    );
+    final publishable = teamMatches
+        .where(
+          (match) =>
+              !_pendingSharedTeamMatchDeletes.contains(match.id) &&
+              (match.creatorPlayerId == playerId ||
+                  (match.trackerPlayerId == playerId &&
+                      match.controllerUid == uid)),
+        )
+        .toList(growable: false);
     var localMetadataChanged = false;
     for (final match in publishable) {
+      if (_pendingSharedTeamMatchDeletes.contains(match.id) ||
+          !identical(teamMatchById(match.id), match))
+        continue;
       final payloadBefore = jsonEncode(match.toJson());
       if (_sharedTeamMatchIds.contains(match.id) &&
           _lastSharedTeamMatchPayloads[match.id] == payloadBefore) {
@@ -3368,15 +3516,22 @@ class AppStore extends ChangeNotifier {
         continue;
       }
       _pendingMatchSyncIds.add(match.id);
+      _publishingMatchIds.add(match.id);
       final ref = firestore.collection('teamMatches').doc(match.id);
+      final source =
+          jsonDecode(jsonEncode(match.toJson())) as Map<String, dynamic>;
       try {
-        await firestore.runTransaction((transaction) async {
+        final uploaded = await firestore.runTransaction<TeamMatch>((
+          transaction,
+        ) async {
+          final match = TeamMatch.fromJson(source);
           final remote = await transaction.get(ref);
           final data = remote.data();
           if (data != null) {
             final remoteCreator = data['creatorPlayerId']?.toString();
             final remoteOrigin = data['originToken']?.toString();
-            if ((remoteCreator != null && remoteCreator != match.creatorPlayerId) ||
+            if ((remoteCreator != null &&
+                    remoteCreator != match.creatorPlayerId) ||
                 (remoteOrigin != null &&
                     match.originToken != null &&
                     remoteOrigin != match.originToken)) {
@@ -3384,9 +3539,10 @@ class AppStore extends ChangeNotifier {
             }
             final remoteRevision = data['revision'] as int? ?? 0;
             final rawLease = data['controllerLeaseUntil'];
-            final remoteLease = rawLease is Timestamp
-                ? rawLease.toDate()
-                : DateTime.tryParse(rawLease?.toString() ?? '');
+            final remoteLease =
+                rawLease is Timestamp
+                    ? rawLease.toDate()
+                    : DateTime.tryParse(rawLease?.toString() ?? '');
             final remoteController = data['controllerUid']?.toString();
             if (remoteController != null &&
                 remoteController != uid &&
@@ -3405,18 +3561,34 @@ class AppStore extends ChangeNotifier {
           match
             ..controllerUid = uid
             ..controllerPlayerId = playerId
-            ..controllerLeaseUntil =
-                DateTime.now().add(_controlLeaseDuration);
+            ..controllerLeaseUntil = DateTime.now().add(_controlLeaseDuration);
           transaction.set(
             ref,
             _sharedTeamMatchDocument(match),
             SetOptions(merge: true),
           );
+          return match;
         });
-        final payload = jsonEncode(match.toJson());
+        final current = teamMatchById(match.id);
+        if (current == null ||
+            _pendingSharedTeamMatchDeletes.contains(match.id)) {
+          continue;
+        }
+        final payload = jsonEncode(uploaded.toJson());
         _sharedTeamMatchIds.add(match.id);
         _lastSharedTeamMatchPayloads[match.id] = payload;
-        _pendingMatchSyncIds.remove(match.id);
+        if (identical(current, match)) {
+          current
+            ..revision = uploaded.revision
+            ..controllerUid = uploaded.controllerUid
+            ..controllerPlayerId = uploaded.controllerPlayerId
+            ..controllerLeaseUntil = uploaded.controllerLeaseUntil;
+        }
+        if (jsonEncode(current.toJson()) == payload) {
+          _pendingMatchSyncIds.remove(match.id);
+        } else {
+          _pendingMatchSyncIds.add(match.id);
+        }
         _matchSyncErrors.remove(match.id);
         localMetadataChanged = true;
         try {
@@ -3439,6 +3611,8 @@ class AppStore extends ChangeNotifier {
       } on Object catch (error) {
         _pendingMatchSyncIds.add(match.id);
         _matchSyncErrors[match.id] = '$error';
+      } finally {
+        _publishingMatchIds.remove(match.id);
       }
     }
     if (localMetadataChanged) await _persistLocal();
@@ -3447,14 +3621,21 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _ingestSharedTeamMatch(TeamMatch remote) async {
     final playerId = activePlayerId;
-    if (playerId == null || !remote.participantIds.contains(playerId)) return;
+    if (playerId == null ||
+        !remote.participantIds.contains(playerId) ||
+        _pendingSharedTeamMatchDeletes.contains(remote.id))
+      return;
     final index = teamMatches.indexWhere((match) => match.id == remote.id);
     if (index < 0) {
       teamMatches.add(remote);
     } else {
       final local = teamMatches[index];
       final pending = _pendingMatchSyncIds.contains(local.id);
-      if (!(pending && remote.revision <= local.revision)) {
+      final ownUploadInFlight =
+          _publishingMatchIds.contains(local.id) &&
+          remote.controllerUid == firebaseUser?.uid;
+      if (!(pending &&
+          (remote.revision <= local.revision || ownUploadInFlight))) {
         teamMatches[index] = remote;
         if (remote.revision > local.revision) {
           _pendingMatchSyncIds.remove(remote.id);
@@ -3500,10 +3681,22 @@ class AppStore extends ChangeNotifier {
       player.teamStats
         ..matches += 1
         ..runs += appearances.fold<int>(0, (total, value) => total + value.runs)
-        ..balls += appearances.fold<int>(0, (total, value) => total + value.balls)
-        ..outs += appearances.fold<int>(0, (total, value) => total + value.dismissals)
-        ..wickets += appearances.fold<int>(0, (total, value) => total + value.wickets)
-        ..catches += appearances.fold<int>(0, (total, value) => total + value.catches)
+        ..balls += appearances.fold<int>(
+          0,
+          (total, value) => total + value.balls,
+        )
+        ..outs += appearances.fold<int>(
+          0,
+          (total, value) => total + value.dismissals,
+        )
+        ..wickets += appearances.fold<int>(
+          0,
+          (total, value) => total + value.wickets,
+        )
+        ..catches += appearances.fold<int>(
+          0,
+          (total, value) => total + value.catches,
+        )
         ..directRunOuts += appearances.fold<int>(
           0,
           (total, value) => total + value.directRunOuts,
@@ -3512,8 +3705,14 @@ class AppStore extends ChangeNotifier {
           0,
           (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings += appearances.fold<int>(0, (total, value) => total + value.stumpings)
-        ..points += appearances.fold<int>(0, (total, value) => total + value.points);
+        ..stumpings += appearances.fold<int>(
+          0,
+          (total, value) => total + value.stumpings,
+        )
+        ..points += appearances.fold<int>(
+          0,
+          (total, value) => total + value.points,
+        );
       final result = TeamScoringEngine.result(match);
       if (result.winnerTeamId != null &&
           match.side(result.winnerTeamId!).playerIds.contains(player.id) &&
@@ -3531,6 +3730,7 @@ class AppStore extends ChangeNotifier {
     if (!loadOlder) {
       _oldestSharedTeamActivityAt = null;
       _hasOlderSharedTeamHistory = true;
+      await _flushPendingSharedTeamMatchDeletes();
       await _syncOwnedTeamMatchesToShared();
     }
     Query<Map<String, dynamic>> query = firestore
@@ -3549,11 +3749,12 @@ class AppStore extends ChangeNotifier {
         snapshot = await query.get();
       } on FirebaseException catch (error) {
         if (error.code != 'failed-precondition') rethrow;
-        snapshot = await firestore
-            .collection('teamMatches')
-            .where('participantIds', arrayContains: playerId)
-            .limit(_sharedMatchPageSize)
-            .get();
+        snapshot =
+            await firestore
+                .collection('teamMatches')
+                .where('participantIds', arrayContains: playerId)
+                .limit(_sharedMatchPageSize)
+                .get();
       }
       DateTime? oldest;
       final remoteIds = <String>{};
@@ -3564,9 +3765,10 @@ class AppStore extends ChangeNotifier {
         if (match == null || !match.participantIds.contains(playerId)) continue;
         remoteIds.add(match.id);
         final rawActivity = data['activityAt'];
-        final activity = rawActivity is Timestamp
-            ? rawActivity.toDate()
-            : _teamMatchActivityAt(match);
+        final activity =
+            rawActivity is Timestamp
+                ? rawActivity.toDate()
+                : _teamMatchActivityAt(match);
         if (oldest == null || activity.isBefore(oldest)) oldest = activity;
         await _ingestSharedTeamMatch(match);
       }
@@ -3582,7 +3784,8 @@ class AppStore extends ChangeNotifier {
             )
             .toList(growable: false);
         for (final local in foreignActive) {
-          final doc = await firestore.collection('teamMatches').doc(local.id).get();
+          final doc =
+              await firestore.collection('teamMatches').doc(local.id).get();
           if (!doc.exists) {
             teamMatches.removeWhere((match) => match.id == local.id);
           }
@@ -3613,29 +3816,37 @@ class AppStore extends ChangeNotifier {
     if (!cloudConnected || firestore == null || playerId == null) {
       return Stream<TeamMatch?>.value(teamMatchById(matchId));
     }
-    return firestore.collection('teamMatches').doc(matchId).snapshots().asyncMap(
-      (snapshot) async {
-        if (!snapshot.exists) return null;
-        final data = snapshot.data()!;
-        _hydrateParticipantSnapshots(data);
-        final remote = _teamMatchFromSharedDocument(data);
-        if (remote == null || !remote.participantIds.contains(playerId)) return null;
-        await _ingestSharedTeamMatch(remote);
-        await _persistLocal();
-        notifyListeners();
-        return teamMatchById(matchId);
-      },
-    );
+    return firestore
+        .collection('teamMatches')
+        .doc(matchId)
+        .snapshots()
+        .asyncMap((snapshot) async {
+          if (!snapshot.exists) return null;
+          final data = snapshot.data()!;
+          _hydrateParticipantSnapshots(data);
+          final remote = _teamMatchFromSharedDocument(data);
+          if (remote == null || !remote.participantIds.contains(playerId))
+            return null;
+          await _ingestSharedTeamMatch(remote);
+          await _persistLocal();
+          notifyListeners();
+          return teamMatchById(matchId);
+        });
   }
 
   Future<bool> _deleteSharedMatchRecord(String matchId) async {
     final firestore = _firestore;
     if (!cloudConnected || firestore == null) return false;
     try {
-      await firestore.collection('matches').doc(matchId).delete();
+      final ref = firestore.collection('matches').doc(matchId);
+      await firestore.runTransaction((transaction) async {
+        if ((await transaction.get(ref)).exists) transaction.delete(ref);
+      });
       _sharedMatchIds.remove(matchId);
       _lastSharedMatchPayloads.remove(matchId);
       _pendingSharedMatchDeletes.remove(matchId);
+      _pendingMatchSyncIds.remove(matchId);
+      _matchSyncErrors.remove(matchId);
       return true;
     } on FirebaseException {
       return false;
@@ -3644,9 +3855,41 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _flushPendingSharedMatchDeletes() async {
     if (_pendingSharedMatchDeletes.isEmpty) return;
+    // Finish any in-flight creation/update before deleting its shared record.
+    await _singlesPublishTail;
+    var changed = false;
     for (final matchId in _pendingSharedMatchDeletes.toList()) {
-      await _deleteSharedMatchRecord(matchId);
+      if (await _deleteSharedMatchRecord(matchId)) changed = true;
     }
+    if (changed) await _persistLocal();
+  }
+
+  Future<void> _flushPendingSharedTeamMatchDeletes() async {
+    final firestore = _firestore;
+    if (_pendingSharedTeamMatchDeletes.isEmpty ||
+        !cloudConnected ||
+        firestore == null)
+      return;
+    await _teamPublishTail;
+    var changed = false;
+    for (final matchId in _pendingSharedTeamMatchDeletes.toList()) {
+      try {
+        final ref = firestore.collection('teamMatches').doc(matchId);
+        await firestore.runTransaction((transaction) async {
+          // A previous attempt may already have deleted the server document.
+          if ((await transaction.get(ref)).exists) transaction.delete(ref);
+        });
+        _pendingSharedTeamMatchDeletes.remove(matchId);
+        _sharedTeamMatchIds.remove(matchId);
+        _lastSharedTeamMatchPayloads.remove(matchId);
+        _pendingMatchSyncIds.remove(matchId);
+        _matchSyncErrors.remove(matchId);
+        changed = true;
+      } on FirebaseException {
+        // The persisted tombstone hides cached snapshots until a later retry.
+      }
+    }
+    if (changed) await _persistLocal();
   }
 
   Future<void> _cacheParticipantProfiles(CricketMatch match) async {
@@ -3668,7 +3911,10 @@ class AppStore extends ChangeNotifier {
     bool preserveOwnedWhenAhead = true,
   }) async {
     final playerId = activePlayerId;
-    if (playerId == null || !remote.participantIds.contains(playerId)) return;
+    if (playerId == null ||
+        !remote.participantIds.contains(playerId) ||
+        _pendingSharedMatchDeletes.contains(remote.id))
+      return;
 
     final localIndex = matches.indexWhere((value) => value.id == remote.id);
     if (localIndex < 0) {
@@ -3680,16 +3926,43 @@ class AppStore extends ChangeNotifier {
           (local.status == MatchStatus.live &&
               local.trackerPlayerId == playerId);
       final pendingLocal = _pendingMatchSyncIds.contains(local.id);
+      final ownUploadInFlight =
+          _publishingMatchIds.contains(local.id) &&
+          remote.controllerUid == firebaseUser?.uid;
       final keepPendingLocal =
           controllableHere &&
           pendingLocal &&
-          remote.revision <= local.revision;
+          (remote.revision <= local.revision || ownUploadInFlight);
       final keepAheadLocal =
           controllableHere &&
           preserveOwnedWhenAhead &&
           remote.revision <= local.revision &&
           _matchProgressScore(local) > _matchProgressScore(remote);
       if (!(keepPendingLocal || keepAheadLocal)) {
+        // Shared snapshots intentionally omit secret cards. Retain those host
+        // device fields when merging the same unfinished draw, including the
+        // zero-selection state whose public progress is equal to the remote.
+        if (local.creatorPlayerId == playerId &&
+            local.status == MatchStatus.drawing &&
+            remote.status == MatchStatus.drawing &&
+            local.originToken == remote.originToken &&
+            local.orderSource == remote.orderSource &&
+            listEquals(local.participantIds, remote.participantIds) &&
+            listEquals(local.drawPlayerOrder, remote.drawPlayerOrder) &&
+            listEquals(local.battingOrder, remote.battingOrder) &&
+            jsonEncode(
+                  local.auditTrail.map((entry) => entry.toJson()).toList(),
+                ) ==
+                jsonEncode(
+                  remote.auditTrail.map((entry) => entry.toJson()).toList(),
+                )) {
+          remote.drawPool
+            ..clear()
+            ..addAll(local.drawPool);
+          remote.drawAssignments
+            ..clear()
+            ..addAll(local.drawAssignments);
+        }
         matches[localIndex] = remote;
         if (remote.revision > local.revision) {
           _pendingMatchSyncIds.remove(remote.id);
@@ -3763,11 +4036,12 @@ class AppStore extends ChangeNotifier {
         // Keep the app functional; deploying firestore.indexes.json enables
         // deterministic recent-first pagination.
         if (error.code != 'failed-precondition') rethrow;
-        snapshot = await firestore
-            .collection('matches')
-            .where('participantIds', arrayContains: playerId)
-            .limit(_sharedMatchPageSize)
-            .get();
+        snapshot =
+            await firestore
+                .collection('matches')
+                .where('participantIds', arrayContains: playerId)
+                .limit(_sharedMatchPageSize)
+                .get();
       }
 
       final remoteIds = <String>{};
@@ -3844,34 +4118,34 @@ class AppStore extends ChangeNotifier {
       return Stream<CricketMatch?>.value(matchById(matchId));
     }
 
-    return firestore.collection('matches').doc(matchId).snapshots().asyncMap(
-      (snapshot) async {
-        if (!snapshot.exists) {
-          final localIndex = matches.indexWhere((match) => match.id == matchId);
-          if (localIndex >= 0 &&
-              matches[localIndex].creatorPlayerId != playerId &&
-              matches[localIndex].status != MatchStatus.completed) {
-            matches.removeAt(localIndex);
-            await _persistLocal();
-            notifyListeners();
-          }
-          return null;
+    return firestore.collection('matches').doc(matchId).snapshots().asyncMap((
+      snapshot,
+    ) async {
+      if (!snapshot.exists) {
+        final localIndex = matches.indexWhere((match) => match.id == matchId);
+        if (localIndex >= 0 &&
+            matches[localIndex].creatorPlayerId != playerId &&
+            matches[localIndex].status != MatchStatus.completed) {
+          matches.removeAt(localIndex);
+          await _persistLocal();
+          notifyListeners();
         }
-        final data = snapshot.data()!;
-        _hydrateParticipantSnapshots(data);
-        final remote = _matchFromSharedDocument(data);
-        if (remote == null || !remote.participantIds.contains(playerId)) {
-          return null;
-        }
-        await _ingestSharedMatch(remote, preserveOwnedWhenAhead: true);
-        await _persistLocal();
-        if (remote.status == MatchStatus.completed) {
-          await _syncActivePlayerPublicProfile();
-        }
-        notifyListeners();
-        return matchById(matchId);
-      },
-    );
+        return null;
+      }
+      final data = snapshot.data()!;
+      _hydrateParticipantSnapshots(data);
+      final remote = _matchFromSharedDocument(data);
+      if (remote == null || !remote.participantIds.contains(playerId)) {
+        return null;
+      }
+      await _ingestSharedMatch(remote, preserveOwnedWhenAhead: true);
+      await _persistLocal();
+      if (remote.status == MatchStatus.completed) {
+        await _syncActivePlayerPublicProfile();
+      }
+      notifyListeners();
+      return matchById(matchId);
+    });
   }
 
   Future<void> _restoreCloudState({bool replaceLocal = false}) async {
@@ -3879,7 +4153,8 @@ class AppStore extends ChangeNotifier {
     final playerId = activePlayerId;
     if (firestore == null || playerId == null) return;
     try {
-      final snapshot = await firestore.collection('accountStates').doc(playerId).get();
+      final snapshot =
+          await firestore.collection('accountStates').doc(playerId).get();
       final raw = snapshot.data()?['state'] as String?;
       if (raw != null && raw.isNotEmpty && (replaceLocal || players.isEmpty)) {
         _replaceState(Map<String, dynamic>.from(jsonDecode(raw) as Map));
@@ -3887,7 +4162,10 @@ class AppStore extends ChangeNotifier {
         await _persistLocal();
         return;
       }
-      final publicPlayer = await findPublicPlayer(playerId, bypassSignedInGate: true);
+      final publicPlayer = await findPublicPlayer(
+        playerId,
+        bypassSignedInGate: true,
+      );
       if (publicPlayer != null) {
         _addOrReplacePlayer(publicPlayer);
         activePlayerId = playerId;
@@ -3956,10 +4234,14 @@ class AppStore extends ChangeNotifier {
         final data = document.data();
         final typeName = data['type']?.toString() ?? 'system';
         final fromId = data['fromPlayerId']?.toString();
-        final sender = fromId == null ? null : await findPublicPlayer(fromId, forceRefresh: true);
-        final type = NotificationType.values.any((value) => value.name == typeName)
-            ? NotificationType.values.byName(typeName)
-            : NotificationType.system;
+        final sender =
+            fromId == null
+                ? null
+                : await findPublicPlayer(fromId, forceRefresh: true);
+        final type =
+            NotificationType.values.any((value) => value.name == typeName)
+                ? NotificationType.values.byName(typeName)
+                : NotificationType.system;
         notifications.add(
           CricNotification(
             id: document.id,
@@ -3998,7 +4280,8 @@ class AppStore extends ChangeNotifier {
         ..addAll(cloudFriendIds);
       for (final cached in players.where((player) => player.id != self.id)) {
         if (cloudFriendIds.contains(cached.id)) {
-          if (!cached.friendIds.contains(self.id)) cached.friendIds.add(self.id);
+          if (!cached.friendIds.contains(self.id))
+            cached.friendIds.add(self.id);
         } else {
           cached.friendIds.remove(self.id);
         }
@@ -4040,9 +4323,13 @@ class AppStore extends ChangeNotifier {
   Future<_AvatarSourceData> _downloadAvatarOriginal(Uri uri) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
-      final request = await client.getUrl(uri).timeout(const Duration(seconds: 10));
+      final request = await client
+          .getUrl(uri)
+          .timeout(const Duration(seconds: 10));
       request.headers.set(HttpHeaders.userAgentHeader, 'CricXii/1.6.3');
-      final response = await request.close().timeout(const Duration(seconds: 10));
+      final response = await request.close().timeout(
+        const Duration(seconds: 10),
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Image server returned HTTP ${response.statusCode}.');
       }
@@ -4071,9 +4358,10 @@ class AppStore extends ChangeNotifier {
         codec.dispose();
       }
       final contentType = response.headers.contentType;
-      final mimeType = contentType == null || contentType.primaryType != 'image'
-          ? 'image/*'
-          : '${contentType.primaryType}/${contentType.subType}';
+      final mimeType =
+          contentType == null || contentType.primaryType != 'image'
+              ? 'image/*'
+              : '${contentType.primaryType}/${contentType.subType}';
       return _AvatarSourceData(bytes: bytes, mimeType: mimeType);
     } finally {
       client.close(force: true);
@@ -4209,7 +4497,8 @@ class AppStore extends ChangeNotifier {
     final playerOrder = List<String>.from(match.participantIds);
     for (var attempt = 0; attempt < 8; attempt++) {
       playerOrder.shuffle(random);
-      if (playerOrder.length < 2 || !_sameOrder(playerOrder, previousPlayerOrder)) {
+      if (playerOrder.length < 2 ||
+          !_sameOrder(playerOrder, previousPlayerOrder)) {
         break;
       }
     }
@@ -4252,8 +4541,9 @@ class AppStore extends ChangeNotifier {
   }
 
   void _finalizeDraw(CricketMatch match) {
-    final ordered = match.drawAssignments.values.toList()
-      ..sort((a, b) => a.card.order.compareTo(b.card.order));
+    final ordered =
+        match.drawAssignments.values.toList()
+          ..sort((a, b) => a.card.order.compareTo(b.card.order));
     match.battingOrder
       ..clear()
       ..addAll(ordered.map((value) => value.playerId));
@@ -4296,9 +4586,10 @@ class AppStore extends ChangeNotifier {
         if (states[id]?.isComplete(match.ballLimit) ?? false) id,
       if (current != null) current,
     };
-    final fixed = match.bowlingPlan
-        .where((block) => lockedBatters.contains(block.batterId))
-        .toList();
+    final fixed =
+        match.bowlingPlan
+            .where((block) => lockedBatters.contains(block.batterId))
+            .toList();
     final orderIndex = <String, int>{
       for (var index = 0; index < match.battingOrder.length; index++)
         match.battingOrder[index]: index,
@@ -4313,9 +4604,8 @@ class AppStore extends ChangeNotifier {
     for (final block in fixed) {
       loads[block.bowlerId] = (loads[block.bowlerId] ?? 0) + block.legalBalls;
     }
-    final futureBatters = match.battingOrder
-        .where((id) => !lockedBatters.contains(id))
-        .toList();
+    final futureBatters =
+        match.battingOrder.where((id) => !lockedBatters.contains(id)).toList();
     final generated = BowlingScheduler.generate(
       battingOrder: futureBatters,
       participantIds: match.participantIds,
@@ -4334,7 +4624,9 @@ class AppStore extends ChangeNotifier {
     final appearances = TeamScoringEngine.appearanceStats(match).values;
     final byPlayer = <String, List<TeamPlayerMatchStats>>{};
     for (final stats in appearances) {
-      byPlayer.putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[]).add(stats);
+      byPlayer
+          .putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[])
+          .add(stats);
     }
     final result = TeamScoringEngine.result(match);
     for (final entry in byPlayer.entries) {
@@ -4345,9 +4637,18 @@ class AppStore extends ChangeNotifier {
         ..matches += 1
         ..runs += values.fold<int>(0, (total, value) => total + value.runs)
         ..balls += values.fold<int>(0, (total, value) => total + value.balls)
-        ..outs += values.fold<int>(0, (total, value) => total + value.dismissals)
-        ..wickets += values.fold<int>(0, (total, value) => total + value.wickets)
-        ..catches += values.fold<int>(0, (total, value) => total + value.catches)
+        ..outs += values.fold<int>(
+          0,
+          (total, value) => total + value.dismissals,
+        )
+        ..wickets += values.fold<int>(
+          0,
+          (total, value) => total + value.wickets,
+        )
+        ..catches += values.fold<int>(
+          0,
+          (total, value) => total + value.catches,
+        )
         ..directRunOuts += values.fold<int>(
           0,
           (total, value) => total + value.directRunOuts,
@@ -4356,11 +4657,13 @@ class AppStore extends ChangeNotifier {
           0,
           (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings += values.fold<int>(0, (total, value) => total + value.stumpings)
+        ..stumpings += values.fold<int>(
+          0,
+          (total, value) => total + value.stumpings,
+        )
         ..points += values.fold<int>(0, (total, value) => total + value.points);
-      final winnerSide = result.winnerTeamId == null
-          ? null
-          : match.side(result.winnerTeamId!);
+      final winnerSide =
+          result.winnerTeamId == null ? null : match.side(result.winnerTeamId!);
       if (winnerSide?.playerIds.contains(player.id) == true &&
           player.id != match.commonJokerPlayerId) {
         player.teamStats.wins += 1;
@@ -4374,7 +4677,9 @@ class AppStore extends ChangeNotifier {
     final appearances = TeamScoringEngine.appearanceStats(match).values;
     final byPlayer = <String, List<TeamPlayerMatchStats>>{};
     for (final stats in appearances) {
-      byPlayer.putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[]).add(stats);
+      byPlayer
+          .putIfAbsent(stats.playerId, () => <TeamPlayerMatchStats>[])
+          .add(stats);
     }
     final result = TeamScoringEngine.result(match);
     for (final entry in byPlayer.entries) {
@@ -4385,9 +4690,18 @@ class AppStore extends ChangeNotifier {
         ..matches -= 1
         ..runs -= values.fold<int>(0, (total, value) => total + value.runs)
         ..balls -= values.fold<int>(0, (total, value) => total + value.balls)
-        ..outs -= values.fold<int>(0, (total, value) => total + value.dismissals)
-        ..wickets -= values.fold<int>(0, (total, value) => total + value.wickets)
-        ..catches -= values.fold<int>(0, (total, value) => total + value.catches)
+        ..outs -= values.fold<int>(
+          0,
+          (total, value) => total + value.dismissals,
+        )
+        ..wickets -= values.fold<int>(
+          0,
+          (total, value) => total + value.wickets,
+        )
+        ..catches -= values.fold<int>(
+          0,
+          (total, value) => total + value.catches,
+        )
         ..directRunOuts -= values.fold<int>(
           0,
           (total, value) => total + value.directRunOuts,
@@ -4396,11 +4710,13 @@ class AppStore extends ChangeNotifier {
           0,
           (total, value) => total + value.assistedRunOuts,
         )
-        ..stumpings -= values.fold<int>(0, (total, value) => total + value.stumpings)
+        ..stumpings -= values.fold<int>(
+          0,
+          (total, value) => total + value.stumpings,
+        )
         ..points -= values.fold<int>(0, (total, value) => total + value.points);
-      final winnerSide = result.winnerTeamId == null
-          ? null
-          : match.side(result.winnerTeamId!);
+      final winnerSide =
+          result.winnerTeamId == null ? null : match.side(result.winnerTeamId!);
       if (winnerSide?.playerIds.contains(player.id) == true &&
           player.id != match.commonJokerPlayerId) {
         player.teamStats.wins -= 1;

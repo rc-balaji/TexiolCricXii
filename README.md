@@ -2,14 +2,6 @@
 
 CricXii is Texiol's Android-first local cricket scorer. Version `1.6.3+27` keeps the hardened live Team/Super Over and mixed daily-report flow, adds player avatars to cricket-style scorecards across mobile/PDF, and simplifies Home around match creation, unfinished matches and recent results while keeping performance reporting in Profile.
 
-## Ground AR
-
-The **Ground** tab adds an editable pitch plan and optional native Android AR. Use the top-view plan on any supported app device, or open AR on an [ARCore-supported phone](https://developers.google.com/ar/devices), scan the ground, place the batting end, choose direction, and walk to confirm the bowling end. AR uses real camera tracking, detected planes and two local anchors.
-
-Choose a standard **22-yard / 20.1168 m** pitch or a custom **4–40 m** length. Move, rotate, nudge, lock and undo changes; configure stumps, creases, custom wide guides and the bowling-end run-up. Saved layout preferences stay on this phone. Every new AR session needs a fresh scan; saved settings do not restore physical anchors. AR is a visual aid: verify pitch length and crease positions with a tape before marking.
-
-AR requires camera permission and Google Play Services for AR, governed by the [Google Privacy Policy](https://policies.google.com/privacy). Unsupported phones and denied camera permission retain the top-view planner. Detected ground is shown as a translucent surface with a grid and boundary; placement requires a steady target on that surface. See [Ground AR setup, build and device checks](docs/GROUND_AR.md) for validation results and remaining physical-device checks.
-
 ## v1.6.3 avatar privacy
 
 - Custom avatar source URLs stay in private account data and are not published to public player documents or shared match participant snapshots.
@@ -28,7 +20,7 @@ AR requires camera permission and Google Play Services for AR, governed by the [
 
 ## v1.5 highlights
 
-- Team Match no longer asks for a fixed batting order before play. The selected roster supplies only the default opening pair; after a wicket, scoring pauses until the scorer chooses the next batter live.
+- Team Match no longer asks for a fixed batting order before play. Choose the opening striker and non-striker after the toss; after a wicket, scoring pauses until the scorer chooses the next batter live.
 - Live automatic prompts are mutually guarded so next batter, Last Player Standing and next bowler cannot open duplicate sheets/dialogs during rebuilds or cloud commits.
 - A tied Team Match enters a Super Over flow: one over, two-wicket cap, same configured scoring/extras behavior, and another Super Over if the tie repeats. The host can also explicitly finish the match as tied.
 - **Today Performance** is now completion-date based and can combine completed Singles and Team Matches. Users can filter All / Singles / Team, select any completed matches, choose PDF sections, preview, download and share.
@@ -38,15 +30,16 @@ AR requires camera permission and Google Play Services for AR, governed by the [
 ## Team Match features
 
 - Flexible team sizes with no eleven-player cap.
-- No fixed pre-match batting order: roster order provides default openers, then every wicket can choose the incoming batter live.
-- Players-first setup with search: choose only the people playing now, then assign those players to teams.
+- No fixed pre-match batting order: choose the opening pair for each innings, then choose the incoming batter live after every wicket.
+- One-page setup with player search, team assignments, team previews and optional rules.
 - Optional shared **Joker** who appears for both teams, keeps separate per-side appearances and combined personal performance, and cannot bowl to themselves.
 - Automatic editable names such as **Team Match 2**, **Team Match 3** and **Team Match 4**.
 - Four start paths: timed in-app toss, physical/manual toss, skip toss, or let the previous winner choose Bat/Bowl.
 - The in-app toss chooses a flipping team, assigns the other team as caller, spins for three seconds, accepts one Heads/Tails call only during the countdown, and reveals only after time ends.
 - A missed timed call can restart the same toss, reset the full start flow, or skip directly to first-batting selection.
 - Optional Wide, No-ball, Bye, Leg bye, Penalty and Free Hit rules configured per match.
-- Individual bowling limits, over-level bowler selection, exhausted-quota blocking and optional consecutive overs.
+- Optional common bowling limit (2, 3 or custom overs per bowler). Optionally let a chosen number of bowlers bowl one extra over, with recipients chosen during play. With limits off, anyone can bowl. Consecutive overs are allowed by default and can be disabled; old saved per-player quotas remain supported.
+- Example: a 9-over innings with four bowlers can use a 2-over limit plus one extra-over bowler: three bowlers bowl 2 overs, and the bowler chosen during play bowls 3.
 - **Last Player Standing** prompt when one batter remains. In solo mode the same batter stays on strike after odd runs and over changes.
 - Live player photos, score/target state, innings break, duplicate-safe automatic prompts, participant Watch mode and controller-device lease.
 - Repeatable one-over, two-wicket **Super Overs** for tied Team Matches, including an explicit finish-as-tie fallback.
