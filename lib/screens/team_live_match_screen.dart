@@ -85,11 +85,7 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     final match = AppScope.read(context).teamMatchById(widget.matchId);
     if (match == null) return;
     if (match.status == TeamMatchStatus.completed) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => TeamMatchSummaryScreen(matchId: match.id),
-        ),
-      );
+      // The store notification rebuilds this route as TeamMatchSummaryScreen.
       return;
     }
     if (match.status == TeamMatchStatus.tieBreak) return;
@@ -524,12 +520,6 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     setState(() => _working = true);
     try {
       await AppScope.read(context).completeTeamMatchAsTie(match.id);
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => TeamMatchSummaryScreen(matchId: match.id),
-        ),
-      );
     } on Object catch (error) {
       _showError(error);
     } finally {

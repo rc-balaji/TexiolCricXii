@@ -219,6 +219,7 @@ class AppStore extends ChangeNotifier {
       activeNotifications.where((value) => !value.read).length;
 
   bool isActiveMatchForPlayer(CricketMatch match, String playerId) {
+    if (match.isPractice) return false;
     if (!match.participantIds.contains(playerId)) return false;
     return switch (match.status) {
       MatchStatus.draft || MatchStatus.drawing || MatchStatus.live => true,
@@ -234,6 +235,7 @@ class AppStore extends ChangeNotifier {
   }
 
   bool isActiveTeamMatchForPlayer(TeamMatch match, String playerId) {
+    if (match.isPractice) return false;
     if (!match.participantIds.contains(playerId)) return false;
     return match.status != TeamMatchStatus.completed;
   }
@@ -760,6 +762,7 @@ class AppStore extends ChangeNotifier {
 
   CricketMatch? matchById(String id) {
     for (final match in matches) {
+      if (match.isPractice) continue;
       if (match.id == id) return match;
     }
     return null;
@@ -767,6 +770,7 @@ class AppStore extends ChangeNotifier {
 
   TeamMatch? teamMatchById(String id) {
     for (final match in teamMatches) {
+      if (match.isPractice) continue;
       if (match.id == id) return match;
     }
     return null;
@@ -1799,6 +1803,7 @@ class AppStore extends ChangeNotifier {
     String? commonJokerPlayerId,
     String? trackerPlayerId,
     String? previousMatchId,
+    bool isPractice = false,
   }) async {
     final creator = activePlayer;
     if (creator == null) throw StateError('Sign in first.');
@@ -1828,10 +1833,13 @@ class AppStore extends ChangeNotifier {
       throw StateError('The selected scorer needs a valid Player ID.');
     }
     final originToken = _ids.eventId();
-    final id = await _reserveUniqueTeamMatchId(
-      creatorPlayerId: creator.id,
-      originToken: originToken,
-    );
+    final id =
+        isPractice
+            ? 'practice-team-${originToken.substring(0, 12)}'
+            : await _reserveUniqueTeamMatchId(
+              creatorPlayerId: creator.id,
+              originToken: originToken,
+            );
     final seriesId = previous?.seriesId ?? id;
     var highestSeriesMatchNumber = 0;
     for (final value in teamMatches) {
@@ -1859,6 +1867,7 @@ class AppStore extends ChangeNotifier {
       controllerUid: firebaseUser?.uid,
       controllerPlayerId: creator.id,
       controllerLeaseUntil: DateTime.now().add(_controlLeaseDuration),
+      isPractice: isPractice,
     );
     TeamScoringEngine.validateSetup(match);
     match.auditTrail.add(
@@ -2288,6 +2297,7 @@ class AppStore extends ChangeNotifier {
     PointRules? pointRules,
     String? pointPresetName,
     bool autoBowlingPlan = true,
+    bool isPractice = false,
   }) async {
     final creator = activePlayer;
     if (creator == null) throw StateError('Create a player profile first.');
@@ -2307,11 +2317,14 @@ class AppStore extends ChangeNotifier {
     final selectedPreset = defaultPointPreset;
     final createdAt = DateTime.now();
     final originToken = _ids.eventId();
-    final matchId = await _reserveUniqueMatchId(
-      creatorPlayerId: creator.id,
-      participantIds: uniqueParticipants,
-      originToken: originToken,
-    );
+    final matchId =
+        isPractice
+            ? 'practice-${originToken.substring(0, 12)}'
+            : await _reserveUniqueMatchId(
+              creatorPlayerId: creator.id,
+              participantIds: uniqueParticipants,
+              originToken: originToken,
+            );
     final match = CricketMatch(
       id: matchId,
       originToken: originToken,
@@ -2334,6 +2347,7 @@ class AppStore extends ChangeNotifier {
       pointRules: pointRules ?? selectedPreset.rules,
       pointPresetName: pointPresetName ?? selectedPreset.name,
       autoBowlingPlan: autoBowlingPlan,
+      isPractice: isPractice,
     );
     _createDrawPool(match);
     match.auditTrail.add(
@@ -2860,8 +2874,16 @@ class AppStore extends ChangeNotifier {
     'activePlayerId': activePlayerId,
     'players': players.map((value) => value.toJson()).toList(),
     'gangs': gangs.map((value) => value.toJson()).toList(),
-    'matches': matches.map((value) => value.toJson()).toList(),
-    'teamMatches': teamMatches.map((value) => value.toJson()).toList(),
+    'matches':
+        matches
+            .where((value) => !value.isPractice)
+            .map((value) => value.toJson())
+            .toList(),
+    'teamMatches':
+        teamMatches
+            .where((value) => !value.isPractice)
+            .map((value) => value.toJson())
+            .toList(),
     'friendRequests': friendRequests.map((value) => value.toJson()).toList(),
     'notifications': notifications.map((value) => value.toJson()).toList(),
     'pointPresets': pointPresets.map((value) => value.toJson()).toList(),
@@ -4620,6 +4642,7 @@ class AppStore extends ChangeNotifier {
   }
 
   void _applyTeamStatsIfComplete(TeamMatch match) {
+    if (match.isPractice) return;
     if (match.status != TeamMatchStatus.completed || match.statsApplied) return;
     final appearances = TeamScoringEngine.appearanceStats(match).values;
     final byPlayer = <String, List<TeamPlayerMatchStats>>{};
@@ -4726,6 +4749,7 @@ class AppStore extends ChangeNotifier {
   }
 
   void _applyStatsIfComplete(CricketMatch match) {
+    if (match.isPractice) return;
     if (match.status != MatchStatus.completed || match.statsApplied) return;
     final stats = ScoringEngine.calculateStats(match);
     for (final entry in stats.entries) {

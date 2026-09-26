@@ -54,56 +54,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _openMatch(BuildContext context, CricketMatch match) {
     final store = AppScope.read(context);
     final canControl = store.canControlMatch(match);
-    final page = !canControl && match.status != MatchStatus.completed
-        ? ParticipantMatchWatchScreen(matchId: match.id)
-        : switch (match.status) {
-            MatchStatus.draft ||
-            MatchStatus.drawing => SecretDrawScreen(matchId: match.id),
-            MatchStatus.live =>
-              match.scoringMode == ScoringMode.ballByBall
-                  ? TrackerScreen(matchId: match.id)
-                  : QuickScoreScreen(matchId: match.id),
-            MatchStatus.completed => MatchSummaryScreen(matchId: match.id),
-          };
+    final page =
+        !canControl && match.status != MatchStatus.completed
+            ? ParticipantMatchWatchScreen(matchId: match.id)
+            : switch (match.status) {
+              MatchStatus.draft ||
+              MatchStatus.drawing => SecretDrawScreen(matchId: match.id),
+              MatchStatus.live =>
+                match.scoringMode == ScoringMode.ballByBall
+                    ? TrackerScreen(matchId: match.id)
+                    : QuickScoreScreen(matchId: match.id),
+              MatchStatus.completed => MatchSummaryScreen(matchId: match.id),
+            };
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
   void _openTeamMatch(BuildContext context, TeamMatch match) {
     final store = AppScope.read(context);
-    final page = !store.canControlTeamMatch(match) &&
-            match.status != TeamMatchStatus.completed
-        ? TeamMatchWatchScreen(matchId: match.id)
-        : switch (match.status) {
-            TeamMatchStatus.toss => TeamTossScreen(matchId: match.id),
-            TeamMatchStatus.live ||
-            TeamMatchStatus.inningsBreak ||
-            TeamMatchStatus.tieBreak =>
-              TeamLiveMatchScreen(matchId: match.id),
-            TeamMatchStatus.completed =>
-              TeamMatchSummaryScreen(matchId: match.id),
-          };
+    final page =
+        !store.canControlTeamMatch(match) &&
+                match.status != TeamMatchStatus.completed
+            ? TeamMatchWatchScreen(matchId: match.id)
+            : switch (match.status) {
+              TeamMatchStatus.toss => TeamTossScreen(matchId: match.id),
+              TeamMatchStatus.live ||
+              TeamMatchStatus.inningsBreak ||
+              TeamMatchStatus
+                  .tieBreak => TeamLiveMatchScreen(matchId: match.id),
+              TeamMatchStatus.completed => TeamMatchSummaryScreen(
+                matchId: match.id,
+              ),
+            };
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
   Future<void> _cancelTeamMatch(BuildContext context, TeamMatch match) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel this Team Match?'),
-        content: Text(
-          '${match.title} and its unfinished innings will be cleared.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep match'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Cancel this Team Match?'),
+            content: Text(
+              '${match.title} and its unfinished innings will be cleared.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep match'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Cancel & clear'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel & clear'),
-          ),
-        ],
-      ),
     );
     if (confirmed != true || !context.mounted) return;
     try {
@@ -125,22 +129,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _cancelMatch(BuildContext context, CricketMatch match) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel this match?'),
-        content: Text(
-          '${match.title} will be cleared from Continue playing. Any unfinished score in this match will be discarded.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep match'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Cancel this match?'),
+            content: Text(
+              '${match.title} will be cleared from Continue playing. Any unfinished score in this match will be discarded.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep match'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Cancel & clear'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel & clear'),
-          ),
-        ],
-      ),
     );
     if (confirmed != true || !context.mounted) return;
     await AppScope.read(context).cancelMatch(match.id);
@@ -159,13 +164,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final activeTeamMatches = store.activeTeamMatches;
     final recent = <_RecentMatchItem>[
       for (final match in store.matches)
-        if (match.status == MatchStatus.completed)
+        if (!match.isPractice && match.status == MatchStatus.completed)
           _RecentMatchItem.singles(match),
       for (final match in store.teamMatches)
-        if (match.status == TeamMatchStatus.completed)
+        if (!match.isPractice && match.status == TeamMatchStatus.completed)
           _RecentMatchItem.team(match),
-    ]
-      ..sort((a, b) => b.when.compareTo(a.when));
+    ]..sort((a, b) => b.when.compareTo(a.when));
     final recentShown = recent.take(5).toList(growable: false);
 
     Widget createCard({
@@ -235,9 +239,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
                 backgroundColor: foreground,
-                foregroundColor: background == AppColors.ink
-                    ? AppColors.ink
-                    : Colors.white,
+                foregroundColor:
+                    background == AppColors.ink ? AppColors.ink : Colors.white,
               ),
               onPressed: onPressed,
               icon: const Icon(Icons.add_rounded),
@@ -254,7 +257,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return Card(
           margin: const EdgeInsets.only(bottom: 9),
           child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 5,
+            ),
             leading: Container(
               width: 42,
               height: 42,
@@ -262,9 +268,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 color: const Color(0xFFE7F8F0),
                 borderRadius: BorderRadius.circular(13),
               ),
-              child: const Icon(Icons.sports_cricket_rounded, color: AppColors.greenDark),
+              child: const Icon(
+                Icons.sports_cricket_rounded,
+                color: AppColors.greenDark,
+              ),
             ),
-            title: Text(singles.title, style: const TextStyle(fontWeight: FontWeight.w900)),
+            title: Text(
+              singles.title,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
             subtitle: Text('Singles • ${_whenLabel(item.when)}'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => _openMatch(context, singles),
@@ -275,7 +287,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return Card(
         margin: const EdgeInsets.only(bottom: 9),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 5,
+          ),
           leading: Container(
             width: 42,
             height: 42,
@@ -285,8 +300,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             child: const Icon(Icons.groups_2_rounded, color: Color(0xFFA56600)),
           ),
-          title: Text(team.title, style: const TextStyle(fontWeight: FontWeight.w900)),
-          subtitle: Text('${team.teamA.name} vs ${team.teamB.name} • ${_whenLabel(item.when)}'),
+          title: Text(
+            team.title,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          subtitle: Text(
+            '${team.teamA.name} vs ${team.teamB.name} • ${_whenLabel(item.when)}',
+          ),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => _openTeamMatch(context, team),
         ),
@@ -326,9 +346,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           player.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
                         ),
                       ),
                     ],
@@ -339,31 +358,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   label: Text('${store.unreadNotificationCount}'),
                   child: IconButton.filledTonal(
                     tooltip: 'Notifications',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-                    ),
+                    onPressed:
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const NotificationsScreen(),
+                          ),
+                        ),
                     icon: const Icon(Icons.notifications_none_rounded),
                   ),
                 ),
                 const SizedBox(width: 6),
                 IconButton.filledTonal(
                   tooltip: 'Player ID',
-                  onPressed: () => showDialog<void>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Your Player ID'),
-                      content: SelectableText(
-                        player.id,
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+                  onPressed:
+                      () => showDialog<void>(
+                        context: context,
+                        builder:
+                            (context) => AlertDialog(
+                              title: const Text('Your Player ID'),
+                              content: SelectableText(
+                                player.id,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('Done'),
+                                ),
+                              ],
+                            ),
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Done'),
-                        ),
-                      ],
-                    ),
-                  ),
                   icon: const Icon(Icons.qr_code_2_rounded),
                 ),
               ],
@@ -372,9 +399,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             Text(
               'Start a match',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -.6,
-                  ),
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.6,
+              ),
             ),
             const SizedBox(height: 5),
             const Text(
@@ -387,26 +414,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 final singles = createCard(
                   eyebrow: 'SINGLES',
                   title: 'Singles Match',
-                  description: 'Secret batting order, Quick Score or ball-by-ball tracking.',
+                  description:
+                      'Secret batting order, Quick Score or ball-by-ball tracking.',
                   icon: Icons.sports_cricket_rounded,
                   background: AppColors.ink,
                   foreground: AppColors.green,
                   buttonLabel: 'Create Singles',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CreateMatchScreen()),
-                  ),
+                  onPressed:
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CreateMatchScreen(),
+                        ),
+                      ),
                 );
                 final team = createCard(
                   eyebrow: 'TEAM',
                   title: 'Team Match',
-                  description: 'Flexible teams, live batter choice, toss and repeatable Super Overs.',
+                  description:
+                      'Flexible teams, live batter choice, toss and repeatable Super Overs.',
                   icon: Icons.groups_2_rounded,
                   background: const Color(0xFFFFF9EB),
                   foreground: const Color(0xFFA56600),
                   buttonLabel: 'Create Team Match',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CreateTeamMatchScreen()),
-                  ),
+                  onPressed:
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CreateTeamMatchScreen(),
+                        ),
+                      ),
                 );
                 if (constraints.maxWidth >= 620) {
                   return Row(
@@ -419,11 +454,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   );
                 }
                 return Column(
-                  children: [
-                    singles,
-                    const SizedBox(height: 12),
-                    team,
-                  ],
+                  children: [singles, const SizedBox(height: 12), team],
                 );
               },
             ),
@@ -445,13 +476,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     child: Column(
                       children: [
                         ListTile(
-                          contentPadding: const EdgeInsets.fromLTRB(14, 12, 8, 7),
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            14,
+                            12,
+                            8,
+                            7,
+                          ),
                           leading: const CircleAvatar(
                             backgroundColor: Color(0xFFE7F8F0),
                             foregroundColor: AppColors.greenDark,
                             child: Icon(Icons.sports_cricket_rounded),
                           ),
-                          title: Text(match.title, style: const TextStyle(fontWeight: FontWeight.w900)),
+                          title: Text(
+                            match.title,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
                           subtitle: Text(
                             store.canControlMatch(match)
                                 ? '${match.scoringMode.label} • ${store.isMatchSynced(match.id) ? 'Synced' : 'Waiting to sync'}'
@@ -467,7 +506,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               onPressed: () => _cancelMatch(context, match),
                               icon: const Icon(Icons.close_rounded),
                               label: const Text('Cancel / clear'),
-                              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.redAccent,
+                              ),
                             ),
                           ),
                       ],
@@ -482,14 +523,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     child: Column(
                       children: [
                         ListTile(
-                          contentPadding: const EdgeInsets.fromLTRB(14, 12, 8, 7),
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            14,
+                            12,
+                            8,
+                            7,
+                          ),
                           leading: const CircleAvatar(
                             backgroundColor: Color(0xFFFFF4D8),
                             foregroundColor: Color(0xFFA56600),
                             child: Icon(Icons.groups_2_rounded),
                           ),
-                          title: Text(match.title, style: const TextStyle(fontWeight: FontWeight.w900)),
-                          subtitle: Text('${match.teamA.name} vs ${match.teamB.name}'),
+                          title: Text(
+                            match.title,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          subtitle: Text(
+                            '${match.teamA.name} vs ${match.teamB.name}',
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -506,7 +557,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               onPressed: () => _cancelTeamMatch(context, match),
                               icon: const Icon(Icons.close_rounded),
                               label: const Text('Cancel / clear'),
-                              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.redAccent,
+                              ),
                             ),
                           ),
                       ],
@@ -541,7 +594,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   String _whenLabel(DateTime value) {
     final now = DateTime.now();
-    final sameDay = value.year == now.year &&
+    final sameDay =
+        value.year == now.year &&
         value.month == now.month &&
         value.day == now.day;
     final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
@@ -550,17 +604,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (sameDay) return 'Today, $time';
     return '${value.day}/${value.month}/${value.year} • $time';
   }
-
 }
 
 class _RecentMatchItem {
   const _RecentMatchItem.singles(CricketMatch value)
-      : singles = value,
-        team = null;
+    : singles = value,
+      team = null;
 
-  const _RecentMatchItem.team(TeamMatch value)
-      : singles = null,
-        team = value;
+  const _RecentMatchItem.team(TeamMatch value) : singles = null, team = value;
 
   final CricketMatch? singles;
   final TeamMatch? team;

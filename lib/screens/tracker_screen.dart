@@ -57,11 +57,7 @@ class _TrackerScreenState extends State<TrackerScreen> {
       if (!mounted) return;
       final match = store.matchById(widget.matchId)!;
       if (match.status == MatchStatus.completed) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => MatchSummaryScreen(matchId: match.id),
-          ),
-        );
+        // The store notification rebuilds this route as MatchSummaryScreen.
         return;
       }
       final next = ScoringEngine.currentBatterId(match);

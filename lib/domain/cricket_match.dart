@@ -204,12 +204,13 @@ class MatchAuditEntry {
     'note': note,
   };
 
-  factory MatchAuditEntry.fromJson(Map<String, dynamic> json) => MatchAuditEntry(
-    type: json['type'] as String,
-    createdAt: DateTime.parse(json['createdAt'] as String),
-    playerId: json['playerId'] as String?,
-    note: json['note'] as String?,
-  );
+  factory MatchAuditEntry.fromJson(Map<String, dynamic> json) =>
+      MatchAuditEntry(
+        type: json['type'] as String,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+        playerId: json['playerId'] as String?,
+        note: json['note'] as String?,
+      );
 }
 
 class ScoreEvent {
@@ -309,6 +310,7 @@ class CricketMatch {
     List<MatchAuditEntry>? auditTrail,
     List<ScoreEvent>? events,
     this.statsApplied = false,
+    this.isPractice = false,
   }) : battingOrder = battingOrder ?? <String>[],
        drawPlayerOrder = drawPlayerOrder ?? <String>[],
        drawPool = drawPool ?? <DrawCard>[],
@@ -350,6 +352,7 @@ class CricketMatch {
   final List<MatchAuditEntry> auditTrail;
   final List<ScoreEvent> events;
   bool statsApplied;
+  final bool isPractice;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -385,6 +388,7 @@ class CricketMatch {
     'auditTrail': auditTrail.map((value) => value.toJson()).toList(),
     'events': events.map((event) => event.toJson()).toList(),
     'statsApplied': statsApplied,
+    'isPractice': isPractice,
   };
 
   factory CricketMatch.fromJson(Map<String, dynamic> json) => CricketMatch(
@@ -396,12 +400,14 @@ class CricketMatch {
     participantIds: List<String>.from(json['participantIds'] as List),
     createdAt: DateTime.parse(json['createdAt'] as String),
     originToken: json['originToken'] as String?,
-    startedAt: json['startedAt'] == null
-        ? null
-        : DateTime.tryParse(json['startedAt'].toString()),
-    completedAt: json['completedAt'] == null
-        ? null
-        : DateTime.tryParse(json['completedAt'].toString()),
+    startedAt:
+        json['startedAt'] == null
+            ? null
+            : DateTime.tryParse(json['startedAt'].toString()),
+    completedAt:
+        json['completedAt'] == null
+            ? null
+            : DateTime.tryParse(json['completedAt'].toString()),
     status: MatchStatus.values.byName(json['status'] as String),
     winnerMetric: MatchWinnerMetric.values.byName(
       json['winnerMetric'] as String? ?? MatchWinnerMetric.overallPoints.name,
@@ -409,9 +415,10 @@ class CricketMatch {
     trackerPlayerId: json['trackerPlayerId'] as String?,
     controllerUid: json['controllerUid'] as String?,
     controllerPlayerId: json['controllerPlayerId'] as String?,
-    controllerLeaseUntil: json['controllerLeaseUntil'] == null
-        ? null
-        : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
+    controllerLeaseUntil:
+        json['controllerLeaseUntil'] == null
+            ? null
+            : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
     revision: json['revision'] as int? ?? 0,
     tieBreakOrder: List<String>.from(
       json['tieBreakOrder'] as List? ?? const [],
@@ -428,45 +435,54 @@ class CricketMatch {
     drawPlayerOrder: List<String>.from(
       json['drawPlayerOrder'] as List? ?? json['participantIds'] as List,
     ),
-    drawPool: (json['drawPool'] as List? ?? const [])
-        .map(
-          (value) => DrawCard.fromJson(Map<String, dynamic>.from(value as Map)),
-        )
-        .toList(),
-    drawAssignments:
-        Map<String, dynamic>.from(
-          json['drawAssignments'] as Map? ?? const {},
-        ).map(
-          (key, value) => MapEntry(
-            key,
-            DrawAssignment.fromJson(Map<String, dynamic>.from(value as Map)),
-          ),
-        ),
-    bowlingPlan: (json['bowlingPlan'] as List? ?? const [])
-        .map(
-          (value) =>
-              BowlingBlock.fromJson(Map<String, dynamic>.from(value as Map)),
-        )
-        .toList(),
-    bowlerChanges: (json['bowlerChanges'] as List? ?? const [])
-        .map(
-          (value) =>
-              BowlerChange.fromJson(Map<String, dynamic>.from(value as Map)),
-        )
-        .toList(),
-    auditTrail: (json['auditTrail'] as List? ?? const [])
-        .map(
-          (value) =>
-              MatchAuditEntry.fromJson(Map<String, dynamic>.from(value as Map)),
-        )
-        .toList(),
-    events: (json['events'] as List? ?? const [])
-        .map(
-          (value) =>
-              ScoreEvent.fromJson(Map<String, dynamic>.from(value as Map)),
-        )
-        .toList(),
+    drawPool:
+        (json['drawPool'] as List? ?? const [])
+            .map(
+              (value) =>
+                  DrawCard.fromJson(Map<String, dynamic>.from(value as Map)),
+            )
+            .toList(),
+    drawAssignments: Map<String, dynamic>.from(
+      json['drawAssignments'] as Map? ?? const {},
+    ).map(
+      (key, value) => MapEntry(
+        key,
+        DrawAssignment.fromJson(Map<String, dynamic>.from(value as Map)),
+      ),
+    ),
+    bowlingPlan:
+        (json['bowlingPlan'] as List? ?? const [])
+            .map(
+              (value) => BowlingBlock.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ),
+            )
+            .toList(),
+    bowlerChanges:
+        (json['bowlerChanges'] as List? ?? const [])
+            .map(
+              (value) => BowlerChange.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ),
+            )
+            .toList(),
+    auditTrail:
+        (json['auditTrail'] as List? ?? const [])
+            .map(
+              (value) => MatchAuditEntry.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ),
+            )
+            .toList(),
+    events:
+        (json['events'] as List? ?? const [])
+            .map(
+              (value) =>
+                  ScoreEvent.fromJson(Map<String, dynamic>.from(value as Map)),
+            )
+            .toList(),
     statsApplied: json['statsApplied'] as bool? ?? false,
+    isPractice: json['isPractice'] as bool? ?? false,
   );
 }
 

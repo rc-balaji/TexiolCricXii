@@ -49,6 +49,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   bool _extraOverEnabled = false;
   bool _jokerEnabled = false;
   bool _customOvers = false;
+  bool _practiceMatch = false;
   PointRules _pointRules = const PointRules();
   String? _jokerId;
   String? _captainA;
@@ -503,6 +504,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
         commonJokerPlayerId: _jokerEnabled ? _jokerId : null,
         trackerPlayerId: _trackerId,
         previousMatchId: widget.templateMatchId,
+        isPractice: _practiceMatch,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -649,6 +651,21 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Warm-up match',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Practice only. It will not sync or appear in saved history.',
+                  ),
+                  value: _practiceMatch,
+                  onChanged:
+                      _saving
+                          ? null
+                          : (value) => setState(() => _practiceMatch = value),
+                ),
                 _sectionTitle(
                   'Choose players',
                   '${_teamA.length} in A · ${_teamB.length} in B',

@@ -31,6 +31,7 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   String _pointPresetId = 'balanced';
   bool _initialized = false;
   bool _busy = false;
+  bool _practiceMatch = false;
 
   @override
   void dispose() {
@@ -54,11 +55,11 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
         ballLimit: _ballLimit,
         participantIds: _selected.toList(),
         winnerMetric: _winnerMetric,
-        trackerPlayerId: _mode == ScoringMode.ballByBall
-            ? _trackerPlayerId
-            : null,
+        trackerPlayerId:
+            _mode == ScoringMode.ballByBall ? _trackerPlayerId : null,
         pointRules: _pointRules,
         pointPresetName: _pointPresetName,
+        isPractice: _practiceMatch,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -77,61 +78,68 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
 
   Future<void> _customOvers() async {
     final controller = TextEditingController(
-      text: _ballLimit % 3 == 0
-          ? (_ballLimit / 6).toString().replaceFirst(RegExp(r'\.0$'), '')
-          : '',
+      text:
+          _ballLimit % 3 == 0
+              ? (_ballLimit / 6).toString().replaceFirst(RegExp(r'\.0$'), '')
+              : '',
     );
     String? validation;
     final value = await showDialog<int>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Overs per player'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (context, setDialogState) => AlertDialog(
+                  title: const Text('Overs per player'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Overs',
+                          hintText: '1.5',
+                          errorText: validation,
+                          helperText:
+                              'CricXii setup: 1.5 overs = 9 legal balls.',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Use whole or half overs: 1, 1.5, 2, 2.5 ...',
+                        style: TextStyle(color: AppColors.muted, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () {
+                        final balls = OversFormat.setupOversToBalls(
+                          controller.text,
+                        );
+                        if (balls == null) {
+                          setDialogState(
+                            () =>
+                                validation = 'Enter whole or half overs only.',
+                          );
+                          return;
+                        }
+                        Navigator.pop(dialogContext, balls);
+                      },
+                      child: const Text('Use overs'),
+                    ),
+                  ],
                 ),
-                decoration: InputDecoration(
-                  labelText: 'Overs',
-                  hintText: '1.5',
-                  errorText: validation,
-                  helperText: 'CricXii setup: 1.5 overs = 9 legal balls.',
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Use whole or half overs: 1, 1.5, 2, 2.5 ...',
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
-            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final balls = OversFormat.setupOversToBalls(controller.text);
-                if (balls == null) {
-                  setDialogState(
-                    () => validation = 'Enter whole or half overs only.',
-                  );
-                  return;
-                }
-                Navigator.pop(dialogContext, balls);
-              },
-              child: const Text('Use overs'),
-            ),
-          ],
-        ),
-      ),
     );
     controller.dispose();
     if (mounted && value != null && value > 0) {
@@ -144,22 +152,23 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
     if (created == null || !mounted) return;
     final addToMatch = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add ${created.player.name} to this match?'),
-        content: const Text(
-          'The account is ready. Add this player to today’s match now?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Not now'),
+      builder:
+          (context) => AlertDialog(
+            title: Text('Add ${created.player.name} to this match?'),
+            content: const Text(
+              'The account is ready. Add this player to today’s match now?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Not now'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Add to match'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add to match'),
-          ),
-        ],
-      ),
     );
     if (addToMatch == true && mounted) {
       setState(() => _selected.add(created.player.id));
@@ -169,7 +178,9 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   Future<void> _editPoints() async {
     final run = TextEditingController(text: '${_pointRules.run}');
     final wicket = TextEditingController(text: '${_pointRules.wicket}');
-    final bowledBonus = TextEditingController(text: '${_pointRules.bowledBonus}');
+    final bowledBonus = TextEditingController(
+      text: '${_pointRules.bowledBonus}',
+    );
     final catchPoint = TextEditingController(text: '${_pointRules.catchPoint}');
     final direct = TextEditingController(text: '${_pointRules.directRunOut}');
     final assist = TextEditingController(text: '${_pointRules.assistedRunOut}');
@@ -181,99 +192,124 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            0,
-            20,
-            MediaQuery.viewInsetsOf(context).bottom + 24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Points rules',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
+      builder:
+          (context) => StatefulBuilder(
+            builder:
+                (context, setSheetState) => Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    0,
+                    20,
+                    MediaQuery.viewInsetsOf(context).bottom + 24,
                   ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Balanced default: wicket 5 + bowled bonus 2, catch 2, direct run-out 3. Match rules lock when play starts.',
-                  style: TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 18),
-                _NumberField(controller: run, label: 'Per run'),
-                _NumberField(controller: wicket, label: 'Wicket'),
-                _NumberField(controller: bowledBonus, label: 'Bowled bonus'),
-                _NumberField(controller: catchPoint, label: 'Catch'),
-                _NumberField(controller: direct, label: 'Direct run out'),
-                _NumberField(
-                  controller: assist,
-                  label: 'Assisted run out (each)',
-                ),
-                _NumberField(controller: stumping, label: 'Stumping'),
-                _NumberField(controller: notOut, label: 'Not-out bonus'),
-                const Divider(height: 26),
-                TextField(
-                  controller: presetName,
-                  textCapitalization: TextCapitalization.words,
-                  onChanged: (_) => setSheetState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Save as preset (optional)',
-                    hintText: 'Weekend Ground Rules',
-                    prefixIcon: Icon(Icons.bookmark_add_outlined),
-                  ),
-                ),
-                if (presetName.text.trim().isNotEmpty)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: makeDefault,
-                    onChanged: (value) =>
-                        setSheetState(() => makeDefault = value),
-                    title: const Text(
-                      'Use as default for new matches',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Points rules',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Balanced default: wicket 5 + bowled bonus 2, catch 2, direct run-out 3. Match rules lock when play starts.',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                        const SizedBox(height: 18),
+                        _NumberField(controller: run, label: 'Per run'),
+                        _NumberField(controller: wicket, label: 'Wicket'),
+                        _NumberField(
+                          controller: bowledBonus,
+                          label: 'Bowled bonus',
+                        ),
+                        _NumberField(controller: catchPoint, label: 'Catch'),
+                        _NumberField(
+                          controller: direct,
+                          label: 'Direct run out',
+                        ),
+                        _NumberField(
+                          controller: assist,
+                          label: 'Assisted run out (each)',
+                        ),
+                        _NumberField(controller: stumping, label: 'Stumping'),
+                        _NumberField(
+                          controller: notOut,
+                          label: 'Not-out bonus',
+                        ),
+                        const Divider(height: 26),
+                        TextField(
+                          controller: presetName,
+                          textCapitalization: TextCapitalization.words,
+                          onChanged: (_) => setSheetState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Save as preset (optional)',
+                            hintText: 'Weekend Ground Rules',
+                            prefixIcon: Icon(Icons.bookmark_add_outlined),
+                          ),
+                        ),
+                        if (presetName.text.trim().isNotEmpty)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: makeDefault,
+                            onChanged:
+                                (value) =>
+                                    setSheetState(() => makeDefault = value),
+                            title: const Text(
+                              'Use as default for new matches',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed: () {
+                            int value(
+                              TextEditingController controller,
+                              int fallback,
+                            ) => int.tryParse(controller.text) ?? fallback;
+                            Navigator.pop(
+                              context,
+                              _PointEditResult(
+                                rules: PointRules(
+                                  run: value(run, _pointRules.run),
+                                  wicket: value(wicket, _pointRules.wicket),
+                                  bowledBonus: value(
+                                    bowledBonus,
+                                    _pointRules.bowledBonus,
+                                  ),
+                                  catchPoint: value(
+                                    catchPoint,
+                                    _pointRules.catchPoint,
+                                  ),
+                                  directRunOut: value(
+                                    direct,
+                                    _pointRules.directRunOut,
+                                  ),
+                                  assistedRunOut: value(
+                                    assist,
+                                    _pointRules.assistedRunOut,
+                                  ),
+                                  stumping: value(
+                                    stumping,
+                                    _pointRules.stumping,
+                                  ),
+                                  notOutBonus: value(
+                                    notOut,
+                                    _pointRules.notOutBonus,
+                                  ),
+                                ),
+                                presetName: presetName.text.trim(),
+                                makeDefault: makeDefault,
+                              ),
+                            );
+                          },
+                          child: const Text('Use these points'),
+                        ),
+                      ],
                     ),
                   ),
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: () {
-                    int value(TextEditingController controller, int fallback) =>
-                        int.tryParse(controller.text) ?? fallback;
-                    Navigator.pop(
-                      context,
-                      _PointEditResult(
-                        rules: PointRules(
-                          run: value(run, _pointRules.run),
-                          wicket: value(wicket, _pointRules.wicket),
-                          bowledBonus: value(
-                            bowledBonus,
-                            _pointRules.bowledBonus,
-                          ),
-                          catchPoint: value(catchPoint, _pointRules.catchPoint),
-                          directRunOut: value(direct, _pointRules.directRunOut),
-                          assistedRunOut: value(
-                            assist,
-                            _pointRules.assistedRunOut,
-                          ),
-                          stumping: value(stumping, _pointRules.stumping),
-                          notOutBonus: value(notOut, _pointRules.notOutBonus),
-                        ),
-                        presetName: presetName.text.trim(),
-                        makeDefault: makeDefault,
-                      ),
-                    );
-                  },
-                  child: const Text('Use these points'),
                 ),
-              ],
-            ),
           ),
-        ),
-      ),
     );
     for (final controller in [
       run,
@@ -330,18 +366,20 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
       _pointPresetName = preset.name;
       _initialized = true;
     }
-    final selectedPlayers = store.visiblePlayers
-        .where((player) => _selected.contains(player.id))
-        .toList();
+    final selectedPlayers =
+        store.visiblePlayers
+            .where((player) => _selected.contains(player.id))
+            .toList();
     final query = _playerSearch.text.trim().toLowerCase();
-    final visiblePlayers = store.visiblePlayers.where((player) {
-      if (query.isEmpty) return true;
-      final gang = store.gangById(player.gangId);
-      return player.name.toLowerCase().contains(query) ||
-          player.id.toLowerCase().contains(query) ||
-          (gang?.name.toLowerCase().contains(query) ?? false) ||
-          (gang?.id.toLowerCase().contains(query) ?? false);
-    }).toList();
+    final visiblePlayers =
+        store.visiblePlayers.where((player) {
+          if (query.isEmpty) return true;
+          final gang = store.gangById(player.gangId);
+          return player.name.toLowerCase().contains(query) ||
+              player.id.toLowerCase().contains(query) ||
+              (gang?.name.toLowerCase().contains(query) ?? false) ||
+              (gang?.id.toLowerCase().contains(query) ?? false);
+        }).toList();
     if (_trackerPlayerId != null && !_selected.contains(_trackerPlayerId)) {
       _trackerPlayerId = null;
     }
@@ -455,45 +493,47 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: const Color(0xFFE1E9E4)),
             ),
-            child: visiblePlayers.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No player matches this search.',
-                      style: TextStyle(color: AppColors.muted),
+            child:
+                visiblePlayers.isEmpty
+                    ? const Center(
+                      child: Text(
+                        'No player matches this search.',
+                        style: TextStyle(color: AppColors.muted),
+                      ),
+                    )
+                    : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      itemCount: visiblePlayers.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final player = visiblePlayers[index];
+                        return CheckboxListTile(
+                          value: _selected.contains(player.id),
+                          onChanged:
+                              player.id == store.activePlayerId
+                                  ? null
+                                  : (value) => setState(() {
+                                    if (value ?? false) {
+                                      _selected.add(player.id);
+                                    } else {
+                                      _selected.remove(player.id);
+                                    }
+                                  }),
+                          secondary: GestureDetector(
+                            onTap: () => openPlayerProfile(context, player.id),
+                            child: PlayerAvatar(player: player),
+                          ),
+                          title: Text(
+                            player.name,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          subtitle: Text(
+                            '${player.id}${player.id == store.activePlayerId ? ' • Creator' : ''}',
+                          ),
+                          controlAffinity: ListTileControlAffinity.trailing,
+                        );
+                      },
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 7),
-                    itemCount: visiblePlayers.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final player = visiblePlayers[index];
-                      return CheckboxListTile(
-                        value: _selected.contains(player.id),
-                        onChanged: player.id == store.activePlayerId
-                            ? null
-                            : (value) => setState(() {
-                                if (value ?? false) {
-                                  _selected.add(player.id);
-                                } else {
-                                  _selected.remove(player.id);
-                                }
-                              }),
-                        secondary: GestureDetector(
-                          onTap: () => openPlayerProfile(context, player.id),
-                          child: PlayerAvatar(player: player),
-                        ),
-                        title: Text(
-                          player.name,
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        subtitle: Text(
-                          '${player.id}${player.id == store.activePlayerId ? ' • Creator' : ''}',
-                        ),
-                        controlAffinity: ListTileControlAffinity.trailing,
-                      );
-                    },
-                  ),
           ),
           if (_mode == ScoringMode.ballByBall &&
               selectedPlayers.isNotEmpty) ...[
@@ -523,6 +563,22 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
             ),
           ],
           const SizedBox(height: 24),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Warm-up match',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: const Text(
+              'Practice only. It will not sync or appear in saved history.',
+            ),
+            value: _practiceMatch,
+            onChanged:
+                _busy
+                    ? null
+                    : (value) => setState(() => _practiceMatch = value),
+          ),
+          const SizedBox(height: 8),
           const SectionLabel('Official winner'),
           const SizedBox(height: 10),
           SegmentedButton<MatchWinnerMetric>(
@@ -540,30 +596,30 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
               ),
             ],
             selected: {_winnerMetric},
-            onSelectionChanged: (value) =>
-                setState(() => _winnerMetric = value.single),
+            onSelectionChanged:
+                (value) => setState(() => _winnerMetric = value.single),
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            initialValue: store.pointPresets.any(
-              (preset) => preset.id == _pointPresetId,
-            )
-                ? _pointPresetId
-                : null,
+            initialValue:
+                store.pointPresets.any((preset) => preset.id == _pointPresetId)
+                    ? _pointPresetId
+                    : null,
             decoration: const InputDecoration(
               labelText: 'Points preset',
               prefixIcon: Icon(Icons.bookmarks_outlined),
             ),
-            items: store.pointPresets
-                .map(
-                  (preset) => DropdownMenuItem(
-                    value: preset.id,
-                    child: Text(
-                      '${preset.name}${preset.id == store.defaultPointPresetId ? ' • Default' : ''}',
-                    ),
-                  ),
-                )
-                .toList(),
+            items:
+                store.pointPresets
+                    .map(
+                      (preset) => DropdownMenuItem(
+                        value: preset.id,
+                        child: Text(
+                          '${preset.name}${preset.id == store.defaultPointPresetId ? ' • Default' : ''}',
+                        ),
+                      ),
+                    )
+                    .toList(),
             onChanged: (value) {
               if (value == null) return;
               final preset = store.pointPresets.firstWhere(
@@ -602,12 +658,13 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
         minimum: const EdgeInsets.fromLTRB(20, 8, 20, 16),
         child: FilledButton.icon(
           onPressed: _busy ? null : _create,
-          icon: _busy
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.casino_rounded),
+          icon:
+              _busy
+                  ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                  : const Icon(Icons.casino_rounded),
           label: const Text('Create match & secret draw'),
         ),
       ),

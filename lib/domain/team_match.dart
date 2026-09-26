@@ -468,6 +468,7 @@ class TeamMatch {
     this.controllerLeaseUntil,
     this.revision = 0,
     this.statsApplied = false,
+    this.isPractice = false,
   }) : seriesId = seriesId ?? id,
        innings = innings ?? <TeamInnings>[],
        auditTrail = auditTrail ?? <MatchAuditEntry>[];
@@ -496,6 +497,7 @@ class TeamMatch {
   DateTime? controllerLeaseUntil;
   int revision;
   bool statsApplied;
+  final bool isPractice;
 
   TeamSide side(String id) => id == teamA.id ? teamA : teamB;
 
@@ -538,6 +540,7 @@ class TeamMatch {
     'controllerLeaseUntil': controllerLeaseUntil?.toIso8601String(),
     'revision': revision,
     'statsApplied': statsApplied,
+    'isPractice': isPractice,
   };
 
   factory TeamMatch.fromJson(Map<String, dynamic> json) => TeamMatch(
@@ -594,6 +597,7 @@ class TeamMatch {
             : DateTime.tryParse(json['controllerLeaseUntil'].toString()),
     revision: json['revision'] as int? ?? 0,
     statsApplied: json['statsApplied'] as bool? ?? false,
+    isPractice: json['isPractice'] as bool? ?? false,
   );
 }
 

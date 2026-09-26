@@ -202,12 +202,8 @@ class _TeamTossScreenState extends State<TeamTossScreen>
         openingStrikerId: _openingStrikerId,
         openingNonStrikerId: _openingNonStrikerId,
       );
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => TeamLiveMatchScreen(matchId: match.id),
-        ),
-      );
+      // The store notification rebuilds this route as TeamLiveMatchScreen.
+      // Do not push a second route after the cloud/local mutation completes.
     } on Object catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

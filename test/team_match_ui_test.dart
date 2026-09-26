@@ -27,6 +27,7 @@ class _TeamStore extends AppStore {
     String? commonJokerPlayerId,
     String? trackerPlayerId,
     String? previousMatchId,
+    bool isPractice = false,
   }) async {
     final match = TeamMatch(
       id: 'created',
@@ -38,6 +39,7 @@ class _TeamStore extends AppStore {
       createdAt: DateTime(2026),
       commonJokerPlayerId: commonJokerPlayerId,
       trackerPlayerId: trackerPlayerId,
+      isPractice: isPractice,
     );
     TeamScoringEngine.validateSetup(match);
     created = match;
