@@ -58,10 +58,9 @@ service cloud.firestore {
       allow read, write: if signedIn() && isCurrentPlayer(playerId);
     }
 
-    // Public player search is exact numeric-ID lookup.
+    // Public player profiles power exact search and the global leaderboard.
     match /players/{playerId} {
-      allow get: if signedIn();
-      allow list: if false;
+      allow get, list: if signedIn();
       allow create: if signedIn() &&
         request.resource.data.playerId == playerId &&
         playerId.matches('^[0-9]{8}$');

@@ -84,6 +84,44 @@ class AppStore extends ChangeNotifier {
   String? _accountEmail;
   final Map<String, Player> _playerIndex = <String, Player>{};
   final List<Player> players = <Player>[];
+  List<Player> _leaderboardPlayers = const <Player>[];
+  bool _leaderboardLoaded = false;
+
+  List<Player> get leaderboardPlayers => _leaderboardPlayers;
+
+  Future<List<Player>> loadLeaderboardPlayers() async {
+    final firestore = _firestore;
+    if (!cloudConnected || firestore == null) {
+      return _leaderboardPlayers.isNotEmpty ? _leaderboardPlayers : players;
+    }
+    try {
+      final snapshot = await firestore.collection('players').get();
+      final loaded = <Player>[];
+      for (final document in snapshot.docs) {
+        try {
+          final data = document.data();
+          final player = Player.fromJson({
+            ...data,
+            'id': document.id,
+            'createdAt':
+                data['joinedAt']?.toString() ?? DateTime.now().toIso8601String(),
+          });
+          if (!player.archived) loaded.add(player);
+        } on Object {
+          // Ignore malformed legacy profiles without hiding valid rows.
+        }
+      }
+      loaded.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+      _leaderboardPlayers = loaded;
+      _leaderboardLoaded = true;
+      notifyListeners();
+      return loaded;
+    } on FirebaseException {
+      return _leaderboardLoaded ? _leaderboardPlayers : players;
+    }
+  }
   final List<Gang> gangs = <Gang>[];
   final List<CricketMatch> matches = <CricketMatch>[];
   final List<TeamMatch> teamMatches = <TeamMatch>[];
@@ -3171,9 +3209,27 @@ class AppStore extends ChangeNotifier {
     if (raw is! Map) return;
     for (final entry in raw.entries) {
       final playerId = entry.key.toString();
-      if (playerById(playerId) != null || entry.value is! Map) continue;
+      if (entry.value is! Map) continue;
       try {
         final snapshot = Map<String, dynamic>.from(entry.value as Map);
+        final existing = playerById(playerId);
+        if (existing != null) {
+          final stats = snapshot['stats'];
+          final teamStats = snapshot['teamStats'];
+          _mergeStatsAtLeast(
+            existing.stats,
+            stats is Map
+                ? PlayerStats.fromJson(Map<String, dynamic>.from(stats))
+                : null,
+          );
+          _mergeStatsAtLeast(
+            existing.teamStats,
+            teamStats is Map
+                ? PlayerStats.fromJson(Map<String, dynamic>.from(teamStats))
+                : null,
+          );
+          continue;
+        }
         // Legacy shared documents may contain a custom source URL from older
         // builds. Never hydrate or persist that private URL on another device.
         snapshot['avatarUrl'] = null;
@@ -3186,6 +3242,23 @@ class AppStore extends ChangeNotifier {
         // A bad historical snapshot must not block the match itself.
       }
     }
+
+  }
+
+  void _mergeStatsAtLeast(PlayerStats target, PlayerStats? incoming) {
+    if (incoming == null) return;
+    target
+      ..matches = max(target.matches, incoming.matches)
+      ..runs = max(target.runs, incoming.runs)
+      ..balls = max(target.balls, incoming.balls)
+      ..outs = max(target.outs, incoming.outs)
+      ..wickets = max(target.wickets, incoming.wickets)
+      ..catches = max(target.catches, incoming.catches)
+      ..directRunOuts = max(target.directRunOuts, incoming.directRunOuts)
+      ..assistedRunOuts = max(target.assistedRunOuts, incoming.assistedRunOuts)
+      ..stumpings = max(target.stumpings, incoming.stumpings)
+      ..points = max(target.points, incoming.points)
+      ..wins = max(target.wins, incoming.wins);
   }
 
   DateTime _matchActivityAt(CricketMatch match) {
