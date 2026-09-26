@@ -29,7 +29,7 @@ class CreateTeamMatchScreen extends StatefulWidget {
 class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   final _title = TextEditingController();
   final _search = TextEditingController();
-  final _overs = TextEditingController(text: '5');
+  final _overs = TextEditingController(text: '4');
   final _limitOvers = TextEditingController(text: '2');
   final _extraBowlers = TextEditingController(text: '1');
   final _teamAName = TextEditingController(text: 'Team A');
@@ -48,6 +48,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   bool _limitEnabled = false;
   bool _extraOverEnabled = false;
   bool _jokerEnabled = false;
+  bool _customOvers = false;
   PointRules _pointRules = const PointRules();
   String? _jokerId;
   String? _captainA;
@@ -95,6 +96,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     if (template == null) return;
     final rules = template.rules;
     _overs.text = '${rules.ballLimit ~/ rules.ballsPerOver}';
+    _customOvers =
+        !const [4, 6, 8].contains(rules.ballLimit ~/ rules.ballsPerOver);
     _teamAName.text = template.teamA.name;
     _teamBName.text = template.teamB.name;
     _teamA.addAll(template.teamA.playerIds);
@@ -204,52 +207,159 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
   }
 
   Future<void> _showTeamPreview() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final store = AppScope.read(context);
     await showDialog<void>(
       context: context,
       builder:
-          (context) => AlertDialog(
-            title: const Text('Team preview'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: ListView(
-                shrinkWrap: true,
+          (context) => Dialog.fullscreen(
+            child: Scaffold(
+              backgroundColor: const Color(0xFF10151C),
+              appBar: AppBar(
+                backgroundColor: const Color(0xFF10151C),
+                foregroundColor: Colors.white,
+                title: const Text(
+                  'TEAM PREVIEW',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+                actions: [
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              body: SafeArea(
+                top: false,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final teams = [
+                      _previewPanel(
+                        '1',
+                        _teamAName.text,
+                        _teamA,
+                        store,
+                        const Color(0xFF1E596D),
+                      ),
+                      _previewPanel(
+                        '2',
+                        _teamBName.text,
+                        _teamB,
+                        store,
+                        const Color(0xFF686B16),
+                      ),
+                    ];
+                    if (constraints.maxWidth < 620) {
+                      return ListView(
+                        padding: const EdgeInsets.fromLTRB(10, 4, 10, 18),
+                        children: [
+                          teams[0],
+                          const SizedBox(height: 12),
+                          teams[1],
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: teams[0]),
+                        const SizedBox(width: 10),
+                        Expanded(child: teams[1]),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+    );
+    if (mounted) {
+      FocusScope.of(context).unfocus();
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+  }
+
+  Widget _previewPanel(
+    String serial,
+    String name,
+    List<String> ids,
+    AppStore store,
+    Color headerColor,
+  ) => Container(
+    decoration: BoxDecoration(
+      color: const Color(0xFF1B202A),
+      border: Border.all(color: const Color(0xFF343B47)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          color: headerColor,
+          child: Text(
+            '$serial  ${name.toUpperCase()}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              letterSpacing: .7,
+            ),
+          ),
+        ),
+        if (ids.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text(
+              'No players selected',
+              style: TextStyle(color: Colors.white70),
+            ),
+          )
+        else
+          for (var index = 0; index < ids.length; index++)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color:
+                    index.isEven
+                        ? const Color(0xFF292D38)
+                        : const Color(0xFF232731),
+                border: const Border(
+                  bottom: BorderSide(color: Color(0xFF11151B)),
+                ),
+              ),
+              child: Row(
                 children: [
-                  _previewList('1. ${_teamAName.text}', _teamA, store),
-                  const SizedBox(height: 16),
-                  _previewList('2. ${_teamBName.text}', _teamB, store),
+                  SizedBox(
+                    width: 28,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      store.playerById(ids[index])?.name ?? ids[index],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-    );
-  }
-
-  Widget _previewList(String title, List<String> ids, AppStore store) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-      const SizedBox(height: 6),
-      if (ids.isEmpty)
-        const Text(
-          'No players selected',
-          style: TextStyle(color: AppColors.muted),
-        )
-      else
-        for (var index = 0; index < ids.length; index++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '${index + 1}. ${store.playerById(ids[index])?.name ?? ids[index]}',
-            ),
-          ),
-    ],
+      ],
+    ),
   );
 
   Future<void> _easyCreatePlayer() async {
@@ -468,7 +578,7 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
           Expanded(
             child: ListView(
               key: const ValueKey('team-match-setup-scroll'),
-              cacheExtent: 10000,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
               children: [
                 Text(
@@ -485,33 +595,58 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                 const SizedBox(height: 18),
                 TextField(
                   controller: _title,
+                  onTapOutside:
+                      (_) => FocusManager.instance.primaryFocus?.unfocus(),
                   decoration: const InputDecoration(labelText: 'Match title'),
                 ),
                 const SizedBox(height: 12),
-                Row(
+                const Text(
+                  'Overs per innings',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _overs,
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: 'Overs per innings',
-                          suffixText: 'ov',
-                        ),
+                    for (final value in [4, 6, 8])
+                      ChoiceChip(
+                        label: Text('$value overs'),
+                        selected: !_customOvers && _oversValue == value,
+                        onSelected:
+                            (_) => setState(() {
+                              _customOvers = false;
+                              _overs.text = '$value';
+                            }),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '${_selectedIds.length} players selected\n${_jokerId == null ? 'Two teams' : 'Shared Joker active'}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.greenDark,
-                        ),
-                      ),
+                    ChoiceChip(
+                      label: const Text('Custom'),
+                      selected: _customOvers,
+                      onSelected: (_) => setState(() => _customOvers = true),
                     ),
                   ],
+                ),
+                if (_customOvers) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _overs,
+                    keyboardType: TextInputType.number,
+                    onTapOutside:
+                        (_) => FocusManager.instance.primaryFocus?.unfocus(),
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Custom overs',
+                      suffixText: 'ov',
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text(
+                  '${_selectedIds.length} players selected\n${_jokerId == null ? 'Two teams' : 'Shared Joker active'}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.greenDark,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 _sectionTitle(
@@ -537,6 +672,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
                 ),
                 TextField(
                   controller: _search,
+                  onTapOutside:
+                      (_) => FocusManager.instance.primaryFocus?.unfocus(),
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Search players',
@@ -847,6 +984,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
             TextField(
               controller: _limitOvers,
               keyboardType: TextInputType.number,
+              onTapOutside:
+                  (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 labelText: 'Maximum overs per bowler',
@@ -863,6 +1002,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
               TextField(
                 controller: _extraBowlers,
                 keyboardType: TextInputType.number,
+                onTapOutside:
+                    (_) => FocusManager.instance.primaryFocus?.unfocus(),
                 onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   labelText: 'How many bowlers per team?',
