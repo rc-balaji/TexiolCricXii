@@ -2,7 +2,9 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../data/app_store.dart';
 import '../domain/cricket_match.dart';
+import '../domain/enums.dart';
 import '../domain/player.dart';
 import '../domain/team_match.dart';
 import '../theme/app_theme.dart';
@@ -167,6 +169,152 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
           ? 'B'
           : null;
 
+  Future<void> _editTeamName(
+    String team,
+    TextEditingController controller,
+  ) async {
+    final editor = TextEditingController(text: controller.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Edit Team $team name'),
+            content: TextField(
+              controller: editor,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Team name'),
+              onSubmitted: (value) => Navigator.pop(context, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, editor.text.trim()),
+                child: const Text('Confirm'),
+              ),
+            ],
+          ),
+    );
+    editor.dispose();
+    if (!mounted || result == null || result.trim().isEmpty) return;
+    setState(() => controller.text = result.trim());
+  }
+
+  Future<void> _showTeamPreview() async {
+    final store = AppScope.read(context);
+    await showDialog<void>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Team preview'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  _previewList('1. ${_teamAName.text}', _teamA, store),
+                  const SizedBox(height: 16),
+                  _previewList('2. ${_teamBName.text}', _teamB, store),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Widget _previewList(String title, List<String> ids, AppStore store) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+      const SizedBox(height: 6),
+      if (ids.isEmpty)
+        const Text(
+          'No players selected',
+          style: TextStyle(color: AppColors.muted),
+        )
+      else
+        for (var index = 0; index < ids.length; index++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '${index + 1}. ${store.playerById(ids[index])?.name ?? ids[index]}',
+            ),
+          ),
+    ],
+  );
+
+  Future<void> _easyCreatePlayer() async {
+    final nameController = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Easy create player'),
+            content: TextField(
+              controller: nameController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Player name'),
+              onSubmitted: (value) => Navigator.pop(context, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed:
+                    () => Navigator.pop(context, nameController.text.trim()),
+                child: const Text('Create'),
+              ),
+            ],
+          ),
+    );
+    nameController.dispose();
+    if (!mounted || name == null || name.trim().length < 2) return;
+    setState(() => _saving = true);
+    try {
+      final slug = name
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s+'), '_')
+          .replaceAll(RegExp(r'[^a-z0-9_]'), '');
+      final email =
+          '$slug.${DateTime.now().millisecondsSinceEpoch}@cricxii.app';
+      final created = await AppScope.read(context).registerManagedPlayerAccount(
+        name: name.trim(),
+        email: email,
+        password: '12345678',
+        battingStyle: BattingStyle.rightHanded,
+        avatarPreset: 1,
+      );
+      if (!mounted) return;
+      _assign(created.player.id, 'A');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${created.player.name} created and added to Team A'),
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error'.replaceFirst('Bad state: ', ''))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   String? _validate() {
     if (_teamA.length < 2 || _teamB.length < 2)
       return 'Add at least two players to each team. A shared Joker can play for both.';
@@ -314,274 +462,327 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
           ),
         ),
       ),
-      body: ListView(
-        key: const ValueKey('team-match-setup-scroll'),
-        cacheExtent: 10000,
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+      body: Column(
         children: [
-          Text(
-            'Your match, all in one place',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'Build both teams below. Choose the opening batters after the toss.',
-            style: TextStyle(color: AppColors.muted),
-          ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Match title'),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _overs,
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Overs per innings',
-                    suffixText: 'ov',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '${_selectedIds.length} players selected\n${_jokerId == null ? 'Two teams' : 'Shared Joker active'}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.greenDark,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final cards = [
-                _teamPreview('A', _teamAName, _teamA, const Color(0xFF19C37D)),
-                _teamPreview('B', _teamBName, _teamB, const Color(0xFF7C5CFC)),
-              ];
-              if (constraints.maxWidth < 360)
-                return Column(
-                  children: [cards[0], const SizedBox(height: 10), cards[1]],
-                );
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: cards[0]),
-                  const SizedBox(width: 10),
-                  Expanded(child: cards[1]),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          _sectionTitle(
-            'Choose players',
-            '${_teamA.length} in A · ${_teamB.length} in B',
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Tap A or B to add or move a player. Tap the selected team again to remove.',
-            style: TextStyle(color: AppColors.muted),
-          ),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Shared Joker',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-            subtitle: const Text('Optional player who plays for both teams'),
-            value: _jokerEnabled,
-            onChanged: _setJoker,
-          ),
-          TextField(
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Search players',
-              prefixIcon: Icon(Icons.search_rounded),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (filtered.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(18),
-              child: Text(
-                'No players found. Try another search, or add a player from your Gang.',
-              ),
-            )
-          else
-            ListView.builder(
-              primary: false,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: filtered.length,
-              itemBuilder: (context, index) {
-                final player = filtered[index];
-                final assignment = _assignment(player.id);
-                return Card(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            PlayerAvatar(player: player, radius: 16),
-                            const SizedBox(width: 9),
-                            Expanded(
-                              child: Text(
-                                player.name,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 5,
-                          children: [
-                            for (final team in [
-                              'A',
-                              'B',
-                              if (_jokerEnabled) 'J',
-                            ])
-                              ChoiceChip(
-                                key: ValueKey('assign-${player.id}-$team'),
-                                label: Text(team == 'J' ? 'Joker' : team),
-                                showCheckmark: false,
-                                selected: assignment == team,
-                                onSelected:
-                                    (selected) => _assign(
-                                      player.id,
-                                      selected ? team : null,
-                                    ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          const SizedBox(height: 20),
-          _bowlingRules(),
-          const SizedBox(height: 12),
-          Card(
-            child: ExpansionTile(
-              title: const Text(
-                'Extras & match rules',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                '${_wide ? 'Wides' : 'No wides'} · ${_noBall ? 'No-balls' : 'No no-balls'}',
-              ),
-              childrenPadding: const EdgeInsets.symmetric(horizontal: 16),
+          _fixedTeamSummary(),
+          Expanded(
+            child: ListView(
+              key: const ValueKey('team-match-setup-scroll'),
+              cacheExtent: 10000,
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
               children: [
-                _rule('Wide', _wide, (v) => _wide = v),
-                _rule('No-ball', _noBall, (v) => _noBall = v),
-                if (_noBall)
-                  _rule(
-                    'Free hit after no-ball',
-                    _freeHit,
-                    (v) => _freeHit = v,
-                  ),
-                _rule('Bye', _bye, (v) => _bye = v),
-                _rule('Leg bye', _legBye, (v) => _legBye = v),
-                _rule('Manual penalty extras', _penalty, (v) => _penalty = v),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 16),
-                  child: Text(
-                    'Points and awards are enabled. When one batter remains, choose to continue solo or end the innings.',
-                    style: TextStyle(color: AppColors.muted),
+                Text(
+                  'Your match, all in one place',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-              ],
-            ),
-          ),
-          Card(
-            child: ExpansionTile(
-              title: const Text(
-                'Roles & scorer',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: const Text('Optional captain, keeper and scorer'),
-              childrenPadding: const EdgeInsets.all(16),
-              children: [
-                _roleSelectors(
-                  _teamAName.text,
-                  _teamA,
-                  _captainA,
-                  _keeperA,
-                  (v) => _captainA = v,
-                  (v) => _keeperA = v,
+                const SizedBox(height: 5),
+                const Text(
+                  'Build both teams below. Choose the opening batters after the toss.',
+                  style: TextStyle(color: AppColors.muted),
                 ),
                 const SizedBox(height: 18),
-                _roleSelectors(
-                  _teamBName.text,
-                  _teamB,
-                  _captainB,
-                  _keeperB,
-                  (v) => _captainB = v,
-                  (v) => _keeperB = v,
+                TextField(
+                  controller: _title,
+                  decoration: const InputDecoration(labelText: 'Match title'),
                 ),
-                const SizedBox(height: 18),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('scorer-$_trackerId-${_selectedIds.join(',')}'),
-                  initialValue: _trackerId ?? '',
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Scorer / tracker',
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('Host scores'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _overs,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'Overs per innings',
+                          suffixText: 'ov',
+                        ),
+                      ),
                     ),
-                    ...selectedPlayers.map(
-                      (player) => DropdownMenuItem(
-                        value: player.id,
-                        child: Text(
-                          player.name,
-                          overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '${_selectedIds.length} players selected\n${_jokerId == null ? 'Two teams' : 'Shared Joker active'}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.greenDark,
                         ),
                       ),
                     ),
                   ],
-                  onChanged:
-                      (v) => setState(() => _trackerId = v == '' ? null : v),
                 ),
+                const SizedBox(height: 20),
+                _sectionTitle(
+                  'Choose players',
+                  '${_teamA.length} in A · ${_teamB.length} in B',
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Tap A or B to add or move a player. Tap the selected team again to remove.',
+                  style: TextStyle(color: AppColors.muted),
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Shared Joker',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Optional player who plays for both teams',
+                  ),
+                  value: _jokerEnabled,
+                  onChanged: _setJoker,
+                ),
+                TextField(
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Search players',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _easyCreatePlayer,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Easy create player'),
+                ),
+                const SizedBox(height: 8),
+                if (filtered.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(18),
+                    child: Text(
+                      'No players found. Try another search, or add a player from your Gang.',
+                    ),
+                  )
+                else
+                  ListView.builder(
+                    primary: false,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: filtered.length,
+                    itemBuilder: (context, index) {
+                      final player = filtered[index];
+                      final assignment = _assignment(player.id);
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  PlayerAvatar(player: player, radius: 16),
+                                  const SizedBox(width: 9),
+                                  Expanded(
+                                    child: Text(
+                                      player.name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 5,
+                                children: [
+                                  for (final team in [
+                                    'A',
+                                    'B',
+                                    if (_jokerEnabled) 'J',
+                                  ])
+                                    ChoiceChip(
+                                      key: ValueKey(
+                                        'assign-${player.id}-$team',
+                                      ),
+                                      label: Text(team == 'J' ? 'Joker' : team),
+                                      showCheckmark: false,
+                                      selected: assignment == team,
+                                      onSelected:
+                                          (selected) => _assign(
+                                            player.id,
+                                            selected ? team : null,
+                                          ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 20),
+                _bowlingRules(),
+                const SizedBox(height: 12),
+                Card(
+                  child: ExpansionTile(
+                    title: const Text(
+                      'Extras & match rules',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: Text(
+                      '${_wide ? 'Wides' : 'No wides'} · ${_noBall ? 'No-balls' : 'No no-balls'}',
+                    ),
+                    childrenPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
+                      _rule('Wide', _wide, (v) => _wide = v),
+                      _rule('No-ball', _noBall, (v) => _noBall = v),
+                      if (_noBall)
+                        _rule(
+                          'Free hit after no-ball',
+                          _freeHit,
+                          (v) => _freeHit = v,
+                        ),
+                      _rule('Bye', _bye, (v) => _bye = v),
+                      _rule('Leg bye', _legBye, (v) => _legBye = v),
+                      _rule(
+                        'Manual penalty extras',
+                        _penalty,
+                        (v) => _penalty = v,
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: Text(
+                          'Points and awards are enabled. When one batter remains, choose to continue solo or end the innings.',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Card(
+                  child: ExpansionTile(
+                    title: const Text(
+                      'Roles & scorer',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: const Text('Optional captain, keeper and scorer'),
+                    childrenPadding: const EdgeInsets.all(16),
+                    children: [
+                      _roleSelectors(
+                        _teamAName.text,
+                        _teamA,
+                        _captainA,
+                        _keeperA,
+                        (v) => _captainA = v,
+                        (v) => _keeperA = v,
+                      ),
+                      const SizedBox(height: 18),
+                      _roleSelectors(
+                        _teamBName.text,
+                        _teamB,
+                        _captainB,
+                        _keeperB,
+                        (v) => _captainB = v,
+                        (v) => _keeperB = v,
+                      ),
+                      const SizedBox(height: 18),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(
+                          'scorer-$_trackerId-${_selectedIds.join(',')}',
+                        ),
+                        initialValue: _trackerId ?? '',
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Scorer / tracker',
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('Host scores'),
+                          ),
+                          ...selectedPlayers.map(
+                            (player) => DropdownMenuItem(
+                              value: player.id,
+                              child: Text(
+                                player.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged:
+                            (v) =>
+                                setState(() => _trackerId = v == '' ? null : v),
+                      ),
+                    ],
+                  ),
+                ),
+                if (widget.templateMatchId != null)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      'This match continues the same series and its awards.',
+                      style: TextStyle(color: AppColors.greenDark),
+                    ),
+                  ),
               ],
             ),
           ),
-          if (widget.templateMatchId != null)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text(
-                'This match continues the same series and its awards.',
-                style: TextStyle(color: AppColors.greenDark),
-              ),
-            ),
         ],
       ),
     );
   }
+
+  Widget _fixedTeamSummary() => Material(
+    color: Theme.of(context).scaffoldBackgroundColor,
+    child: SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 4,
+                    children: [
+                      _teamSummary('A', _teamAName.text, _teamA.length),
+                      _teamSummary('B', _teamBName.text, _teamB.length),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Edit Team A',
+                  onPressed: () => _editTeamName('A', _teamAName),
+                  icon: const Icon(Icons.edit_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Edit Team B',
+                  onPressed: () => _editTeamName('B', _teamBName),
+                  icon: const Icon(Icons.edit_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Preview teams',
+                  onPressed: _showTeamPreview,
+                  icon: const Icon(Icons.preview_rounded),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _teamSummary(String team, String name, int count) => Text(
+    '$team: $name ($count)',
+    style: const TextStyle(fontWeight: FontWeight.w900),
+  );
 
   Widget _sectionTitle(String title, String detail) => Wrap(
     alignment: WrapAlignment.spaceBetween,
@@ -595,71 +796,6 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       Text(detail, style: const TextStyle(color: AppColors.muted)),
     ],
   );
-
-  Widget _teamPreview(
-    String team,
-    TextEditingController name,
-    List<String> ids,
-    Color color,
-  ) {
-    final store = AppScope.read(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .07),
-        border: Border.all(color: color.withValues(alpha: .35)),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: name,
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(fontWeight: FontWeight.w900),
-            decoration: InputDecoration(
-              labelText: 'Team $team name',
-              isDense: true,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '${ids.length} players',
-            style: TextStyle(color: color, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 8),
-          if (ids.isEmpty)
-            const Text(
-              'Add players below',
-              style: TextStyle(color: AppColors.muted),
-            ),
-          for (final id in ids)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Row(
-                children: [
-                  Icon(
-                    id == _jokerId
-                        ? Icons.style_rounded
-                        : Icons.person_outline_rounded,
-                    size: 15,
-                    color: color,
-                  ),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      store.playerById(id)?.name ?? id,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 
   Widget _rule(String label, bool value, ValueChanged<bool> onChanged) =>
       SwitchListTile.adaptive(
