@@ -62,6 +62,18 @@ class _AuthScreenState extends State<AuthScreen> {
     return text.startsWith('Bad state: ') ? text.substring(11) : text;
   }
 
+  Future<void> _forgotPassword() async {
+    final reset = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ForgotPasswordDialog(initialEmail: _email.text),
+    );
+    if (reset == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password updated. Sign in with your new password.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
@@ -200,6 +212,15 @@ class _AuthScreenState extends State<AuthScreen> {
                     if (!_registering && !_busy) _submit();
                   },
                 ),
+                if (!_registering) ...[
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _busy ? null : _forgotPassword,
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
+                ],
                 if (_registering) ...[
                   const SizedBox(height: 16),
                   DropdownButtonFormField<BattingStyle>(
@@ -302,5 +323,173 @@ class _AuthScreenState extends State<AuthScreen> {
         ],
       ),
     ),
+  );
+}
+
+class _ForgotPasswordDialog extends StatefulWidget {
+  const _ForgotPasswordDialog({required this.initialEmail});
+
+  final String initialEmail;
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  final _email = TextEditingController();
+  final _playerId = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirmPassword = TextEditingController();
+  bool _identityVerified = false;
+  bool _busy = false;
+  bool _hidePasswords = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _email.text = widget.initialEmail.trim();
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _playerId.dispose();
+    _newPassword.dispose();
+    _confirmPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _verifyIdentity() async {
+    final email = _email.text.trim();
+    final playerId = _playerId.text.trim();
+    if (!email.contains('@') || !RegExp(r'^\d{8}$').hasMatch(playerId)) {
+      _showError('Enter a valid email and 8-digit Player ID.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).verifyPasswordResetIdentity(
+        email: email,
+        playerId: playerId,
+      );
+      if (mounted) setState(() => _identityVerified = true);
+    } on Object catch (error) {
+      _showError(_cleanError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _updatePassword() async {
+    final password = _newPassword.text;
+    if (password.length < 8) {
+      _showError('Use at least 8 characters for your new password.');
+      return;
+    }
+    if (password != _confirmPassword.text) {
+      _showError('Passwords do not match.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await AppScope.read(context).resetPasswordWithPlayerId(
+        email: _email.text.trim(),
+        playerId: _playerId.text.trim(),
+        newPassword: password,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on Object catch (error) {
+      _showError(_cleanError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _cleanError(Object error) {
+    final text = '$error';
+    return text.startsWith('Bad state: ') ? text.substring(11) : text;
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(_identityVerified ? 'Set a new password' : 'Forgot password?'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!_identityVerified) ...[
+            const Text('Confirm your account using its email and Player ID.'),
+            const SizedBox(height: 8),
+            const Text(
+              'Anyone who knows both can reset this password.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _playerId,
+              keyboardType: TextInputType.number,
+              maxLength: 8,
+              decoration: const InputDecoration(labelText: 'Player ID'),
+            ),
+          ] else ...[
+            TextField(
+              controller: _newPassword,
+              obscureText: _hidePasswords,
+              autofillHints: const [AutofillHints.newPassword],
+              decoration: InputDecoration(
+                labelText: 'New password',
+                suffixIcon: IconButton(
+                  onPressed: () =>
+                      setState(() => _hidePasswords = !_hidePasswords),
+                  icon: Icon(
+                    _hidePasswords
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _confirmPassword,
+              obscureText: _hidePasswords,
+              decoration: const InputDecoration(labelText: 'Confirm password'),
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _busy
+            ? null
+            : _identityVerified
+            ? _updatePassword
+            : _verifyIdentity,
+        child: _busy
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text(_identityVerified ? 'Update password' : 'Confirm'),
+      ),
+    ],
   );
 }

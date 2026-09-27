@@ -650,6 +650,71 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> verifyPasswordResetIdentity({
+    required String email,
+    required String playerId,
+  }) async {
+    if (_accountSignedIn) throw StateError('Sign out before resetting a password.');
+    await _ensureAnonymousSession();
+    final firestore = _firestore;
+    if (!firebaseEnabled || firestore == null || firebaseUser == null) {
+      throw StateError('Firebase is unavailable.');
+    }
+    final cleanEmail = _normalizeEmail(email);
+    final cleanPlayerId = playerId.trim();
+    if (!RegExp(r'^\d{8}$').hasMatch(cleanPlayerId)) {
+      throw StateError('Email and Player ID do not match.');
+    }
+    final credential = await firestore
+        .collection('loginCredentials')
+        .doc(_emailKey(cleanEmail))
+        .get();
+    final data = credential.data();
+    if (data == null ||
+        _normalizeEmail(data['email']?.toString() ?? '') != cleanEmail ||
+        data['playerId']?.toString() != cleanPlayerId) {
+      throw StateError('Email and Player ID do not match.');
+    }
+  }
+
+  Future<void> resetPasswordWithPlayerId({
+    required String email,
+    required String playerId,
+    required String newPassword,
+  }) async {
+    if (_accountSignedIn) throw StateError('Sign out before resetting a password.');
+    if (newPassword.length < 8) {
+      throw StateError('New password must contain at least 8 characters.');
+    }
+    await verifyPasswordResetIdentity(email: email, playerId: playerId);
+    final firestore = _firestore!;
+    final user = firebaseUser!;
+    final cleanEmail = _normalizeEmail(email);
+    final cleanPlayerId = playerId.trim();
+    final credentialRef = firestore
+        .collection('loginCredentials')
+        .doc(_emailKey(cleanEmail));
+    final credential = await credentialRef.get();
+    final data = credential.data();
+    if (data == null ||
+        data['playerId']?.toString() != cleanPlayerId ||
+        _normalizeEmail(data['email']?.toString() ?? '') != cleanEmail) {
+      throw StateError('Email and Player ID do not match.');
+    }
+
+    await _bindCurrentSession(cleanPlayerId);
+    final salt = _newPasswordSalt();
+    try {
+      await credentialRef.update({
+        'passwordSalt': salt,
+        'passwordVerifier': _passwordVerifier(newPassword, salt),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } finally {
+      await firestore.collection('sessions').doc(user.uid).delete();
+    }
+  }
+
   Future<CreatedPlayer> registerManagedPlayerAccount({
     required String name,
     required String email,
