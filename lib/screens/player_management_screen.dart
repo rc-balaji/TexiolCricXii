@@ -89,7 +89,7 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
           const ScreenTitle(
             title: 'Known players',
             subtitle:
-                'Each added player gets a separate CricXii email/password account and numeric Player ID. They edit their own profile after signing in.',
+                'Create a player with only their name. CricXii generates a unique Easy Login name and uses the default password 12345678.',
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -98,7 +98,7 @@ class _PlayerManagementScreenState extends State<PlayerManagementScreen> {
               if (mounted) setState(() {});
             },
             icon: const Icon(Icons.person_add_alt_1_rounded),
-            label: const Text('Create another player account'),
+            label: const Text('Create player with Easy Login'),
           ),
           const SizedBox(height: 12),
           TextField(

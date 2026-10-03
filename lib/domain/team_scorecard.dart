@@ -176,16 +176,17 @@ class TeamScorecardBuilder {
         stats['$teamId:$playerId'] ??
         TeamPlayerMatchStats(playerId: playerId, teamId: teamId);
 
-    final appeared = <String>{};
+    final appeared = <String>{
+      innings.openingStrikerId,
+      if (innings.openingNonStrikerId != null) innings.openingNonStrikerId!,
+    };
     for (final event in innings.events) {
       appeared.add(event.strikerId);
       if (event.nonStrikerId != null) appeared.add(event.nonStrikerId!);
       if (event.dismissedPlayerId != null) appeared.add(event.dismissedPlayerId!);
     }
-    if (innings.events.isNotEmpty) {
-      appeared.add(innings.strikerId);
-      if (innings.nonStrikerId != null) appeared.add(innings.nonStrikerId!);
-    }
+    if (innings.strikerId.isNotEmpty) appeared.add(innings.strikerId);
+    if (innings.nonStrikerId != null) appeared.add(innings.nonStrikerId!);
     appeared.addAll(innings.nextBatterByWicketSequence.values);
 
     final batters = <TeamScorecardBatterRow>[];

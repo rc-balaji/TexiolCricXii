@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../domain/enums.dart';
 import '../domain/player.dart';
 import '../domain/team_match.dart';
+import '../domain/team_scorecard.dart';
 import '../domain/team_scoring_engine.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_scope.dart';
@@ -330,6 +331,209 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
       _showError(error);
     } finally {
       _nextBatterSheetOpen = false;
+    }
+  }
+
+  Future<void> _swapBatters(TeamMatch match) async {
+    if (_working) return;
+    setState(() => _working = true);
+    try {
+      await AppScope.read(context).swapTeamBatters(match.id);
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _chooseReplacementBatter(TeamMatch match) async {
+    final innings = match.currentInnings;
+    if (_working || innings == null) return;
+    final available = TeamScoringEngine.availableNextBatters(match, innings);
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No available batter to bring in.')),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<_BatterChange>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final store = AppScope.read(context);
+        var replaceStriker = true;
+        return StatefulBuilder(
+          builder:
+              (context, setSheetState) => SafeArea(
+                child: SizedBox(
+                  height: min(620.0, MediaQuery.sizeOf(context).height * .78),
+                  child: Column(
+                    children: [
+                      const ListTile(
+                        leading: CircleAvatar(
+                          child: Icon(Icons.swap_horiz_rounded),
+                        ),
+                        title: Text(
+                          'Change batter',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          'The player leaving the crease remains not out and can return later.',
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: SegmentedButton<bool>(
+                          segments: [
+                            const ButtonSegment(
+                              value: true,
+                              label: Text('Striker'),
+                            ),
+                            ButtonSegment(
+                              value: false,
+                              label: Text(
+                                innings.nonStrikerId == null
+                                    ? 'No non-striker'
+                                    : 'Non-striker',
+                              ),
+                              enabled: innings.nonStrikerId != null,
+                            ),
+                          ],
+                          selected: {replaceStriker},
+                          onSelectionChanged:
+                              (values) => setSheetState(
+                                () => replaceStriker = values.first,
+                              ),
+                        ),
+                      ),
+                      const Divider(height: 20),
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: available.length,
+                          itemBuilder: (context, index) {
+                            final id = available[index];
+                            final player = store.playerById(id);
+                            return Card(
+                              child: ListTile(
+                                leading:
+                                    player == null
+                                        ? const CircleAvatar(
+                                          child: Icon(Icons.person),
+                                        )
+                                        : PlayerAvatar(
+                                          player: player,
+                                          radius: 20,
+                                        ),
+                                title: Text(
+                                  player?.name ?? id,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                subtitle: const Text('Available • not out'),
+                                onTap:
+                                    () => Navigator.pop(
+                                      context,
+                                      _BatterChange(
+                                        replaceStriker: replaceStriker,
+                                        playerId: id,
+                                      ),
+                                    ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+        );
+      },
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _working = true);
+    try {
+      await AppScope.read(context).replaceTeamBatter(
+        match.id,
+        replaceStriker: selected.replaceStriker,
+        playerId: selected.playerId,
+      );
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _managePlayers(TeamMatch match) async {
+    if (_working) return;
+    final innings = match.currentInnings;
+    if (innings == null) return;
+    final choice = await showModalBottomSheet<_LivePlayerChoice>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder:
+          (_) => _LivePlayerPickerSheet(
+            match: match,
+            initialTeamId: innings.battingTeamId,
+          ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice.newPlayerName != null) {
+      await _createAndAddLivePlayer(
+        match,
+        choice.teamId,
+        choice.newPlayerName!,
+      );
+      return;
+    }
+    await _addLivePlayer(match, choice.teamId, choice.playerId!);
+  }
+
+  Future<void> _createAndAddLivePlayer(
+    TeamMatch match,
+    String teamId,
+    String name,
+  ) async {
+    if (_working) return;
+    setState(() => _working = true);
+    try {
+      final store = AppScope.read(context);
+      final created = await store.createPlayerForLiveTeamMatch(
+        match.id,
+        teamId: teamId,
+        name: name,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${created.name} created and added to the team.')),
+        );
+      }
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _addLivePlayer(
+    TeamMatch match,
+    String teamId,
+    String playerId,
+  ) async {
+    if (_working) return;
+    setState(() => _working = true);
+    try {
+      await AppScope.read(
+        context,
+      ).addPlayerToLiveTeamMatch(match.id, teamId: teamId, playerId: playerId);
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
     }
   }
 
@@ -834,8 +1038,6 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
     final freeHit = TeamScoringEngine.isFreeHitDelivery(match, innings);
     final battingPromptPending =
         innings.awaitingNextBatter || innings.awaitingSoloDecision;
-    final recent = innings.events.reversed.take(12).toList().reversed.toList();
-
     final anyPromptOpen =
         _nextBatterSheetOpen || _soloDialogOpen || _bowlerSheetOpen || _working;
     if (!anyPromptOpen && innings.awaitingNextBatter) {
@@ -859,9 +1061,14 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
             onSelected: (value) {
               if (value == 'quota') _editQuotas(match);
               if (value == 'end') _endInnings(match);
+              if (value == 'players') _managePlayers(match);
             },
             itemBuilder:
                 (_) => [
+                  const PopupMenuItem(
+                    value: 'players',
+                    child: Text('Add players'),
+                  ),
                   if (match.rules.maxOversPerBowler == null &&
                       match
                           .side(innings.bowlingTeamId)
@@ -878,6 +1085,7 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
         ],
       ),
       body: ListView(
+        key: const ValueKey('team-live-match-scroll'),
         padding: const EdgeInsets.fromLTRB(18, 6, 18, 34),
         children: [
           Container(
@@ -948,6 +1156,10 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
               ],
             ),
           ),
+          _buildOverTracker(match, innings),
+          const SizedBox(height: 10),
+          _buildLiveScorecard(match, innings),
+          const SizedBox(height: 10),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -980,6 +1192,35 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
                       !_working && _canChooseBowler(match, innings)
                           ? () => _chooseBowler(match)
                           : null,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed:
+                      _working ||
+                              battingPromptPending ||
+                              innings.soloMode ||
+                              innings.nonStrikerId == null
+                          ? null
+                          : () => _swapBatters(match),
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Swap ends'),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed:
+                      _working || battingPromptPending
+                          ? null
+                          : () => _chooseReplacementBatter(match),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Change batter'),
                 ),
               ),
             ],
@@ -1075,33 +1316,306 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
               label: const Text('Choose bowler to continue'),
             ),
           ],
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Recent balls',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverTracker(TeamMatch match, TeamInnings innings) {
+    final ballsPerOver = match.rules.ballsPerOver;
+    final eventsByOver = <int, List<TeamDeliveryEvent>>{};
+    var legalBallsSeen = 0;
+    for (final event in innings.events) {
+      final over = legalBallsSeen ~/ ballsPerOver;
+      eventsByOver.putIfAbsent(over, () => <TeamDeliveryEvent>[]).add(event);
+      if (event.legalBall) legalBallsSeen++;
+    }
+    int runsIn(int over) => (eventsByOver[over] ?? const <TeamDeliveryEvent>[])
+        .fold<int>(0, (total, event) => total + event.totalRuns);
+    final currentOver = TeamScoringEngine.currentOver(match, innings);
+    final previousOver = currentOver - 1;
+    final shownOvers = [
+      if (currentOver >= 0) currentOver,
+      if (previousOver >= 0) previousOver,
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Recent balls • over by over',
+                    style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),
-              ),
-              Text(
-                '${innings.events.length} events',
-                style: const TextStyle(color: AppColors.muted),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (recent.isEmpty)
-            const Card(
-              child: ListTile(title: Text('Score the first ball to begin.')),
-            )
-          else
+                Text(
+                  '${innings.events.length} events',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: recent.map((event) => _BallChip(event: event)).toList(),
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _OverRunBadge(label: 'This over', runs: runsIn(currentOver)),
+                if (previousOver >= 0)
+                  _OverRunBadge(
+                    label: 'Previous over',
+                    runs: runsIn(previousOver),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (innings.events.isEmpty)
+              const Text(
+                'Score the first ball to begin.',
+                style: TextStyle(color: AppColors.muted),
+              )
+            else
+              for (final over in shownOvers) ...[
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 58,
+                      child: Text(
+                        'Over ${over + 1}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child:
+                          (eventsByOver[over] ?? const <TeamDeliveryEvent>[])
+                                  .isEmpty
+                              ? const Text(
+                                'No balls yet',
+                                style: TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 12,
+                                ),
+                              )
+                              : Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children:
+                                    eventsByOver[over]!
+                                        .map((event) => _BallChip(event: event))
+                                        .toList(),
+                              ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${runsIn(over)} runs',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                if (over != shownOvers.last) const Divider(height: 20),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLiveScorecard(TeamMatch match, TeamInnings innings) {
+    final store = AppScope.read(context);
+    final data = TeamScorecardBuilder.build(match, innings);
+    final activeBatters = {innings.strikerId, innings.nonStrikerId};
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: const Icon(Icons.scoreboard_rounded),
+        title: const Text(
+          'Live scorecard',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+          '${match.side(innings.battingTeamId).name} ${data.total}/${data.wickets} '
+          '(${data.overs} ov) • RR ${data.runRate.toStringAsFixed(2)}',
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        children: [
+          const Divider(height: 1),
+          const Padding(
+            padding: EdgeInsets.only(top: 10, bottom: 4),
+            child: Row(
+              children: [
+                Expanded(child: Text('BATTER', style: _scorecardHeading)),
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    'R',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    'B',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+                SizedBox(
+                  width: 56,
+                  child: Text(
+                    'SR',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final batter in data.batters)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${activeBatters.contains(batter.playerId) ? '• ' : ''}'
+                      '${store.playerById(batter.playerId)?.name ?? batter.playerId}'
+                      '  ${batter.dismissal.text((id) => store.playerById(id)?.name ?? id)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 42,
+                    child: Text(
+                      '${batter.runs}',
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 42,
+                    child: Text('${batter.balls}', textAlign: TextAlign.end),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      batter.strikeRate.toStringAsFixed(1),
+                      textAlign: TextAlign.end,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (data.yetToBat.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Yet to bat: ${data.yetToBat.map((id) => store.playerById(id)?.name ?? id).join(', ')}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+            ),
+          if (data.bowlers.isNotEmpty) ...[
+            const Divider(height: 20),
+            const Row(
+              children: [
+                Expanded(child: Text('BOWLER', style: _scorecardHeading)),
+                SizedBox(
+                  width: 46,
+                  child: Text(
+                    'O',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+                SizedBox(
+                  width: 46,
+                  child: Text(
+                    'R',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+                SizedBox(
+                  width: 46,
+                  child: Text(
+                    'W',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+                SizedBox(
+                  width: 50,
+                  child: Text(
+                    'ECO',
+                    textAlign: TextAlign.end,
+                    style: _scorecardHeading,
+                  ),
+                ),
+              ],
+            ),
+            for (final bowler in data.bowlers)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        store.playerById(bowler.playerId)?.name ??
+                            bowler.playerId,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 46,
+                      child: Text(bowler.overs, textAlign: TextAlign.end),
+                    ),
+                    SizedBox(
+                      width: 46,
+                      child: Text('${bowler.runs}', textAlign: TextAlign.end),
+                    ),
+                    SizedBox(
+                      width: 46,
+                      child: Text(
+                        '${bowler.wickets}',
+                        textAlign: TextAlign.end,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 50,
+                      child: Text(
+                        bowler.economy.toStringAsFixed(1),
+                        textAlign: TextAlign.end,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          const Divider(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Extras ${data.extras} (${data.extrasBreakdown}) • '
+              'Total ${data.total}/${data.wickets}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            ),
             ),
         ],
       ),
@@ -1214,6 +1728,245 @@ class _TeamLiveMatchScreenState extends State<TeamLiveMatchScreen> {
       ),
     );
   }
+}
+
+const _scorecardHeading = TextStyle(
+  color: AppColors.muted,
+  fontSize: 10,
+  fontWeight: FontWeight.w900,
+);
+
+class _LivePlayerChoice {
+  const _LivePlayerChoice({
+    required this.teamId,
+    this.playerId,
+    this.newPlayerName,
+  });
+
+  final String teamId;
+  final String? playerId;
+  final String? newPlayerName;
+}
+
+class _LivePlayerPickerSheet extends StatefulWidget {
+  const _LivePlayerPickerSheet({
+    required this.match,
+    required this.initialTeamId,
+  });
+
+  final TeamMatch match;
+  final String initialTeamId;
+
+  @override
+  State<_LivePlayerPickerSheet> createState() => _LivePlayerPickerSheetState();
+}
+
+class _LivePlayerPickerSheetState extends State<_LivePlayerPickerSheet> {
+  final _query = TextEditingController();
+  late String _teamId = widget.initialTeamId;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createPlayer() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CreateLivePlayerDialog(),
+    );
+    if (name == null || !mounted) return;
+    Navigator.pop(
+      context,
+      _LivePlayerChoice(teamId: _teamId, newPlayerName: name),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppScope.read(context);
+    final term = _query.text.trim().toLowerCase();
+    final assignedIds = {
+      ...widget.match.teamA.playerIds,
+      ...widget.match.teamB.playerIds,
+    };
+    final players =
+        store.visiblePlayers
+            .where(
+              (player) =>
+                  !assignedIds.contains(player.id) &&
+                  (term.isEmpty ||
+                      player.name.toLowerCase().contains(term) ||
+                      player.id.toLowerCase().contains(term)),
+            )
+            .toList()
+          ..sort(
+            (left, right) =>
+                left.name.toLowerCase().compareTo(right.name.toLowerCase()),
+          );
+
+    return SafeArea(
+      child: SizedBox(
+        height: min(680.0, MediaQuery.sizeOf(context).height * .84),
+        child: Column(
+          children: [
+            const ListTile(
+              leading: CircleAvatar(child: Icon(Icons.group_add_rounded)),
+              title: Text(
+                'Add player to live match',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text(
+                'Added players join this team roster and can bat or bowl.',
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: widget.match.teamA.id,
+                    label: Text(widget.match.teamA.name),
+                  ),
+                  ButtonSegment(
+                    value: widget.match.teamB.id,
+                    label: Text(widget.match.teamB.name),
+                  ),
+                ],
+                selected: {_teamId},
+                onSelectionChanged:
+                    (values) => setState(() => _teamId = values.first),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                controller: _query,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Search players',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+              ),
+            ),
+            Expanded(
+              child:
+                  players.isEmpty
+                      ? const Center(child: Text('No available players found.'))
+                      : ListView.builder(
+                        itemCount: players.length,
+                        itemBuilder: (context, index) {
+                          final player = players[index];
+                          return ListTile(
+                            leading: PlayerAvatar(player: player, radius: 20),
+                            title: Text(player.name),
+                            subtitle: Text(player.id),
+                            trailing: const Icon(
+                              Icons.add_circle_outline_rounded,
+                            ),
+                            onTap:
+                                () => Navigator.pop(
+                                  context,
+                                  _LivePlayerChoice(
+                                    teamId: _teamId,
+                                    playerId: player.id,
+                                  ),
+                                ),
+                          );
+                        },
+                      ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _createPlayer,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Create new player'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateLivePlayerDialog extends StatefulWidget {
+  const _CreateLivePlayerDialog();
+
+  @override
+  State<_CreateLivePlayerDialog> createState() =>
+      _CreateLivePlayerDialogState();
+}
+
+class _CreateLivePlayerDialogState extends State<_CreateLivePlayerDialog> {
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Create player'),
+    content: TextField(
+      controller: _name,
+      autofocus: true,
+      textCapitalization: TextCapitalization.words,
+      onChanged: (_) => setState(() {}),
+      decoration: const InputDecoration(labelText: 'Player name'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed:
+            _name.text.trim().length < 2
+                ? null
+                : () => Navigator.pop(context, _name.text.trim()),
+        child: const Text('Create'),
+      ),
+    ],
+  );
+}
+
+class _BatterChange {
+  const _BatterChange({required this.replaceStriker, required this.playerId});
+
+  final bool replaceStriker;
+  final String playerId;
+}
+
+class _OverRunBadge extends StatelessWidget {
+  const _OverRunBadge({required this.label, required this.runs});
+
+  final String label;
+  final int runs;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    decoration: BoxDecoration(
+      color: const Color(0xFFE7F8F0),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      '$label: $runs runs',
+      style: const TextStyle(
+        color: AppColors.greenDark,
+        fontSize: 12,
+        fontWeight: FontWeight.w900,
+      ),
+    ),
+  );
 }
 
 class _DeliveryInput {

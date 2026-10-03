@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/id_generator.dart';
+import '../core/easy_login.dart';
 import '../domain/cricket_match.dart';
 import '../domain/daily_performance.dart';
 import '../domain/enums.dart';
@@ -37,6 +38,8 @@ class CreatedPlayer {
   final Player player;
   final String loginEmail;
 }
+
+class _LoginNameCollision implements Exception {}
 
 class AppStore extends ChangeNotifier {
   AppStore({IdGenerator? ids, this.firebaseEnabled = false})
@@ -104,7 +107,8 @@ class AppStore extends ChangeNotifier {
             ...data,
             'id': document.id,
             'createdAt':
-                data['joinedAt']?.toString() ?? DateTime.now().toIso8601String(),
+                data['joinedAt']?.toString() ??
+                DateTime.now().toIso8601String(),
           });
           if (!player.archived) loaded.add(player);
         } on Object {
@@ -122,6 +126,7 @@ class AppStore extends ChangeNotifier {
       return _leaderboardLoaded ? _leaderboardPlayers : players;
     }
   }
+
   final List<Gang> gangs = <Gang>[];
   final List<CricketMatch> matches = <CricketMatch>[];
   final List<TeamMatch> teamMatches = <TeamMatch>[];
@@ -506,6 +511,7 @@ class AppStore extends ChangeNotifier {
     required BattingStyle battingStyle,
     required int avatarPreset,
     bool bindToCurrentSession = false,
+    bool allowEmailCollision = false,
   }) async {
     if (!firebaseEnabled || _firestore == null || firebaseUser == null) {
       throw StateError('Connect Firebase and enable Anonymous sign-in first.');
@@ -532,7 +538,7 @@ class AppStore extends ChangeNotifier {
         await firestore.runTransaction((transaction) async {
           final credential = await transaction.get(credentialRef);
           if (credential.exists) {
-            throw StateError('An account already uses this email.');
+            throw _LoginNameCollision();
           }
           final collision = await transaction.get(playerRef);
           if (collision.exists) throw _PlayerIdCollision();
@@ -571,6 +577,9 @@ class AppStore extends ChangeNotifier {
         return player;
       } on _PlayerIdCollision {
         continue;
+      } on _LoginNameCollision {
+        if (allowEmailCollision) rethrow;
+        throw StateError('An account already uses this email.');
       }
     }
     throw StateError('Could not generate a unique Player ID. Try again.');
@@ -654,7 +663,8 @@ class AppStore extends ChangeNotifier {
     required String email,
     required String playerId,
   }) async {
-    if (_accountSignedIn) throw StateError('Sign out before resetting a password.');
+    if (_accountSignedIn)
+      throw StateError('Sign out before resetting a password.');
     await _ensureAnonymousSession();
     final firestore = _firestore;
     if (!firebaseEnabled || firestore == null || firebaseUser == null) {
@@ -665,10 +675,11 @@ class AppStore extends ChangeNotifier {
     if (!RegExp(r'^\d{8}$').hasMatch(cleanPlayerId)) {
       throw StateError('Email and Player ID do not match.');
     }
-    final credential = await firestore
-        .collection('loginCredentials')
-        .doc(_emailKey(cleanEmail))
-        .get();
+    final credential =
+        await firestore
+            .collection('loginCredentials')
+            .doc(_emailKey(cleanEmail))
+            .get();
     final data = credential.data();
     if (data == null ||
         _normalizeEmail(data['email']?.toString() ?? '') != cleanEmail ||
@@ -682,7 +693,8 @@ class AppStore extends ChangeNotifier {
     required String playerId,
     required String newPassword,
   }) async {
-    if (_accountSignedIn) throw StateError('Sign out before resetting a password.');
+    if (_accountSignedIn)
+      throw StateError('Sign out before resetting a password.');
     if (newPassword.length < 8) {
       throw StateError('New password must contain at least 8 characters.');
     }
@@ -733,6 +745,53 @@ class AppStore extends ChangeNotifier {
     _addOrReplacePlayer(player);
     await _commit();
     return CreatedPlayer(player: player, loginEmail: loginEmail);
+  }
+
+  Future<CreatedPlayer> createEasyPlayerAccount({
+    required String name,
+    BattingStyle battingStyle = BattingStyle.rightHanded,
+    int avatarPreset = 1,
+  }) async {
+    final username = easyLoginUsername(name);
+    final firestore = _firestore;
+    if (!firebaseEnabled || firestore == null || firebaseUser == null) {
+      throw StateError('Connect Firebase and enable Anonymous sign-in first.');
+    }
+
+    final suffixStart = Random.secure().nextInt(10000);
+    for (var attempt = 0; attempt <= 10000; attempt++) {
+      final suffix =
+          attempt == 0
+              ? ''
+              : ((suffixStart + attempt - 1) % 10000).toString().padLeft(
+                4,
+                '0',
+              );
+      final email = '$username$suffix@gmail.com';
+      final credential =
+          await firestore
+              .collection('loginCredentials')
+              .doc(_emailKey(email))
+              .get();
+      if (credential.exists) continue;
+      try {
+        final player = await _createAccountRecord(
+          name: name,
+          email: email,
+          password: easyLoginPassword,
+          battingStyle: battingStyle,
+          avatarPreset: avatarPreset,
+          allowEmailCollision: true,
+        );
+        final loginEmail = _normalizeEmail(email);
+        _addOrReplacePlayer(player);
+        await _commit();
+        return CreatedPlayer(player: player, loginEmail: loginEmail);
+      } on _LoginNameCollision {
+        continue;
+      }
+    }
+    throw StateError('Could not find a unique easy-login name. Try again.');
   }
 
   Future<void> changeAccountPassword({
@@ -2111,6 +2170,142 @@ class AppStore extends ChangeNotifier {
     await _commit();
   }
 
+  Future<void> addPlayerToLiveTeamMatch(
+    String matchId, {
+    required String teamId,
+    required String playerId,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.status != TeamMatchStatus.live) {
+      throw StateError('The Team Match is not live.');
+    }
+    await _requireTeamMatchScorer(match);
+    final side =
+        teamId == match.teamA.id
+            ? match.teamA
+            : teamId == match.teamB.id
+            ? match.teamB
+            : throw StateError('Choose a team in this match.');
+    if (playerById(playerId) == null) throw StateError('Player not found.');
+    if (side.playerIds.contains(playerId)) {
+      throw StateError('That player is already on ${side.name}.');
+    }
+    if (match.otherSide(teamId).playerIds.contains(playerId)) {
+      throw StateError('A player cannot be added to both teams.');
+    }
+    side.playerIds.add(playerId);
+    side.battingOrder.add(playerId);
+    if (match.rules.maxOversPerBowler == null &&
+        side.bowlingQuotaBalls.isNotEmpty) {
+      side.bowlingQuotaBalls[playerId] = match.rules.ballLimit;
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_player_added_live',
+        playerId: playerId,
+        createdAt: DateTime.now(),
+        note: teamId,
+      ),
+    );
+    await _commit();
+  }
+
+  Future<Player> createPlayerForLiveTeamMatch(
+    String matchId, {
+    required String teamId,
+    required String name,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.status != TeamMatchStatus.live) {
+      throw StateError('The Team Match is not live.');
+    }
+    await _requireTeamMatchScorer(match);
+    final side =
+        teamId == match.teamA.id
+            ? match.teamA
+            : teamId == match.teamB.id
+            ? match.teamB
+            : throw StateError('Choose a team in this match.');
+    final cleanName = name.trim();
+    if (cleanName.length < 2) {
+      throw StateError('Player name must contain at least two characters.');
+    }
+    String? playerId;
+    for (var attempt = 0; attempt < 15; attempt++) {
+      final candidate = _ids.playerId();
+      if (playerById(candidate) == null) {
+        playerId = candidate;
+        break;
+      }
+    }
+    if (playerId == null) {
+      throw StateError('Could not generate a unique Player ID. Try again.');
+    }
+    final player = Player(
+      id: playerId,
+      name: cleanName,
+      avatarColor: _avatarColors[players.length % _avatarColors.length],
+      createdAt: DateTime.now(),
+    );
+    _addOrReplacePlayer(player);
+    side.playerIds.add(player.id);
+    side.battingOrder.add(player.id);
+    if (match.rules.maxOversPerBowler == null &&
+        side.bowlingQuotaBalls.isNotEmpty) {
+      side.bowlingQuotaBalls[player.id] = match.rules.ballLimit;
+    }
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_player_created_live',
+        playerId: player.id,
+        createdAt: DateTime.now(),
+        note: teamId,
+      ),
+    );
+    await _commit();
+    return player;
+  }
+
+  Future<void> swapTeamBatters(String matchId) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.currentInnings == null) {
+      throw StateError('Live Team Match not found.');
+    }
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.swapBatters(match, match.currentInnings!);
+    match.auditTrail.add(
+      MatchAuditEntry(type: 'team_batters_swapped', createdAt: DateTime.now()),
+    );
+    await _commit();
+  }
+
+  Future<void> replaceTeamBatter(
+    String matchId, {
+    required bool replaceStriker,
+    required String playerId,
+  }) async {
+    final match = teamMatchById(matchId);
+    if (match == null || match.currentInnings == null) {
+      throw StateError('Live Team Match not found.');
+    }
+    await _requireTeamMatchScorer(match);
+    TeamScoringEngine.replaceBatter(
+      match,
+      match.currentInnings!,
+      replaceStriker: replaceStriker,
+      playerId: playerId,
+    );
+    match.auditTrail.add(
+      MatchAuditEntry(
+        type: 'team_batter_replaced',
+        playerId: playerId,
+        createdAt: DateTime.now(),
+        note: replaceStriker ? 'striker' : 'nonStriker',
+      ),
+    );
+    await _commit();
+  }
+
   Future<void> selectTeamBowler(String matchId, String bowlerId) async {
     final match = teamMatchById(matchId);
     if (match == null || match.currentInnings == null) {
@@ -3307,7 +3502,6 @@ class AppStore extends ChangeNotifier {
         // A bad historical snapshot must not block the match itself.
       }
     }
-
   }
 
   void _mergeStatsAtLeast(PlayerStats target, PlayerStats? incoming) {

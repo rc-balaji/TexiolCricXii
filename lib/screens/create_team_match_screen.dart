@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../core/easy_login.dart';
 import '../domain/cricket_match.dart';
 import '../domain/enums.dart';
 import '../domain/player.dart';
@@ -394,17 +395,8 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
     if (!mounted || name == null || name.trim().length < 2) return;
     setState(() => _saving = true);
     try {
-      final slug = name
-          .trim()
-          .toLowerCase()
-          .replaceAll(RegExp(r'\s+'), '_')
-          .replaceAll(RegExp(r'[^a-z0-9_]'), '');
-      final email =
-          '$slug.${DateTime.now().millisecondsSinceEpoch}@cricxii.app';
-      final created = await AppScope.read(context).registerManagedPlayerAccount(
+      final created = await AppScope.read(context).createEasyPlayerAccount(
         name: name.trim(),
-        email: email,
-        password: '12345678',
         battingStyle: BattingStyle.rightHanded,
         avatarPreset: 1,
       );
@@ -412,7 +404,10 @@ class _CreateTeamMatchScreenState extends State<CreateTeamMatchScreen> {
       _assign(created.player.id, 'A');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${created.player.name} created and added to Team A'),
+          content: Text(
+            '${created.player.name} added to Team A. Easy login: '
+            '${created.loginEmail.split('@').first} / $easyLoginPassword',
+          ),
         ),
       );
     } on Object catch (error) {

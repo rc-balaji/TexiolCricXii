@@ -807,6 +807,44 @@ class TeamScoringEngine {
     _applySelectedNextBatter(innings, playerId, persistChoice: true);
   }
 
+  static void swapBatters(TeamMatch match, TeamInnings innings) {
+    if (match.status != TeamMatchStatus.live ||
+        innings.completed ||
+        innings.awaitingNextBatter ||
+        innings.awaitingSoloDecision ||
+        innings.soloMode ||
+        innings.nonStrikerId == null) {
+      throw StateError('The batters cannot be swapped right now.');
+    }
+    _swapBatters(innings);
+  }
+
+  static void replaceBatter(
+    TeamMatch match,
+    TeamInnings innings, {
+    required bool replaceStriker,
+    required String playerId,
+  }) {
+    if (match.status != TeamMatchStatus.live ||
+        innings.completed ||
+        innings.awaitingNextBatter ||
+        innings.awaitingSoloDecision) {
+      throw StateError('A batter cannot be changed right now.');
+    }
+    if (!availableNextBatters(match, innings).contains(playerId)) {
+      throw StateError(
+        'Choose a batter from this team who is not out or currently batting.',
+      );
+    }
+    if (replaceStriker) {
+      innings.strikerId = playerId;
+    } else if (innings.nonStrikerId != null) {
+      innings.nonStrikerId = playerId;
+    } else {
+      throw StateError('There is no non-striker to replace.');
+    }
+  }
+
   static void _applySelectedNextBatter(
     TeamInnings innings,
     String playerId, {

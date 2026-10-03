@@ -99,6 +99,62 @@ class _TeamStore extends AppStore {
     TeamScoringEngine.selectNextBatter(match, match.currentInnings!, playerId);
     notifyListeners();
   }
+
+  @override
+  Future<void> swapTeamBatters(String matchId) async {
+    final match = teamMatchById(matchId)!;
+    TeamScoringEngine.swapBatters(match, match.currentInnings!);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> replaceTeamBatter(
+    String matchId, {
+    required bool replaceStriker,
+    required String playerId,
+  }) async {
+    final match = teamMatchById(matchId)!;
+    TeamScoringEngine.replaceBatter(
+      match,
+      match.currentInnings!,
+      replaceStriker: replaceStriker,
+      playerId: playerId,
+    );
+    notifyListeners();
+  }
+
+  @override
+  Future<void> addPlayerToLiveTeamMatch(
+    String matchId, {
+    required String teamId,
+    required String playerId,
+  }) async {
+    final match = teamMatchById(matchId)!;
+    final side = match.side(teamId);
+    side.playerIds.add(playerId);
+    side.battingOrder.add(playerId);
+    notifyListeners();
+  }
+
+  @override
+  Future<Player> createPlayerForLiveTeamMatch(
+    String matchId, {
+    required String teamId,
+    required String name,
+  }) async {
+    final player = Player(
+      id: 'live-player',
+      name: name,
+      avatarColor: 0xFF19C37D,
+      createdAt: DateTime(2026),
+    );
+    players.add(player);
+    final side = teamMatchById(matchId)!.side(teamId);
+    side.playerIds.add(player.id);
+    side.battingOrder.add(player.id);
+    notifyListeners();
+    return player;
+  }
 }
 
 _TeamStore _store() {
@@ -152,8 +208,10 @@ Future<void> _visible(
     await tester.ensureVisible(finder);
   else {
     final list = find.byKey(const ValueKey('team-match-setup-scroll'));
+    final liveList = find.byKey(const ValueKey('team-live-match-scroll'));
+    final scrollable = liveList.evaluate().isNotEmpty ? liveList : list;
     for (var attempt = 0; attempt < 6 && finder.evaluate().isEmpty; attempt++) {
-      await tester.drag(list, const Offset(0, 240));
+      await tester.drag(scrollable, const Offset(0, 240));
       await tester.pumpAndSettle();
     }
     for (
@@ -161,7 +219,7 @@ Future<void> _visible(
       attempt < 12 && finder.evaluate().isEmpty;
       attempt++
     ) {
-      await tester.drag(list, const Offset(0, -240));
+      await tester.drag(scrollable, const Offset(0, -240));
       await tester.pumpAndSettle();
     }
     if (finder.evaluate().isNotEmpty) await tester.ensureVisible(finder);
@@ -361,4 +419,114 @@ void main() {
       },
     );
   }
+
+  testWidgets('live match exposes over scorecard and batter controls', (
+    tester,
+  ) async {
+    final store = _store();
+    final match =
+        _match()
+          ..toss = TeamToss(
+            createdAt: DateTime(2026),
+            mode: TeamTossMode.skipped,
+            firstBattingTeamId: 'A',
+          );
+    TeamScoringEngine.startFirstInnings(
+      match,
+      openingBowlerId: 'b1',
+      openingStrikerId: 'a1',
+      openingNonStrikerId: 'a2',
+    );
+    store.teamMatches.add(match);
+    await _pump(tester, store, const TeamLiveMatchScreen(matchId: 'match'));
+
+    expect(find.text('Live scorecard'), findsOneWidget);
+    expect(find.text('Recent balls • over by over'), findsOneWidget);
+    await _visible(tester, find.text('Swap ends'));
+    await _visible(tester, find.text('Change batter'));
+
+    await tester.tap(find.text('Swap ends'));
+    await tester.pumpAndSettle();
+    expect(match.currentInnings!.strikerId, 'a2');
+    expect(match.currentInnings!.nonStrikerId, 'a1');
+
+    await tester.tap(find.text('Change batter'));
+    await tester.pumpAndSettle();
+    await _visible(tester, find.text('a3'), sheet: true);
+    await tester.tap(find.text('a3').last);
+    await tester.pumpAndSettle();
+    expect(match.currentInnings!.strikerId, 'a3');
+    expect(match.currentInnings!.nonStrikerId, 'a1');
+    expect(
+      TeamScoringEngine.availableNextBatters(match, match.currentInnings!),
+      ['a2'],
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('live scorer can add an existing player to a team', (
+    tester,
+  ) async {
+    final store = _store();
+    final match = _match()
+      ..toss = TeamToss(
+        createdAt: DateTime(2026),
+        mode: TeamTossMode.skipped,
+        firstBattingTeamId: 'A',
+      );
+    TeamScoringEngine.startFirstInnings(
+      match,
+      openingBowlerId: 'b1',
+      openingStrikerId: 'a1',
+      openingNonStrikerId: 'a2',
+    );
+    store.teamMatches.add(match);
+    await _pump(tester, store, const TeamLiveMatchScreen(matchId: 'match'));
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add players'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('joker').last);
+    await tester.pumpAndSettle();
+
+    expect(match.teamA.playerIds, contains('joker'));
+    expect(match.teamA.battingOrder, contains('joker'));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('live scorer can create and add a player offline', (tester) async {
+    final store = _store();
+    final match = _match()
+      ..toss = TeamToss(
+        createdAt: DateTime(2026),
+        mode: TeamTossMode.skipped,
+        firstBattingTeamId: 'A',
+      );
+    TeamScoringEngine.startFirstInnings(
+      match,
+      openingBowlerId: 'b1',
+      openingStrikerId: 'a1',
+      openingNonStrikerId: 'a2',
+    );
+    store.teamMatches.add(match);
+    await _pump(tester, store, const TeamLiveMatchScreen(matchId: 'match'));
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add players'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create new player'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_field('Player name'), 'Guest Batter');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create player'), findsNothing);
+    expect(find.text('Add player to live match'), findsNothing);
+    expect(match.teamA.playerIds, contains('live-player'));
+    expect(store.playerById('live-player')?.name, 'Guest Batter');
+    expect(tester.takeException(), isNull);
+  });
 }

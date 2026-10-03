@@ -490,6 +490,45 @@ void main() {
       },
     );
 
+    test('batters can be swapped and non-dismissed players can return', () {
+      final match = _match();
+      _start(match, openingBowler: 'b1');
+      final innings = match.currentInnings!;
+
+      TeamScoringEngine.replaceBatter(
+        match,
+        innings,
+        replaceStriker: true,
+        playerId: 'a3',
+      );
+      expect(innings.strikerId, 'a3');
+      expect(TeamScoringEngine.availableNextBatters(match, innings), ['a1']);
+
+      TeamScoringEngine.replaceBatter(
+        match,
+        innings,
+        replaceStriker: true,
+        playerId: 'a1',
+      );
+      expect(innings.strikerId, 'a1');
+      expect(TeamScoringEngine.availableNextBatters(match, innings), ['a3']);
+
+      TeamScoringEngine.swapBatters(match, innings);
+      expect(innings.strikerId, 'a2');
+      expect(innings.nonStrikerId, 'a1');
+
+      expect(
+        () => TeamScoringEngine.replaceBatter(
+          match,
+          innings,
+          replaceStriker: true,
+          playerId: 'b1',
+        ),
+        throwsStateError,
+      );
+      },
+    );
+
     test('supports team sizes above eleven with no hard cap', () {
       final a = List.generate(12, (index) => 'a$index');
       final b = List.generate(13, (index) => 'b$index');
@@ -763,6 +802,32 @@ void main() {
         ),
         throwsStateError,
       );
+    });
+
+    test('run-out starts at zero and incoming batter follows end changes', () {
+      final match = _match(ballsPerOver: 2);
+      _start(match, openingBowler: 'b1');
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'before-runout',
+        batRuns: 0,
+      );
+      final innings = match.currentInnings!;
+      TeamScoringEngine.recordDelivery(
+        match,
+        eventId: 'runout-zero',
+        batRuns: 0,
+        isWicket: true,
+        dismissalType: DismissalType.runOutDirect,
+        dismissedPlayerId: 'a2',
+      );
+      expect(innings.events.last.runningRuns, 0);
+      expect(innings.pendingNextBatterEnd, 'nonStriker');
+
+      TeamScoringEngine.selectNextBatter(match, innings, 'a3');
+      expect(innings.strikerId, 'a3');
+      expect(innings.nonStrikerId, 'a1');
+      expect(innings.dismissedPlayerIds, ['a2']);
     });
 
     test('free hit survives an illegal wide and blocks bowler wicket', () {
